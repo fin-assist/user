@@ -38,9 +38,10 @@ CREATE TABLE consent_current (
 );
 
 -- Users and their profile settings. Account deletion deletes the row: the foreign keys
--- below cascade to every row that references the user (consents, verified requests,
--- sessions), and a late write for the user fails on its foreign key. Unverified requests
--- of the phone have no user_id and stay until their cleanup (docs/schema.md, question 6). That the user_id was deleted is remembered by the tombstone library.
+-- below cascade to every row that references the user (consents, requests verified for
+-- the existing user or closed by Register, sessions), and a late write for the user fails
+-- on its foreign key. Other requests of the phone (unverified, or verified for a new user
+-- who never registered) have no user_id and stay until cleanup (docs/schema.md, question 6). That the user_id was deleted is remembered by the tombstone library.
 CREATE TABLE app_user (
     id uuid NOT NULL DEFAULT uuidv7(),
     -- E.164, Russian numbers only (api.md 1.1); the login of the user.
