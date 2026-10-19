@@ -8,4 +8,5 @@ DROP TABLE user_consent;
 DROP TABLE app_user;
 DROP TABLE consent_current;
 DROP TABLE consent_document;
-DROP EXTENSION IF EXISTS btree_gist;
+-- btree_gist stays: it is database infrastructure (the up file creates it only IF NOT
+-- EXISTS, a cluster may install it beforehand), and dropping it needs its ownership.

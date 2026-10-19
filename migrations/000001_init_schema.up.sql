@@ -9,6 +9,7 @@
 
 -- The exclusion constraint "one provider request per phone at a time" needs btree equality
 -- in a GiST index. btree_gist is a trusted extension: the owner of the database creates it.
+-- The down file leaves it in place (database infrastructure, docs/schema.md).
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 
 -- Consent documents (api.md 1.6). A new version is a new row plus a switch of
@@ -144,7 +145,8 @@ CREATE TABLE phone_verification (
         CHECK (closed_at IS NULL OR user_id IS NOT NULL),
     -- The provider accepts one request per phone until the previous one expires (api.md
     -- 1.1, "номер занят у провайдера"), closed or not: requests of a phone never overlap in
-    -- time. INSERT ... ON CONFLICT DO NOTHING turns a busy phone into an empty RETURNING;
+    -- time. INSERT ... ON CONFLICT ON CONSTRAINT phone_verification_one_per_phone DO NOTHING
+    -- turns a busy phone into an empty RETURNING, other conflicts stay errors;
     -- the index also answers "the request of this phone at moment t".
     CONSTRAINT phone_verification_one_per_phone
         EXCLUDE USING gist (phone WITH =, tstzrange(created_at, expires_at) WITH &&)
