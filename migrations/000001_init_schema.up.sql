@@ -36,7 +36,8 @@ CREATE TABLE consent_current (
 -- below cascade to every row that references the user (consents, requests verified for the
 -- existing user or closed by Register, sessions), and a late write for the user fails on
 -- its foreign key. Other requests of the phone (unverified, or verified for a new user who
--- never registered) have no user_id and stay until cleanup (docs/schema.md, question 6).
+-- never registered) have no user_id: DeleteAccount deletes them by phone in the same
+-- transaction (docs/schema.md, «Удаление аккаунта»).
 -- That the user_id was deleted is remembered by the tombstone library.
 CREATE TABLE app_user (
     id uuid NOT NULL DEFAULT uuidv7(),
@@ -121,6 +122,9 @@ CREATE TABLE phone_verification (
 -- One holding request per phone; also finds the holder for retry_at of the duplicate.
 CREATE UNIQUE INDEX phone_verification_phone_held_key ON phone_verification (phone)
     WHERE released_at IS NULL;
+-- Account deletion removes every request of the phone (DELETE ... WHERE phone = $1): the
+-- unique index above covers only the holder.
+CREATE INDEX phone_verification_phone_idx ON phone_verification (phone);
 -- Account deletion (cascade) and "requests of this user".
 CREATE INDEX phone_verification_user_idx ON phone_verification (user_id)
     WHERE user_id IS NOT NULL;

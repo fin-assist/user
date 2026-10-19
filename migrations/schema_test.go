@@ -668,18 +668,17 @@ func TestVerificationCleanupKeepsTheSession(t *testing.T) {
 	}
 }
 
-// Current behaviour, an open question to the owner (docs/schema.md, question 6): the
-// cascade removes only requests with the user's user_id — verified for the existing user
-// or closed by Register. Requests of the phone without it (never verified, or verified for
-// a new user who did not register) stay, with the phone, until the cleanup of requests. A
-// change of that decision changes this test.
-func TestAccountDeletionKeepsPendingRequestsOfThePhone(t *testing.T) {
+// DeleteAccount (owner's decision of 19.10.2026, docs/schema.md question 6): in one
+// transaction the user's row goes, its consents, sessions and requests with its user_id go
+// by cascade, and every other request of the phone — unverified, or verified for a new
+// user who never registered — goes by DELETE ... WHERE phone. Requests of other phones stay.
+func TestAccountDeletionRemovesAllRequestsOfThePhone(t *testing.T) {
 	db, _ := schema(t)
 	ctx := context.Background()
 	user := newUser(t, db, phoneA)
 	ciphertext := bytes.Repeat([]byte{1}, 64)
 
-	// Verified for a new user, the result still deliverable, no Register.
+	// Verified for a new user, the result still deliverable, no Register: no user_id.
 	unregistered := verification(t, db, phoneA, "vt-0", t0)
 	exec(t, db, `
 		UPDATE phone_verification
@@ -697,12 +696,31 @@ func TestAccountDeletionKeepsPendingRequestsOfThePhone(t *testing.T) {
 	signedIn := verification(t, db, phoneA, "vt-2", t0.Add(20*time.Minute))
 	exec(t, db, `UPDATE phone_verification SET provider_call_id = 'c2', verified_at = $2, is_new_user = false, user_id = $3 WHERE id = $1`,
 		signedIn, t0.Add(21*time.Minute), user)
-	expired := verification(t, db, phoneA, "vt-3", t0.Add(30*time.Minute))
-	pending := verification(t, db, phoneA, "vt-4", t0.Add(40*time.Minute))
+	verification(t, db, phoneA, "vt-3", t0.Add(30*time.Minute)) // expired, no user_id
+	verification(t, db, phoneA, "vt-4", t0.Add(40*time.Minute)) // pending, holds the phone
+	// Requests of other phones, one of them verified for a new user.
+	otherPending := verification(t, db, phoneB, "vt-5", t0.Add(40*time.Minute))
+	otherVerified := verification(t, db, "+79005550000", "vt-6", t0)
+	exec(t, db, `
+		UPDATE phone_verification SET provider_call_id = 'c6', verified_at = $2, is_new_user = true, registration_token_hash = $3
+		WHERE id = $1`, otherVerified, t0.Add(time.Minute), hash("reg-6"))
 
-	exec(t, db, `DELETE FROM app_user WHERE id = $1`, user)
+	err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `DELETE FROM app_user WHERE id = $1`, user); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `DELETE FROM phone_verification WHERE phone = $1`, phoneA)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	rows, err := db.Query(ctx, `SELECT id FROM phone_verification WHERE phone = $1 ORDER BY id`, phoneA)
+	var ofPhone int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM phone_verification WHERE phone = $1`, phoneA).Scan(&ofPhone); err != nil || ofPhone != 0 {
+		t.Fatalf("%d requests of the deleted user's phone, %v; want 0", ofPhone, err)
+	}
+	rows, err := db.Query(ctx, `SELECT id FROM phone_verification ORDER BY id`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -710,10 +728,11 @@ func TestAccountDeletionKeepsPendingRequestsOfThePhone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []int64{unregistered, expired, pending}
-	if len(left) != len(want) || left[0] != want[0] || left[1] != want[1] || left[2] != want[2] {
-		t.Fatalf("requests of the phone after deletion %v, want %v (no user_id)", left, want)
+	if len(left) != 2 || left[0] != otherPending || left[1] != otherVerified {
+		t.Fatalf("requests left %v, want the other phones' %d and %d", left, otherPending, otherVerified)
 	}
+	// The phone is free again: a new request of it is accepted at once.
+	verification(t, db, phoneA, "vt-7", t0.Add(41*time.Minute))
 }
 
 func TestRateLimitWindow(t *testing.T) {
