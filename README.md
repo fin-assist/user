@@ -7,6 +7,7 @@
 - [docs/server.md](docs/server.md) — gRPC-сервер и интерцепторы, идентичность, таблица доступа, клиенты, транзакции, логи и метрики.
 - [docs/config.md](docs/config.md) — переменные окружения.
 - [docs/migrations.md](docs/migrations.md) — миграции и запросы на pgx ([FIN-115](https://finassist.youtrack.cloud/issue/FIN-115)).
+- [docs/schema.md](docs/schema.md) — схема БД `user`: сущности, инварианты, ожидаемые запросы и индексы ([FIN-112](https://finassist.youtrack.cloud/issue/FIN-112)).
 - [AGENTS.md](AGENTS.md) — карта и правила для агентов, Code Review Rules.
 
 ## Что ещё не сделано из шагов шаблона
