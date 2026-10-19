@@ -806,3 +806,57 @@ func TestDownLeavesNothing(t *testing.T) {
 		t.Fatalf("up again: %v", err)
 	}
 }
+
+// The retry path of StartPhoneVerification (docs/schema.md, phone_verification): between
+// the empty INSERT ... DO NOTHING and the SELECT of the holder, DeleteAccount may delete
+// every request of the phone. The SELECT then finds no holder, and repeating release and
+// insert in the same transaction creates the request.
+func TestVerificationRetryWhenTheHolderIsDeletedByPhone(t *testing.T) {
+	db, _ := schema(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	verification(t, db, phoneA, "vt-holder", t0)
+	now := t0.Add(time.Minute) // the holder is still in its term
+
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	insert := func(token string) (int64, error) {
+		var id int64
+		err := tx.QueryRow(ctx, `
+			INSERT INTO phone_verification (phone, token_hash, provider, created_at, expires_at)
+			VALUES ($1, $2, 'zvonok', $3, $4)
+			ON CONFLICT (phone) WHERE released_at IS NULL DO NOTHING
+			RETURNING id`, phoneA, hash(token), now, now.Add(5*time.Minute)).Scan(&id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, nil
+		}
+		return id, err
+	}
+	if id, err := insert("vt-new"); err != nil || id != 0 {
+		t.Fatalf("first insert: id %d, %v; want the busy phone", id, err)
+	}
+
+	// DeleteAccount commits in between.
+	exec(t, db, `DELETE FROM phone_verification WHERE phone = $1`, phoneA)
+
+	var holder time.Time
+	if err := tx.QueryRow(ctx, `
+		SELECT expires_at FROM phone_verification WHERE phone = $1 AND released_at IS NULL`, phoneA).Scan(&holder); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("holder %v, %v; want none after the deletion", holder, err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE phone_verification SET released_at = $2
+		WHERE phone = $1 AND released_at IS NULL AND expires_at <= $2`, phoneA, now); err != nil {
+		t.Fatal(err)
+	}
+	id, err := insert("vt-new")
+	if err != nil || id == 0 {
+		t.Fatalf("retried insert: id %d, %v; want the new request", id, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
