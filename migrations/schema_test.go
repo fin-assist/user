@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,8 +21,11 @@ import (
 	"github.com/fin-assist/user/migrations"
 )
 
-// The tests below check the invariants the schema enforces itself (docs/schema.md) with
-// real inserts against PostgreSQL, and the shape of the expected queries.
+// The tests below check, with real statements against PostgreSQL, what the schema keeps by
+// itself — primary keys, unique indexes, foreign keys and their cascades, NOT NULL and
+// defaults — and the shape of the expected queries the service will run (docs/schema.md).
+// Formats and state rules are the service's code (docs/schema.md, «Инварианты в коде
+// сервиса») and are tested with it.
 
 var t0 = time.Date(2026, 10, 19, 22, 12, 0, 0, time.UTC)
 
@@ -30,13 +34,20 @@ const (
 	phoneB = "+79007654321"
 )
 
+func source() migrate.Source {
+	return migrate.Source{Name: "service", Table: "schema_migrations", FS: migrations.FS}
+}
+
+func config(dsn string) migrate.Config {
+	cfg := migrate.DefaultConfig(dsn)
+	cfg.Logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	return cfg
+}
+
 func schema(t *testing.T) (*pgxpool.Pool, string) {
 	t.Helper()
 	dsn := migratetest.DSN(t)
-	cfg := migrate.DefaultConfig(dsn)
-	cfg.Logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	src := migrate.Source{Name: "service", Table: "schema_migrations", FS: migrations.FS}
-	if err := migrate.Up(context.Background(), cfg, []migrate.Source{src}); err != nil {
+	if err := migrate.Up(context.Background(), config(dsn), []migrate.Source{source()}); err != nil {
 		t.Fatal(err)
 	}
 	pool, err := pgxpool.New(context.Background(), dsn)
@@ -59,7 +70,7 @@ func exec(t *testing.T, db *pgxpool.Pool, sql string, args ...any) {
 	}
 }
 
-// violates asserts that the statement fails on the named constraint.
+// violates asserts that the statement fails on the named constraint or unique index.
 func violates(t *testing.T, db *pgxpool.Pool, constraint, sql string, args ...any) {
 	t.Helper()
 	_, err := db.Exec(context.Background(), sql, args...)
@@ -69,6 +80,16 @@ func violates(t *testing.T, db *pgxpool.Pool, constraint, sql string, args ...an
 	}
 	if pgErr.ConstraintName != constraint {
 		t.Fatalf("%s: violated %q (%s), want %q", sql, pgErr.ConstraintName, pgErr.Message, constraint)
+	}
+}
+
+// notNull asserts that the statement fails because the column is NOT NULL.
+func notNull(t *testing.T, db *pgxpool.Pool, column, sql string, args ...any) {
+	t.Helper()
+	_, err := db.Exec(context.Background(), sql, args...)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23502" || pgErr.ColumnName != column {
+		t.Fatalf("%s: error %v, want NOT NULL of %s", sql, err, column)
 	}
 }
 
@@ -92,21 +113,52 @@ func documents(t *testing.T, db *pgxpool.Pool) {
 		('personal_data', '2026-09-28'), ('assistant', '2026-10-20')`)
 }
 
-// verification inserts a pending request created at created for five minutes and returns
-// its id, or 0 when the phone is busy (only the exclusion constraint is turned into "no row").
-func verification(t *testing.T, db *pgxpool.Pool, phone, token string, created time.Time) int64 {
-	t.Helper()
+// querier is a pool or a transaction.
+type querier interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// startVerification is the database part of StartPhoneVerification for a new key, as the
+// service runs it (docs/schema.md): release the holder of the phone whose term has passed,
+// then insert; an empty RETURNING means the phone is busy, and retry_at comes from the
+// holder found by the same index. It returns the id of the new request, or 0 and the
+// expires_at of the holder.
+func startVerification(ctx context.Context, q querier, phone, token string, now time.Time) (int64, time.Time, error) {
+	if _, err := q.Exec(ctx, `
+		UPDATE phone_verification SET released_at = $2
+		WHERE phone = $1 AND released_at IS NULL AND expires_at <= $2`, phone, now); err != nil {
+		return 0, time.Time{}, err
+	}
 	var id int64
-	err := db.QueryRow(context.Background(), `
+	err := q.QueryRow(ctx, `
 		INSERT INTO phone_verification (phone, token_hash, provider, created_at, expires_at)
 		VALUES ($1, $2, 'zvonok', $3, $4)
-		ON CONFLICT ON CONSTRAINT phone_verification_one_per_phone DO NOTHING
-		RETURNING id`, phone, hash(token), created, created.Add(5*time.Minute)).Scan(&id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0
+		ON CONFLICT (phone) WHERE released_at IS NULL DO NOTHING
+		RETURNING id`, phone, hash(token), now, now.Add(5*time.Minute)).Scan(&id)
+	if err == nil {
+		return id, time.Time{}, nil
 	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return 0, time.Time{}, err
+	}
+	var holder time.Time
+	if err := q.QueryRow(ctx, `
+		SELECT expires_at FROM phone_verification WHERE phone = $1 AND released_at IS NULL`, phone).Scan(&holder); err != nil {
+		return 0, time.Time{}, err
+	}
+	return 0, holder, nil
+}
+
+// verification starts a request on db and fails the test unless it was created.
+func verification(t *testing.T, db *pgxpool.Pool, phone, token string, now time.Time) int64 {
+	t.Helper()
+	id, _, err := startVerification(context.Background(), db, phone, token, now)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if id == 0 {
+		t.Fatalf("request of %s at %v: the phone is busy", phone, now)
 	}
 	return id
 }
@@ -117,9 +169,7 @@ func TestPhoneIsUniqueAmongUsers(t *testing.T) {
 	newUser(t, db, phoneB)
 
 	violates(t, db, "app_user_phone_key", `INSERT INTO app_user (phone) VALUES ($1)`, phoneA)
-	violates(t, db, "app_user_phone_format", `INSERT INTO app_user (phone) VALUES ('89001234567')`)
-	violates(t, db, "app_user_phone_format", `INSERT INTO app_user (phone) VALUES ('+7900123456')`)
-	violates(t, db, "app_user_phone_format", `INSERT INTO app_user (phone) VALUES ('+380501234567')`)
+	notNull(t, db, "phone", `INSERT INTO app_user (phone) VALUES (NULL)`)
 
 	// The expected lookup "live user by phone" finds the user; after the account is
 	// deleted the phone is free for a new registration.
@@ -134,36 +184,37 @@ func TestPhoneIsUniqueAmongUsers(t *testing.T) {
 	}
 }
 
-func TestProfileDefaultsAndChecks(t *testing.T) {
+func TestProfileDefaults(t *testing.T) {
 	db, _ := schema(t)
 	id := newUser(t, db, phoneA)
 
 	var theme, tz string
-	var version int64
+	var version int
+	var created, updated time.Time
 	if err := db.QueryRow(context.Background(),
-		`SELECT theme, timezone, settings_version FROM app_user WHERE id = $1`, id).Scan(&theme, &tz, &version); err != nil {
+		`SELECT theme, timezone, settings_version, created_at, updated_at FROM app_user WHERE id = $1`, id).
+		Scan(&theme, &tz, &version, &created, &updated); err != nil {
 		t.Fatal(err)
 	}
-	if theme != "system" || tz != "Europe/Moscow" || version != 1 {
-		t.Fatalf("defaults %q %q %d, want system Europe/Moscow 1", theme, tz, version)
+	if theme != "system" || tz != "Europe/Moscow" || version != 1 || !updated.Equal(created) {
+		t.Fatalf("defaults %q %q %d %v %v, want system Europe/Moscow 1 and updated_at = created_at",
+			theme, tz, version, created, updated)
 	}
-	// The id is a UUIDv7 (api.md: IDs that leave the database).
+	// The id is a UUIDv7 (Confluence «Идентификаторы»: IDs that leave the database).
 	var uuidVersion int
 	if err := db.QueryRow(context.Background(),
 		`SELECT uuid_extract_version(id) FROM app_user WHERE id = $1`, id).Scan(&uuidVersion); err != nil || uuidVersion != 7 {
 		t.Fatalf("uuid version %d, %v; want 7", uuidVersion, err)
 	}
 
-	violates(t, db, "app_user_theme_known", `UPDATE app_user SET theme = 'sepia' WHERE id = $1`, id)
-	violates(t, db, "app_user_timezone_length", `UPDATE app_user SET timezone = '' WHERE id = $1`, id)
-	violates(t, db, "app_user_settings_version_positive", `UPDATE app_user SET settings_version = 0 WHERE id = $1`, id)
-
-	// SetUserTimezone: a new time zone bumps the version in the same statement.
+	// SetUserTimezone: a new time zone bumps the version in the same statement; updated_at
+	// is set by the service.
 	if err := db.QueryRow(context.Background(), `
-		UPDATE app_user SET timezone = $2, settings_version = settings_version + 1
-		WHERE id = $1 RETURNING settings_version`, id, "Asia/Yekaterinburg").Scan(&version); err != nil || version != 2 {
+		UPDATE app_user SET timezone = $2, settings_version = settings_version + 1, updated_at = $3
+		WHERE id = $1 RETURNING settings_version`, id, "Asia/Yekaterinburg", t0).Scan(&version); err != nil || version != 2 {
 		t.Fatalf("settings_version %d, %v; want 2", version, err)
 	}
+	notNull(t, db, "theme", `UPDATE app_user SET theme = NULL WHERE id = $1`, id)
 }
 
 func TestConsents(t *testing.T) {
@@ -178,22 +229,20 @@ func TestConsents(t *testing.T) {
 
 	exec(t, db, `INSERT INTO user_consent (user_id, type, version, granted_at) VALUES ($1, 'assistant', '2026-09-28', $2)`, id, t0)
 
-	// Documents: a version in use stays, the current version is one per type, links are https.
+	// Documents: a version in use stays, the current version is one per type.
 	violates(t, db, "user_consent_document_fkey",
 		`DELETE FROM consent_document WHERE type = 'assistant' AND version = '2026-09-28'`)
 	violates(t, db, "consent_current_document_fkey",
 		`DELETE FROM consent_document WHERE type = 'assistant' AND version = '2026-10-20'`)
 	violates(t, db, "consent_current_pkey",
 		`INSERT INTO consent_current (type, version) VALUES ('assistant', '2026-09-28')`)
-	violates(t, db, "consent_document_url_https", `
+	violates(t, db, "consent_document_pkey", `
 		INSERT INTO consent_document (type, version, title, url)
-		VALUES ('assistant', '2026-11-01', 'Помощник', 'http://example.ru/a/2026-11-01')`)
+		VALUES ('assistant', '2026-10-20', 'Помощник', 'https://example.ru/a/2026-10-20')`)
 
 	// One active grant per type: a second grant without revoking the first fails.
 	violates(t, db, "user_consent_active_key",
 		`INSERT INTO user_consent (user_id, type, version, granted_at) VALUES ($1, 'assistant', '2026-10-20', $2)`, id, t0.Add(time.Hour))
-	violates(t, db, "user_consent_revoked_after_granted",
-		`UPDATE user_consent SET revoked_at = $2 WHERE user_id = $1`, id, t0.Add(-time.Second))
 
 	// GetAssistantConsentStatus: the active grant and the current version in one query.
 	status := func() (granted bool, version *string, current string) {
@@ -225,138 +274,123 @@ func TestConsents(t *testing.T) {
 	}
 }
 
-func TestOneVerificationPerPhoneAtATime(t *testing.T) {
+func TestOneHoldingVerificationPerPhone(t *testing.T) {
 	db, _ := schema(t)
+	ctx := context.Background()
 
 	first := verification(t, db, phoneA, "vt-1", t0)
-	if first == 0 {
-		t.Fatal("the first request was refused")
-	}
-	// Busy until expires_at, whether or not the request is closed: a new request in the
-	// term returns no row, and the plain insert names the constraint.
-	if id := verification(t, db, phoneA, "vt-2", t0.Add(4*time.Minute+59*time.Second)); id != 0 {
-		t.Fatalf("a second request %d overlaps the first", id)
-	}
-	violates(t, db, "phone_verification_one_per_phone", `
+
+	// A second holding request of the phone: the partial unique index refuses it.
+	violates(t, db, "phone_verification_phone_held_key", `
 		INSERT INTO phone_verification (phone, token_hash, provider, created_at, expires_at)
-		VALUES ($1, $2, 'zvonok', $3, $4)`, phoneA, hash("vt-3"), t0.Add(time.Minute), t0.Add(6*time.Minute))
+		VALUES ($1, $2, 'zvonok', $3, $4)`, phoneA, hash("vt-x"), t0.Add(time.Minute), t0.Add(6*time.Minute))
+
+	// Busy until expires_at, closed or not: the service gets no row and the holder's term.
+	exec(t, db, `UPDATE phone_verification SET closed_at = $2 WHERE id = $1`, first, t0.Add(time.Minute))
+	id, holder, err := startVerification(ctx, db, phoneA, "vt-2", t0.Add(4*time.Minute+59*time.Second))
+	if err != nil || id != 0 || !holder.Equal(t0.Add(5*time.Minute)) {
+		t.Fatalf("busy phone: id %d, holder %v, %v; want 0 and %v", id, holder, err, t0.Add(5*time.Minute))
+	}
 	// Another phone in the same minutes is independent.
-	if id := verification(t, db, phoneB, "vt-4", t0.Add(time.Minute)); id == 0 {
-		t.Fatal("a request of another phone was refused")
+	verification(t, db, phoneB, "vt-3", t0.Add(time.Minute))
+
+	// At expires_at the holder is released in the same transaction and the request passes.
+	second := verification(t, db, phoneA, "vt-4", t0.Add(5*time.Minute))
+	var released *time.Time
+	if err := db.QueryRow(ctx, `SELECT released_at FROM phone_verification WHERE id = $1`, first).Scan(&released); err != nil ||
+		released == nil || !released.Equal(t0.Add(5*time.Minute)) {
+		t.Fatalf("released_at of the first %v, %v; want %v", released, err, t0.Add(5*time.Minute))
 	}
-	// The range is [created_at, expires_at): a request at exactly expires_at is accepted.
-	if id := verification(t, db, phoneA, "vt-5", t0.Add(5*time.Minute)); id == 0 {
-		t.Fatal("a request at the expiry of the previous one was refused")
+	if second == first {
+		t.Fatal("the same id twice")
 	}
 
-	// retry_at of the duplicate (api.md 1.1): expires_at of the request that holds the phone
-	// at the moment of the new request, found by the exclusion index.
-	var holder time.Time
-	if err := db.QueryRow(context.Background(), `
-		SELECT expires_at FROM phone_verification
-		WHERE phone = $1 AND tstzrange(created_at, expires_at) @> $2::timestamptz`,
-		phoneA, t0.Add(2*time.Minute)).Scan(&holder); err != nil || !holder.Equal(t0.Add(5*time.Minute)) {
-		t.Fatalf("holder expires at %v, %v; want %v", holder, err, t0.Add(5*time.Minute))
-	}
-
-	// The busy-phone insert names its conflict target: a repeated token hash on a free phone
-	// stays an error instead of looking like a busy phone.
+	// The insert names its conflict target: a repeated token hash on a free phone stays an
+	// error instead of looking like a busy phone.
 	violates(t, db, "phone_verification_token_hash_key", `
 		INSERT INTO phone_verification (phone, token_hash, provider, created_at, expires_at)
 		VALUES ($1, $2, 'zvonok', $3, $4)
-		ON CONFLICT ON CONSTRAINT phone_verification_one_per_phone DO NOTHING`,
-		phoneB, hash("vt-1"), t0.Add(2*time.Hour), t0.Add(2*time.Hour+5*time.Minute))
-
-	// The same secret never maps to two requests.
-	violates(t, db, "phone_verification_token_hash_key", `
-		INSERT INTO phone_verification (phone, token_hash, provider, created_at, expires_at)
-		VALUES ($1, $2, 'zvonok', $3, $4)`, phoneB, hash("vt-1"), t0.Add(time.Hour), t0.Add(time.Hour+5*time.Minute))
-	violates(t, db, "phone_verification_token_hash_sha256", `
-		INSERT INTO phone_verification (phone, token_hash, provider, created_at, expires_at)
-		VALUES ($1, 'vt_plain', 'zvonok', $2, $3)`, phoneB, t0.Add(time.Hour), t0.Add(time.Hour+5*time.Minute))
-	violates(t, db, "phone_verification_expires_after_created", `
-		INSERT INTO phone_verification (phone, token_hash, provider, created_at, expires_at)
-		VALUES ($1, $2, 'zvonok', $3, $3)`, phoneB, hash("vt-6"), t0.Add(time.Hour))
+		ON CONFLICT (phone) WHERE released_at IS NULL DO NOTHING`,
+		"+79005550000", hash("vt-1"), t0.Add(time.Hour), t0.Add(time.Hour+5*time.Minute))
+	notNull(t, db, "token_hash", `
+		INSERT INTO phone_verification (phone, provider, created_at, expires_at)
+		VALUES ('+79005550001', 'zvonok', $1, $2)`, t0, t0.Add(5*time.Minute))
 }
 
-func TestVerificationStates(t *testing.T) {
+func TestConcurrentVerificationsOfOnePhone(t *testing.T) {
 	db, _ := schema(t)
-	existing := newUser(t, db, phoneA)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// An expired holder, so both transactions first release it and then race to insert.
+	verification(t, db, phoneA, "vt-0", t0)
+	now := t0.Add(10 * time.Minute)
+
+	const n = 8
+	ids := make(chan int64, n)
+	errs := make(chan error, n)
+	var start sync.WaitGroup
+	start.Add(1)
+	for i := range n {
+		go func() {
+			start.Wait()
+			err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
+				id, _, err := startVerification(ctx, tx, phoneA, "vt-"+strconv.Itoa(i+1), now)
+				ids <- id
+				return err
+			})
+			errs <- err
+		}()
+	}
+	start.Done()
+	created := 0
+	for range n {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+		if <-ids != 0 {
+			created++
+		}
+	}
+	var holding int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM phone_verification WHERE phone = $1 AND released_at IS NULL`, phoneA).Scan(&holding); err != nil {
+		t.Fatal(err)
+	}
+	if created != 1 || holding != 1 {
+		t.Fatalf("%d created, %d holding; want exactly one", created, holding)
+	}
+}
+
+func TestVerificationLookups(t *testing.T) {
+	db, _ := schema(t)
+	ctx := context.Background()
 	id := verification(t, db, phoneA, "vt-1", t0)
 	exec(t, db, `UPDATE phone_verification SET provider_call_id = 'call-1' WHERE id = $1`, id)
-	ciphertext := bytes.Repeat([]byte{1}, 64)
 
-	// A pending request has no result to deliver and cannot be closed.
-	violates(t, db, "phone_verification_result_only_verified",
-		`UPDATE phone_verification SET result_ciphertext = $2, result_key_id = 'k1' WHERE id = $1`, id, ciphertext)
-	violates(t, db, "phone_verification_closed_after_verified",
-		`UPDATE phone_verification SET closed_at = $2 WHERE id = $1`, id, t0.Add(time.Minute))
-
-	// Verified needs the outcome; an existing user needs its id; no token of a new user.
-	violates(t, db, "phone_verification_outcome_iff_verified",
-		`UPDATE phone_verification SET verified_at = $2 WHERE id = $1`, id, t0.Add(time.Minute))
-	violates(t, db, "phone_verification_existing_user_known",
-		`UPDATE phone_verification SET verified_at = $2, is_new_user = false WHERE id = $1`, id, t0.Add(time.Minute))
-	violates(t, db, "phone_verification_registration_token_iff_new_user", `
-		UPDATE phone_verification SET verified_at = $2, is_new_user = false, user_id = $3, registration_token_hash = $4
-		WHERE id = $1`, id, t0.Add(time.Minute), existing, hash("reg"))
-	// A call after the term or before the request does not verify it.
-	violates(t, db, "phone_verification_verified_in_term", `
-		UPDATE phone_verification SET verified_at = $2, is_new_user = false, user_id = $3 WHERE id = $1`,
-		id, t0.Add(5*time.Minute+time.Second), existing)
-	// The result is ciphertext with its key id, never one without the other.
-	violates(t, db, "phone_verification_result_key_pair", `
-		UPDATE phone_verification SET verified_at = $2, is_new_user = false, user_id = $3, result_ciphertext = $4
-		WHERE id = $1`, id, t0.Add(time.Minute), existing, ciphertext)
-
-	exec(t, db, `
-		UPDATE phone_verification
-		SET verified_at = $2, is_new_user = false, user_id = $3, result_ciphertext = $4, result_key_id = 'k1'
-		WHERE id = $1`, id, t0.Add(time.Minute), existing, ciphertext)
-
-	// Closed before it was verified.
-	violates(t, db, "phone_verification_closed_after_verified", `
-		UPDATE phone_verification SET closed_at = $2, result_ciphertext = NULL, result_key_id = NULL
-		WHERE id = $1`, id, t0.Add(30*time.Second))
-
-	// Closing wipes the result in the same statement.
-	violates(t, db, "phone_verification_closed_has_no_result",
-		`UPDATE phone_verification SET closed_at = $2 WHERE id = $1`, id, t0.Add(2*time.Minute))
-	exec(t, db, `
-		UPDATE phone_verification SET closed_at = $2, result_ciphertext = NULL, result_key_id = NULL
-		WHERE id = $1 AND closed_at IS NULL`, id, t0.Add(2*time.Minute))
-
-	// A new user: the registration token hash is required and closing needs the created user.
+	// The read path of WatchPhoneVerification: the request by the hash of its token.
+	var found int64
+	if err := db.QueryRow(ctx, `SELECT id FROM phone_verification WHERE token_hash = $1`, hash("vt-1")).Scan(&found); err != nil || found != id {
+		t.Fatalf("by token hash: %d, %v; want %d", found, err, id)
+	}
+	// The postback by call_id: one request per provider call.
 	other := verification(t, db, phoneB, "vt-2", t0)
-	violates(t, db, "phone_verification_verified_needs_provider", `
-		UPDATE phone_verification SET verified_at = $2, is_new_user = true, registration_token_hash = $3
-		WHERE id = $1`, other, t0.Add(time.Minute), hash("reg-2"))
-	exec(t, db, `UPDATE phone_verification SET provider_call_id = 'call-2' WHERE id = $1`, other)
-	violates(t, db, "phone_verification_registration_token_iff_new_user",
-		`UPDATE phone_verification SET verified_at = $2, is_new_user = true WHERE id = $1`, other, t0.Add(time.Minute))
-	violates(t, db, "phone_verification_registration_token_hash_sha256", `
-		UPDATE phone_verification SET verified_at = $2, is_new_user = true, registration_token_hash = 'reg_plain'
-		WHERE id = $1`, other, t0.Add(time.Minute))
-	exec(t, db, `
-		UPDATE phone_verification SET verified_at = $2, is_new_user = true, registration_token_hash = $3
-		WHERE id = $1`, other, t0.Add(time.Minute), hash("reg-2"))
-	// The same registration token hash on a second verified request of another phone.
-	third := verification(t, db, "+79005550000", "vt-3", t0)
-	violates(t, db, "phone_verification_registration_token_hash_key", `
-		UPDATE phone_verification
-		SET provider_call_id = 'call-3', verified_at = $2, is_new_user = true, registration_token_hash = $3
-		WHERE id = $1`, third, t0.Add(time.Minute), hash("reg-2"))
-	violates(t, db, "phone_verification_closed_new_user_registered",
-		`UPDATE phone_verification SET closed_at = $2 WHERE id = $1`, other, t0.Add(2*time.Minute))
 	violates(t, db, "phone_verification_provider_call_key",
 		`UPDATE phone_verification SET provider_call_id = 'call-1' WHERE id = $1`, other)
+	// The same call_id of another provider is another call.
+	exec(t, db, `UPDATE phone_verification SET provider = 'fake', provider_call_id = 'call-1' WHERE id = $1`, other)
 
-	// Register finds the request by the hash of the registration token and closes it only
-	// once: the second attempt updates no row.
+	// A new user: the registration token hash is unique, Register finds the request by it
+	// and closes it only once.
+	exec(t, db, `
+		UPDATE phone_verification SET verified_at = $2, is_new_user = true, registration_token_hash = $3,
+		       result_ciphertext = $4, result_key_id = 'k1'
+		WHERE id = $1`, other, t0.Add(time.Minute), hash("reg-2"), bytes.Repeat([]byte{1}, 64))
+	violates(t, db, "phone_verification_registration_token_hash_key", `
+		UPDATE phone_verification SET verified_at = $2, is_new_user = true, registration_token_hash = $3
+		WHERE id = $1`, id, t0.Add(time.Minute), hash("reg-2"))
 	registered := newUser(t, db, phoneB)
 	closeByRegistration := func() int64 {
 		t.Helper()
-		tag, err := db.Exec(context.Background(), `
+		tag, err := db.Exec(ctx, `
 			UPDATE phone_verification SET user_id = $2, closed_at = $3, result_ciphertext = NULL, result_key_id = NULL
 			WHERE registration_token_hash = $1 AND closed_at IS NULL AND verified_at > $3::timestamptz - interval '15 minutes'`,
 			hash("reg-2"), registered, t0.Add(3*time.Minute))
@@ -373,13 +407,15 @@ func TestVerificationStates(t *testing.T) {
 	}
 }
 
-func TestWatchIsNotifiedOnVerification(t *testing.T) {
+// The verification and its notification are one transaction of the service (there is no
+// trigger): WatchPhoneVerification sees the notification only after the commit, and a
+// rolled-back verification notifies nobody.
+func TestVerificationNotifiesOnCommit(t *testing.T) {
 	db, dsn := schema(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	user := newUser(t, db, phoneA)
 	id := verification(t, db, phoneA, "vt-1", t0)
-	exec(t, db, `UPDATE phone_verification SET provider_call_id = 'call-1' WHERE id = $1`, id)
 
 	listener, err := pgx.Connect(ctx, dsn)
 	if err != nil {
@@ -389,29 +425,40 @@ func TestWatchIsNotifiedOnVerification(t *testing.T) {
 	if _, err := listener.Exec(ctx, `LISTEN phone_verification`); err != nil {
 		t.Fatal(err)
 	}
-
-	// The read path of WatchPhoneVerification: the request by the hash of the token.
-	var found int64
-	if err := db.QueryRow(ctx, `SELECT id FROM phone_verification WHERE token_hash = $1`, hash("vt-1")).Scan(&found); err != nil || found != id {
-		t.Fatalf("by token hash: %d, %v; want %d", found, err, id)
+	verify := func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `
+			UPDATE phone_verification SET provider_call_id = 'c', verified_at = $2, is_new_user = false, user_id = $3
+			WHERE id = $1 AND verified_at IS NULL`, id, t0.Add(time.Minute), user); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `SELECT pg_notify('phone_verification', $1::bigint::text)`, id)
+		return err
 	}
 
-	// Updates other than the verification itself do not notify.
-	exec(t, db, `UPDATE phone_verification SET provider_call_id = 'call-1b' WHERE id = $1`, id)
-	exec(t, db, `UPDATE phone_verification SET verified_at = $2, is_new_user = false, user_id = $3 WHERE id = $1`,
-		id, t0.Add(time.Minute), user)
+	boom := errors.New("boom")
+	if err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
+		if err := verify(tx); err != nil {
+			return err
+		}
+		return boom
+	}); !errors.Is(err, boom) {
+		t.Fatalf("rolled back with %v", err)
+	}
+	short, cancelShort := context.WithTimeout(ctx, 200*time.Millisecond)
+	defer cancelShort()
+	if n, err := listener.WaitForNotification(short); err == nil {
+		t.Fatalf("notification %q from a rolled-back verification", n.Payload)
+	}
+
+	if err := pgx.BeginFunc(ctx, db, verify); err != nil {
+		t.Fatal(err)
+	}
 	n, err := listener.WaitForNotification(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if n.Channel != "phone_verification" || n.Payload != strconv.FormatInt(id, 10) {
 		t.Fatalf("notification %q %q, want phone_verification %d", n.Channel, n.Payload, id)
-	}
-	exec(t, db, `UPDATE phone_verification SET closed_at = $2 WHERE id = $1`, id, t0.Add(2*time.Minute))
-	short, cancelShort := context.WithTimeout(ctx, 200*time.Millisecond)
-	defer cancelShort()
-	if n, err := listener.WaitForNotification(short); err == nil {
-		t.Fatalf("unexpected notification %q after closing", n.Payload)
 	}
 }
 
@@ -474,13 +521,13 @@ func TestRefreshRotationAndReuse(t *testing.T) {
 	user := newUser(t, db, phoneA)
 	s := session(t, db, user, "rt-1")
 
-	// The schema refuses a second live link and a reused generation by itself.
+	// The schema refuses a second live link by itself.
 	violates(t, db, "refresh_token_one_live_key", `
 		INSERT INTO refresh_token (token_hash, session_id, generation, issued_at, expires_at)
 		VALUES ($1, $2, 2, $3, $4)`, hash("rt-x"), s, t0, t0.Add(time.Hour))
-	violates(t, db, "refresh_token_hash_sha256", `
+	violates(t, db, "refresh_token_session_fkey", `
 		INSERT INTO refresh_token (token_hash, session_id, generation, issued_at, expires_at)
-		VALUES ('rt_plain', $1, 2, $2, $3)`, s, t0, t0.Add(time.Hour))
+		VALUES ($1, -1, 1, $2, $3)`, hash("rt-y"), t0, t0.Add(time.Hour))
 
 	// A reused generation, checked apart from the one-live-link index: after rt-1 -> rt-2 the
 	// duplicate is inserted already rotated, so only (session_id, generation) can refuse it.
@@ -490,6 +537,10 @@ func TestRefreshRotationAndReuse(t *testing.T) {
 	violates(t, db, "refresh_token_generation_key", `
 		INSERT INTO refresh_token (token_hash, session_id, generation, issued_at, expires_at, rotated_at)
 		VALUES ($1, $2, 1, $3, $4, $3)`, hash("rt-dup"), s, t0, t0.Add(time.Hour))
+	// The same token hash twice is the primary key.
+	violates(t, db, "refresh_token_pkey", `
+		INSERT INTO refresh_token (token_hash, session_id, generation, issued_at, expires_at, rotated_at)
+		VALUES ($1, $2, 9, $3, $4, $3)`, hash("rt-1"), s, t0, t0.Add(time.Hour))
 
 	steps := []struct{ presented, next, want string }{
 		{"rt-2", "rt-3", "rotated"},
@@ -694,35 +745,45 @@ func TestRateLimitWindow(t *testing.T) {
 	if got := hit(phoneA, t0.Add(time.Hour)); got != 1 {
 		t.Fatalf("the next window counted %d, want 1", got)
 	}
-	violates(t, db, "rate_limit_window_end_after_start", `
-		INSERT INTO rate_limit_window (scope, subject, window_start, window_end, hits)
-		VALUES ('x', '', $1, $1, 1)`, t0)
-	violates(t, db, "rate_limit_window_scope_format", `
-		INSERT INTO rate_limit_window (scope, subject, window_start, window_end, hits)
-		VALUES ('Bad Scope', '', $1, $2, 1)`, t0, t0.Add(time.Hour))
 }
 
-// The down file leaves btree_gist in place: the extension may have been installed by the
-// cluster before the first migration, and it is database infrastructure.
-func TestDownKeepsTheExtension(t *testing.T) {
+// The schema has no CHECK or EXCLUDE constraints, triggers or functions (owner's decision of
+// 19.10.2026, docs/schema.md): such rules are the service's code. The test keeps a new
+// migration from bringing them back unnoticed.
+func TestSchemaHasNoRulesOrLogic(t *testing.T) {
+	db, _ := schema(t)
+	var checks, triggers, functions int
+	if err := db.QueryRow(context.Background(), `
+		SELECT (SELECT count(*) FROM pg_constraint c JOIN pg_namespace n ON n.oid = c.connamespace
+		        WHERE n.nspname = 'public' AND c.contype IN ('c', 'x')),
+		       (SELECT count(*) FROM pg_trigger t JOIN pg_class r ON r.oid = t.tgrelid
+		        JOIN pg_namespace n ON n.oid = r.relnamespace
+		        WHERE n.nspname = 'public' AND NOT t.tgisinternal),
+		       (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+		        WHERE n.nspname = 'public')`).Scan(&checks, &triggers, &functions); err != nil {
+		t.Fatal(err)
+	}
+	if checks != 0 || triggers != 0 || functions != 0 {
+		t.Fatalf("%d CHECK/EXCLUDE, %d triggers, %d functions; want none", checks, triggers, functions)
+	}
+}
+
+// The down file drops the tables and leaves nothing behind; up applies again.
+func TestDownLeavesNothing(t *testing.T) {
 	db, dsn := schema(t)
 	ctx := context.Background()
-	cfg := migrate.DefaultConfig(dsn)
-	cfg.Logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	src := migrate.Source{Name: "service", Table: "schema_migrations", FS: migrations.FS}
-	if err := migrate.Down(ctx, cfg, src, 1); err != nil {
+	if err := migrate.Down(ctx, config(dsn), source(), 1); err != nil {
 		t.Fatal(err)
 	}
-	var tables, extensions int
+	var tables int
 	if err := db.QueryRow(ctx, `
-		SELECT (SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'schema_migrations'),
-		       (SELECT count(*) FROM pg_extension WHERE extname = 'btree_gist')`).Scan(&tables, &extensions); err != nil {
+		SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'schema_migrations'`).Scan(&tables); err != nil {
 		t.Fatal(err)
 	}
-	if tables != 0 || extensions != 1 {
-		t.Fatalf("after down: %d tables, %d btree_gist; want 0 and 1", tables, extensions)
+	if tables != 0 {
+		t.Fatalf("after down: %d tables; want 0", tables)
 	}
-	if err := migrate.Up(ctx, cfg, []migrate.Source{src}); err != nil {
-		t.Fatalf("up over the kept extension: %v", err)
+	if err := migrate.Up(ctx, config(dsn), []migrate.Source{source()}); err != nil {
+		t.Fatalf("up again: %v", err)
 	}
 }

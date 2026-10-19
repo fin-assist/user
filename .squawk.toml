@@ -5,4 +5,7 @@ pg_version = "18.0"
 assume_in_transaction = true
 # The migrate command sets lock_timeout and statement_timeout for the whole session
 # (MIGRATE_LOCK_TIMEOUT, MIGRATE_STATEMENT_TIMEOUT), so files do not repeat them.
-excluded_rules = ["require-lock-timeout", "require-statement-timeout"]
+excluded_rules = ["require-lock-timeout", "require-statement-timeout", "prefer-bigint-over-int"]
+# prefer-bigint-over-int: the width of an integer key is chosen per table by the number of
+# rows over its lifetime (Confluence «Архитектура» → «Идентификаторы»; FIN-112 review), not
+# bigint everywhere.
