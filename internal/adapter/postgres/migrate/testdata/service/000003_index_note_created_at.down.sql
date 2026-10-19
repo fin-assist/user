@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS note_created_at_idx;

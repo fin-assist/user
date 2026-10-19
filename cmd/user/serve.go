@@ -1,0 +1,81 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net"
+	"net/http"
+	"os"
+	"sync"
+	"time"
+
+	"github.com/fin-assist/user/internal/app"
+	"github.com/fin-assist/user/internal/config"
+	"github.com/fin-assist/user/internal/logx"
+	"github.com/fin-assist/user/internal/ops"
+	"github.com/fin-assist/user/internal/worker"
+)
+
+// runServe starts the gRPC server, the ops listener and the background jobs, and stops
+// them in order on SIGTERM: NOT_SERVING, a pause for balancers, graceful stop, jobs, pools.
+func runServe(ctx context.Context) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	log := logx.New(os.Stderr, cfg.Log.Format, cfg.Log.Level, cfg.Service)
+	slog.SetDefault(log)
+	if cfg.Auth.Mode == config.AuthInsecureDev {
+		log.Warn("AUTH_MODE=insecure-dev: identities are not verified, dev only")
+	}
+
+	reg := ops.NewRegistry()
+	a, err := app.New(ctx, cfg, log, reg)
+	if err != nil {
+		return err
+	}
+	defer a.Close()
+	srv, db, jobs := a.GRPC, a.DB, a.Jobs
+
+	grpcLis, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.GRPC.Addr)
+	if err != nil {
+		return err
+	}
+	readiness := &ops.Readiness{}
+	httpSrv := ops.Server(cfg.HTTP.Addr, ops.Handler(reg, readiness))
+
+	runCtx, stopRun := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopRun()
+	var wg sync.WaitGroup
+	errc := make(chan error, 2)
+	wg.Go(func() {
+		if err := srv.Serve(grpcLis); err != nil {
+			errc <- fmt.Errorf("grpc: %w", err)
+		}
+	})
+	wg.Go(func() {
+		if err := httpSrv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+			errc <- fmt.Errorf("http: %w", err)
+		}
+	})
+	wg.Go(func() { readiness.Watch(runCtx, 5*time.Second, log, db.Ping, srv.SetServing) })
+	wg.Go(func() { worker.Run(runCtx, log, jobs...) })
+	log.Info("serving", "version", version, "grpc", cfg.GRPC.Addr, "http", cfg.HTTP.Addr, "env", cfg.Env)
+
+	var runErr error
+	select {
+	case <-ctx.Done():
+		log.Info("shutting down")
+	case runErr = <-errc:
+		log.Error("listener failed, shutting down", "error", runErr)
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownDelay+cfg.ShutdownTimeout)
+	defer cancel()
+	srv.Shutdown(shutdownCtx, cfg.ShutdownDelay)
+	stopRun()
+	_ = httpSrv.Shutdown(shutdownCtx)
+	wg.Wait()
+	return runErr
+}

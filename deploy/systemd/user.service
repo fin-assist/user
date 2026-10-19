@@ -1,0 +1,48 @@
+# Example unit for the stand (FIN-149): Go services under systemd, one PostgreSQL.
+# Install as /etc/systemd/system/user.service.
+# The deploy script runs "/opt/finassist/user/user migrate up" (same environment) before restarting the unit.
+#
+# Secrets are systemd credentials, not environment variables: they do not show up in
+# "systemctl show" or /proc/<pid>/environ.
+#   /etc/finassist/user/env            non-secret settings (see docs/config.md)
+#   /etc/finassist/user/db-primary-dsn DSN, mode 0600, owner root
+[Unit]
+Description=fin-assist user
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+ExecStart=/opt/finassist/user/user serve
+EnvironmentFile=/etc/finassist/user/env
+Environment=ENV=stage
+LoadCredential=db-primary-dsn:/etc/finassist/user/db-primary-dsn
+Environment=DB_PRIMARY_DSN_FILE=%d/db-primary-dsn
+# The service token file of FIN-119 goes the same way:
+#LoadCredential=service-token:/etc/finassist/user/service-token
+#Environment=SERVICE_TOKEN_FILE=%d/service-token
+
+DynamicUser=yes
+Restart=on-failure
+RestartSec=2s
+# SHUTDOWN_DELAY + SHUTDOWN_TIMEOUT (5s + 20s by default) plus a margin.
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

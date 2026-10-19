@@ -1,0 +1,47 @@
+# Local run: PostgreSQL 18, migrations, the service. Dev mode: identities are not
+# verified (AUTH_MODE=insecure-dev), reflection is on, logs are text.
+#   docker compose up --build
+#   grpcurl -plaintext -H 'x-service-authorization: Bearer dev:bank-bff' \
+#     -H 'authorization: Bearer dev:<user_id>' localhost:9090 list
+name: user
+
+x-env: &env
+  SERVICE_NAME: user
+  ENV: dev
+  AUTH_MODE: insecure-dev
+  LOG_FORMAT: text
+  LOG_LEVEL: debug
+  DB_PRIMARY_DSN: postgres://user_service:user_service@postgres:5432/user?sslmode=disable
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: user_service
+      POSTGRES_PASSWORD: user_service
+      POSTGRES_DB: user
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "user_service", "-d", "user"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    build: .
+    command: ["migrate", "up"]
+    environment: *env
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  user:
+    build: .
+    command: ["serve"]
+    environment: *env
+    ports: ["127.0.0.1:9090:9090", "127.0.0.1:9091:9091"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+volumes:
+  pgdata:
