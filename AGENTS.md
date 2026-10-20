@@ -50,7 +50,7 @@ updates them in the same PR. A service made from the template rewrites the first
 | gRPC handlers (messages ↔ usecases) | `internal/adapter/grpc/<feature>/` |
 | Pools, transaction manager, repositories | `internal/adapter/postgres/`; rules — `docs/migrations.md`, «Запросы на pgx» |
 | Migration runner and the PostgreSQL for tests | `internal/adapter/postgres/migrate/`, `migratetest/` |
-| SQL migrations (embedded) | `migrations/`; rules — `docs/migrations.md` |
+| SQL migrations (embedded) and the tests of their keys, cascades and expected queries | `migrations/`; rules — `docs/migrations.md`; the schema, its keys, expected queries and the invariants kept by code — `docs/schema.md` |
 | Clients of other services, service token source | `internal/adapter/client/` |
 | Background jobs | `internal/worker/` |
 | Configuration: every variable with its default and description | `internal/config/vars.go` (`Vars`); generated tables — `docs/config.md` |
@@ -133,6 +133,9 @@ Priorities when they pull apart, in this order:
 - Database: SQL with parameters only (`$1`), table and column names are constants. A usecase opens the transaction
   with `db.Run`; repositories take `db.Writer(ctx)` / `db.Reader(ctx)`; no calls to other services inside `Run`.
   Migrations follow `docs/migrations.md` (two releases for an incompatible change, `CONCURRENTLY` alone in a file).
+  The schema holds only primary keys, unique indexes, foreign keys with their cascades, NOT NULL and defaults: no
+  CHECK, EXCLUDE, triggers or functions (owner's decision of 19.10.2026, FIN-112). Formats, state rules and
+  notifications are code; `docs/schema.md`, «Инварианты в коде сервиса», lists them.
 - Clients of other services: `client.Dial` with `Retry` listing only reads and methods idempotent by construction;
   the context carries the deadline.
 - Time: "now" in business logic comes from an injected clock (`func() time.Time` or an interface passed by `wire()`),
