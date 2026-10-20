@@ -11,26 +11,23 @@
 -- Secrets are never stored in the clear: tokens as SHA-256 hashes, results to deliver again
 -- as ciphertext of the service key, JWT signing keys not in the database at all.
 
--- Consent documents (api.md 1.6). A new version is a new row plus a switch of
--- consent_current, both by a data migration.
+-- Consent documents (api.md 1.6). A new version is a new row; is_current marks the version
+-- 1.6 returns and 1.3 / 2.3 accept. A data migration switches it in one transaction: first
+-- clear the flag of the old version, then set it on the new one (the index below refuses
+-- two current versions of a type at any moment).
 CREATE TABLE consent_document (
     type text NOT NULL,
     version text NOT NULL,
     title text NOT NULL,
     url text NOT NULL,
+    is_current boolean NOT NULL DEFAULT false,
     created_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT consent_document_pkey PRIMARY KEY (type, version)
 );
 
--- The current version of each document type: the one 1.6 returns and 1.3 / 2.3 accept.
-CREATE TABLE consent_current (
-    type text NOT NULL,
-    version text NOT NULL,
-    updated_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT consent_current_pkey PRIMARY KEY (type),
-    CONSTRAINT consent_current_document_fkey FOREIGN KEY (type, version)
-        REFERENCES consent_document (type, version)
-);
+-- One current version per type; also finds it by type.
+CREATE UNIQUE INDEX consent_document_current_key ON consent_document (type)
+    WHERE is_current;
 
 -- Users and their profile settings. Account deletion deletes the row: the foreign keys
 -- below cascade to every row that references the user (consents, requests verified for the

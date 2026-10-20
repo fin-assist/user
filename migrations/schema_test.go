@@ -105,12 +105,10 @@ func newUser(t *testing.T, db *pgxpool.Pool, phone string) string {
 
 func documents(t *testing.T, db *pgxpool.Pool) {
 	t.Helper()
-	exec(t, db, `INSERT INTO consent_document (type, version, title, url) VALUES
-		('personal_data', '2026-09-28', 'ПДн', 'https://example.ru/pd/2026-09-28'),
-		('assistant', '2026-09-28', 'Помощник', 'https://example.ru/a/2026-09-28'),
-		('assistant', '2026-10-20', 'Помощник', 'https://example.ru/a/2026-10-20')`)
-	exec(t, db, `INSERT INTO consent_current (type, version) VALUES
-		('personal_data', '2026-09-28'), ('assistant', '2026-10-20')`)
+	exec(t, db, `INSERT INTO consent_document (type, version, title, url, is_current) VALUES
+		('personal_data', '2026-09-28', 'ПДн', 'https://example.ru/pd/2026-09-28', true),
+		('assistant', '2026-09-28', 'Помощник', 'https://example.ru/a/2026-09-28', false),
+		('assistant', '2026-10-20', 'Помощник', 'https://example.ru/a/2026-10-20', true)`)
 }
 
 // querier is a pool or a transaction.
@@ -222,20 +220,14 @@ func TestConsents(t *testing.T) {
 	documents(t, db)
 	id := newUser(t, db, phoneA)
 
-	violates(t, db, "consent_current_document_fkey",
-		`UPDATE consent_current SET version = '2099-01-01' WHERE type = 'assistant'`)
 	violates(t, db, "user_consent_document_fkey",
 		`INSERT INTO user_consent (user_id, type, version, granted_at) VALUES ($1, 'assistant', '2099-01-01', $2)`, id, t0)
 
 	exec(t, db, `INSERT INTO user_consent (user_id, type, version, granted_at) VALUES ($1, 'assistant', '2026-09-28', $2)`, id, t0)
 
-	// Documents: a version in use stays, the current version is one per type.
+	// Documents: a version in use stays; a version is one row per type.
 	violates(t, db, "user_consent_document_fkey",
 		`DELETE FROM consent_document WHERE type = 'assistant' AND version = '2026-09-28'`)
-	violates(t, db, "consent_current_document_fkey",
-		`DELETE FROM consent_document WHERE type = 'assistant' AND version = '2026-10-20'`)
-	violates(t, db, "consent_current_pkey",
-		`INSERT INTO consent_current (type, version) VALUES ('assistant', '2026-09-28')`)
 	violates(t, db, "consent_document_pkey", `
 		INSERT INTO consent_document (type, version, title, url)
 		VALUES ('assistant', '2026-10-20', 'Помощник', 'https://example.ru/a/2026-10-20')`)
@@ -249,10 +241,10 @@ func TestConsents(t *testing.T) {
 		t.Helper()
 		err := db.QueryRow(context.Background(), `
 			SELECT c.version IS NOT NULL, c.version, d.version
-			FROM consent_current d
+			FROM consent_document d
 			LEFT JOIN user_consent c
 			       ON c.user_id = $1 AND c.type = d.type AND c.revoked_at IS NULL
-			WHERE d.type = 'assistant'`, id).Scan(&granted, &version, &current)
+			WHERE d.type = 'assistant' AND d.is_current`, id).Scan(&granted, &version, &current)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -271,6 +263,78 @@ func TestConsents(t *testing.T) {
 	var rows int
 	if err := db.QueryRow(context.Background(), `SELECT count(*) FROM user_consent WHERE user_id = $1`, id).Scan(&rows); err != nil || rows != 2 {
 		t.Fatalf("%d rows of history, %v; want 2", rows, err)
+	}
+}
+
+// The current version of a consent document: one per type (consent_document_current_key,
+// owner's decision of 20.10.2026), switched by "clear the old, then set the new" in one
+// transaction. GetConsentDocument (1.6) and the CONSENT_OUTDATED check read it by type.
+func TestCurrentConsentDocument(t *testing.T) {
+	db, _ := schema(t)
+	ctx := context.Background()
+	documents(t, db)
+
+	current := func(typ string) string {
+		t.Helper()
+		var v string
+		if err := db.QueryRow(ctx, `SELECT version FROM consent_document WHERE type = $1 AND is_current`, typ).Scan(&v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	if got := current("assistant"); got != "2026-10-20" {
+		t.Fatalf("current assistant %q, want 2026-10-20", got)
+	}
+	// Each type has its own current version.
+	if got := current("personal_data"); got != "2026-09-28" {
+		t.Fatalf("current personal_data %q, want 2026-09-28", got)
+	}
+	// A new version is not current by default.
+	exec(t, db, `INSERT INTO consent_document (type, version, title, url) VALUES ('assistant', '2026-11-01', 'Помощник', 'https://example.ru/a/2026-11-01')`)
+	if got := current("assistant"); got != "2026-10-20" {
+		t.Fatalf("current after insert %q, want 2026-10-20", got)
+	}
+	// A second current version of the same type.
+	violates(t, db, "consent_document_current_key",
+		`UPDATE consent_document SET is_current = true WHERE type = 'assistant' AND version = '2026-11-01'`)
+	violates(t, db, "consent_document_current_key", `
+		INSERT INTO consent_document (type, version, title, url, is_current)
+		VALUES ('assistant', '2026-12-01', 'Помощник', 'https://example.ru/a/2026-12-01', true)`)
+	notNull(t, db, "is_current", `UPDATE consent_document SET is_current = NULL WHERE type = 'assistant' AND version = '2026-11-01'`)
+
+	switchTo := func(setFirst bool) error {
+		return pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
+			clear := `UPDATE consent_document SET is_current = false WHERE type = 'assistant' AND is_current`
+			set := `UPDATE consent_document SET is_current = true WHERE type = 'assistant' AND version = '2026-11-01'`
+			first, second := clear, set
+			if setFirst {
+				first, second = set, clear
+			}
+			if _, err := tx.Exec(ctx, first); err != nil {
+				return err
+			}
+			_, err := tx.Exec(ctx, second)
+			return err
+		})
+	}
+	// "Set, then clear" fails on the index at the first statement, and nothing changes.
+	err := switchTo(true)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.ConstraintName != "consent_document_current_key" {
+		t.Fatalf("set then clear: %v, want a violation of consent_document_current_key", err)
+	}
+	if got := current("assistant"); got != "2026-10-20" {
+		t.Fatalf("current after the failed switch %q, want 2026-10-20", got)
+	}
+	// "Clear, then set" passes.
+	if err := switchTo(false); err != nil {
+		t.Fatal(err)
+	}
+	if got := current("assistant"); got != "2026-11-01" {
+		t.Fatalf("current after the switch %q, want 2026-11-01", got)
+	}
+	if got := current("personal_data"); got != "2026-09-28" {
+		t.Fatalf("personal_data changed to %q", got)
 	}
 }
 
