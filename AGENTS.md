@@ -208,8 +208,10 @@ golangci-lint, image build, and on PRs the migration checks (existing files unch
   subject (`Add …`, `Fix …`, `Address review: …`).
 - Dependency updates come from Renovate (`renovate.json`; README «Библиотеки и обновления»): its `renovate/…`
   branches are the exception to the branch names and need no YouTrack issue while they change nothing but
-  dependencies. When an update is incompatible (CI fails, «Несовместимо» in the library's CHANGELOG), the fixes go
-  into the same branch, and the PR gets the issue of that work.
+  dependencies. FIN-211 permits merge/retry/close of allowed bot-only updates, including v0 minor/major changes,
+  after required CI; deployment and rollout instructions in CHANGELOG/contracts remain the owner's responsibility.
+  Human fixes make the PR manual and require a YouTrack issue. After automatic closure, create a separate fix PR
+  with an issue rather than pushing to the closed Renovate branch; follow README dependency policy.
 - PR title and description in Russian: what changed and why, deviations from the contracts or docs, how it was
   checked. A PR for a single issue starts its title with the key (`FIN-42 Поиск операций по сумме`); a PR for several
   issues lists all of them in the description, each linked (`https://finassist.youtrack.cloud/issue/FIN-<n>`).
