@@ -204,7 +204,7 @@ golangci-lint, image build, and on PRs the migration checks (existing files unch
 
 ### Coverage reports (FIN-210)
 
-CI reports project totals and changed executable lines together from the same profile per Go module in one
+CI reports project totals and changed executable lines together from the same profile of the root Go module in one
 updated PR comment and the run summary; push runs retain project totals. The 80% target remains for changed
 lines only. Count unique lines in blocks with nonzero statement counts, including generated production code;
 exclude `_test.go` and `testdata/`. An empty profile means no data, never 100%. Fork PRs cannot post comments.
