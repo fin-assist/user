@@ -216,8 +216,10 @@ Test changes to the report with `python3 -m unittest discover -s scripts -p 'tes
   subject (`Add …`, `Fix …`, `Address review: …`).
 - Dependency updates come from Renovate (`renovate.json`; README «Библиотеки и обновления»): its `renovate/…`
   branches are the exception to the branch names and need no YouTrack issue while they change nothing but
-  dependencies. When an update is incompatible (CI fails, «Несовместимо» in the library's CHANGELOG), the fixes go
-  into the same branch, and the PR gets the issue of that work.
+  dependencies. FIN-211 permits merge/retry/close of allowed bot-only updates, including v0 minor/major changes,
+  after required CI; deployment and rollout instructions in CHANGELOG/contracts remain the owner's responsibility.
+  Human fixes make the PR manual and require a YouTrack issue. After automatic closure, create a separate fix PR
+  with an issue rather than pushing to the closed Renovate branch; follow README dependency policy.
 - PR title and description in Russian: what changed and why, deviations from the contracts or docs, how it was
   checked. A PR for a single issue starts its title with the key (`FIN-42 Поиск операций по сумме`); a PR for several
   issues lists all of them in the description, each linked (`https://finassist.youtrack.cloud/issue/FIN-<n>`).
@@ -345,3 +347,7 @@ security-relevant behaviour has negative tests.
 - A new metric has bounded labels and is listed in `docs/server.md`; a new setting is declared in `Vars` and the
   tables of `docs/config.md` are regenerated, not edited by hand.
 - Changed lines the coverage comment of the PR (posted by CI) shows as uncovered have a reason in the PR.
+
+## Renovate automation
+
+FIN-211: dependency-only Renovate PRs may be merged/closed by the reviewed `renovate-policy.yml` controller, after exact-head required CI and bot-only commit checks. Ordinary PRs and release-to-main PRs still require the owner. Do not enable native automerge or bypass protections. Preserve base policy in `renovate-base.json` (schedules, groups, allowed versions and manual Go upgrades); generated target/version approvals live on the separate `renovate-policy` branch. Failed exact values are isolated for explicit Dashboard approval; new values keep their original groups. AndroidX/Compose and mixed groups never auto-merge. See `docs/renovate-policy.md` for credentials, safeguards, bootstrap and verification.

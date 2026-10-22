@@ -1,0 +1,17 @@
+{
+  "requiredChecks": [
+    "go",
+    "lint",
+    "image",
+    "migrations",
+    "Renovate policy tests",
+    "Renovate runtime contract"
+  ],
+  "controllerLogin": "avtomon",
+  "ciChecks": [
+    "go",
+    "lint",
+    "image",
+    "migrations"
+  ]
+}
