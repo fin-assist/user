@@ -202,6 +202,64 @@ func TestAuthAPIConcurrentRegisterSameKeyIsOneEffect(t *testing.T) {
 	}
 }
 
+func TestAuthAPIConcurrentRegisterDifferentKeysConsumesTokenOnce(t *testing.T) {
+	env := apitest.Start(t)
+	seedDocuments(t, env)
+	seedRegistration(t, env, "reg", "+79001234567", time.Now().UTC().Add(-6*time.Minute))
+	c := userv1.NewAuthServiceClient(env.Conn)
+	blocker, err := env.App.DB.Primary().Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = blocker.Rollback(context.Background()) }()
+	if _, err := blocker.Exec(t.Context(), `SELECT version FROM consent_document WHERE type='personal_data' AND is_current FOR UPDATE`); err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		response *userv1.RegisterResponse
+		err      error
+	}
+	done := make(chan result, 2)
+	for range 2 {
+		key := authKey()
+		go func() {
+			r, err := c.Register(authContext(t.Context(), key), registrationRequest("reg"))
+			done <- result{r, err}
+		}()
+	}
+	// Both requests have already read the same open verification, and now wait
+	// at the document read before either can create an account or consume it.
+	eventually(t, func() bool {
+		var n int
+		err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND application_name='user-auth' AND wait_event_type='Lock' AND query LIKE 'SELECT version FROM consent_document%'`).Scan(&n)
+		return err == nil && n == 2
+	})
+	if err := blocker.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	successes, refusals := 0, 0
+	var user string
+	for range 2 {
+		r := <-done
+		if r.err == nil {
+			successes++
+			user = r.response.GetUserId()
+		} else if apitest.Reason(r.err) == "INVALID_TOKEN" {
+			refusals++
+		} else {
+			t.Fatal(r.err)
+		}
+	}
+	if successes != 1 || refusals != 1 || user == "" {
+		t.Fatal("registration token consumed more than once", successes, refusals)
+	}
+	var users, sessions, events, consents, closed, hits int
+	err = env.App.DB.Primary().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM app_user),(SELECT count(*) FROM auth_session),(SELECT count(*) FROM outbox_events),(SELECT count(*) FROM user_consent WHERE type='personal_data'),(SELECT count(*) FROM phone_verification WHERE closed_at IS NOT NULL AND user_id=$1),(SELECT hits FROM rate_limit_window WHERE scope='register_ip:60')`, user).Scan(&users, &sessions, &events, &consents, &closed, &hits)
+	if err != nil || users != 1 || sessions != 1 || events != 1 || consents != 1 || closed != 1 || hits != 2 {
+		t.Fatal("duplicate registration effects", users, sessions, events, consents, closed, hits, err)
+	}
+}
+
 func TestAuthAPICleanupDrainsBatchesAndKeepsLiveState(t *testing.T) {
 	env := apitest.Start(t)
 	seedDocuments(t, env)
