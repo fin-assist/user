@@ -37,6 +37,19 @@ updates them in the same PR. A service made from the template rewrites the first
   non-radical. The owner writes backend code himself and is strong in PostgreSQL: schemas and queries are proposed
   with arguments, not decided for him.
 
+## Current implementation (FIN-219, foundation)
+
+The registered functional RPCs are GetConsentDocument and GetSigningKeys. AuthService,
+ProfileService and GetAssistantConsentStatus are subsequent FIN-219 stages; the embedded
+UserInternalService handler still returns UNIMPLEMENTED for consent status. Do not describe
+this foundation as a complete sign-in service. go-identity v0.1.0 supplies only the verifiers
+and token sources: keep the existing server ACL and reqctx chain, without a second identity
+interceptor. The signing package supplies its local JWKS provider (no self-RPC). go-tombstone
+v0.1.0 reads primary and its migration source precedes the service. Assistant documents check
+the conditional user token and tombstone in their handler; personal-data documents are public
+to authenticated bank-bff. Signing key files are required even in insecure-dev. Make up/run
+create an ignored .local key; never put that directory in git or the Docker build context.
+
 ## Repository map
 
 | What | Where |
@@ -44,6 +57,8 @@ updates them in the same PR. A service made from the template rewrites the first
 | Commands `serve`, `migrate`: listeners, shutdown | `cmd/user/` (`serve.go`, `migrate.go`) |
 | Assembly: identity, pools, server; wiring of adapters, usecases and handlers (`wire()`), the access table (`AccessPolicy()`), migration sources | `internal/app/` (`app.go`, `wire.go`) |
 | The whole service in-process for API tests | `internal/app/apitest/` |
+| Access JWT signing, rotation snapshot, local public JWKS | `internal/signing/` |
+| Current consent-document usecase | `internal/consent/` |
 | Entities and invariants (no pgx, gRPC or generated code) | `internal/domain/` |
 | Usecases and the interfaces of repositories and clients they need | `internal/<feature>/` |
 | gRPC server, interceptors, access table types, identity and tombstone interfaces | `internal/adapter/grpc/server/`; rules — `docs/server.md` |

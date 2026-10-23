@@ -3,7 +3,7 @@ GOLANGCI_LINT_VERSION := v2.15.0
 BIN := bin/user
 export GOPRIVATE := github.com/fin-assist/*
 
-.PHONY: build test cover lint fmt run migrate image up down
+.PHONY: build test cover lint fmt run migrate image up down dev-key
 
 build: ## build the binary into bin/
 	go build -trimpath -o $(BIN) ./cmd/user
@@ -26,16 +26,22 @@ fmt:
 image: ## the service image
 	docker build -t user:dev .
 
-up: ## PostgreSQL, migrations and the service in Docker
-	docker compose up --build
+up: dev-key ## PostgreSQL, migrations and the service in Docker
+	LOCAL_UID=$$(id -u) LOCAL_GID=$$(id -g) docker compose up --build
 
 down:
 	docker compose down
 
-run: build ## the service on the host against the compose PostgreSQL
+run: build dev-key ## the service on the host against the compose PostgreSQL
 	SERVICE_NAME=user ENV=dev AUTH_MODE=insecure-dev LOG_FORMAT=text \
+	JWT_SIGNING_KEY_FILE=.local/jwt-signing.pem JWT_KEY_ID=local JWT_ISSUER=local-user JWT_AUDIENCE=local-app \
 	DB_PRIMARY_DSN='postgres://user_service:user_service@localhost:5432/user?sslmode=disable' \
 	$(BIN) serve
 
 migrate: build ## migrate up against the compose PostgreSQL
 	DB_PRIMARY_DSN='postgres://user_service:user_service@localhost:5432/user?sslmode=disable' $(BIN) migrate up
+
+# A throwaway local user-signing key; never replace an existing key on repeated runs.
+dev-key:
+	@mkdir -p .local
+	@test -s .local/jwt-signing.pem || (umask 077 && openssl genpkey -algorithm ED25519 -out .local/jwt-signing.pem)

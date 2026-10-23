@@ -13,8 +13,14 @@ package apitest
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
 	"log/slog"
 	"net"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -51,8 +57,21 @@ func Start(t *testing.T, mutate ...func(*config.Config)) *Env {
 		t.Fatalf("migrate: %v", err)
 	}
 
+	_, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(t.TempDir(), "user.pem")
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	cfg := config.Config{
-		Service: "apitest",
+		Service: "user",
+		Signing: config.SigningConfig{PrivateKeyFile: keyPath, KeyID: "apitest", Issuer: "apitest-user", Audience: "apitest-client"},
 		Env:     config.EnvDev,
 		Auth:    config.AuthConfig{Mode: config.AuthInsecureDev},
 		DB:      config.DBConfig{PrimaryDSN: dsn, MaxConns: 4},

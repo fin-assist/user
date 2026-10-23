@@ -7,3 +7,6 @@ __pycache__/
 
 # Local Renovate runtime dependencies
 node_modules/
+
+# Local private signing material
+.local/

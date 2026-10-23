@@ -6,8 +6,12 @@ package app
 
 import (
 	"context"
-	"errors"
 	"log/slog"
+	"time"
+
+	tombstone "github.com/fin-assist/go-tombstone"
+
+	"github.com/fin-assist/user/internal/signing"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -20,20 +24,27 @@ import (
 
 // App is the assembled service. Wire reads its fields to build adapters and usecases.
 type App struct {
-	Cfg     config.Config
-	Log     *slog.Logger
-	DB      *postgres.DB
-	GRPC    *server.Server
-	Clients *client.Metrics
-	Tokens  client.TokenSource
-	Jobs    []worker.Job
+	Cfg        config.Config
+	Log        *slog.Logger
+	DB         *postgres.DB
+	GRPC       *server.Server
+	Clients    *client.Metrics
+	Tokens     client.TokenSource
+	Jobs       []worker.Job
+	Signing    *signing.Keys
+	Users      server.UserVerifier
+	Tombstones *tombstone.Store
 
 	closers []func()
 }
 
 // New assembles the service from cfg. Close releases what it opened.
 func New(ctx context.Context, cfg config.Config, log *slog.Logger, reg prometheus.Registerer) (*App, error) {
-	services, users, tokens, err := identity(cfg)
+	keys, err := signing.Load(signing.Options{PrivateKeyFile: cfg.Signing.PrivateKeyFile, PublicKeysFile: cfg.Signing.PublicKeysFile, KeyID: cfg.Signing.KeyID, Issuer: cfg.Signing.Issuer, Audience: cfg.Signing.Audience, Clock: time.Now})
+	if err != nil {
+		return nil, err
+	}
+	ids, err := buildIdentity(cfg, keys, reg)
 	if err != nil {
 		return nil, err
 	}
@@ -42,14 +53,19 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger, reg prometheu
 		MaxConns: cfg.DB.MaxConns, AppName: cfg.Service,
 	})
 	if err != nil {
+		ids.close()
 		return nil, err
 	}
-	a := &App{Cfg: cfg, Log: log, DB: db, Tokens: tokens, closers: []func(){db.Close}}
+	a := &App{Cfg: cfg, Log: log, DB: db, Tokens: ids.tokens, Signing: keys, Users: ids.users, Jobs: ids.jobs, closers: []func(){ids.close, db.Close}}
 	fail := func(err error) (*App, error) { a.Close(); return nil, err }
+	a.Tombstones, err = tombstone.New(db, db.Primary(), time.Now)
+	if err != nil {
+		return fail(err)
+	}
 
 	if a.GRPC, err = server.New(server.Options{MaxRecvMsgSize: cfg.GRPC.MaxRecvMsgSize, Reflection: cfg.GRPC.Reflection}, server.Deps{
 		Logger: log, Metrics: reg, Policy: AccessPolicy(),
-		Services: services, Users: users, Tombstones: tombstones(db),
+		Services: ids.services, Users: ids.users, Tombstones: deletedUsers{a.Tombstones},
 	}); err != nil {
 		return fail(err)
 	}
@@ -60,7 +76,7 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger, reg prometheu
 	if err != nil {
 		return fail(err)
 	}
-	a.Jobs = jobs
+	a.Jobs = append(a.Jobs, jobs...)
 	a.closers = append(a.closers, closeWired)
 	return a, nil
 }
@@ -73,22 +89,9 @@ func (a *App) Close() {
 	a.closers = nil
 }
 
-// identity returns the verifiers of incoming calls and the token of outgoing ones.
-func identity(cfg config.Config) (server.ServiceVerifier, server.UserVerifier, client.TokenSource, error) {
-	switch cfg.Auth.Mode {
-	case config.AuthInsecureDev:
-		return server.DevServiceVerifier{}, server.DevUserVerifier{}, client.DevToken(cfg.Service), nil
-	default:
-		// TODO(FIN-119): JWT (Ed25519, GetSigningKeys) and ServiceAccount tokens (JWKS of
-		// the API server); the outgoing token from client.FileToken{Path: SERVICE_TOKEN_FILE}.
-		// Until then the service does not start outside dev rather than trust anyone.
-		return nil, nil, nil, errors.New("AUTH_MODE=verify needs the identity library (FIN-119); use AUTH_MODE=insecure-dev with ENV=dev")
-	}
-}
+// deletedUsers adapts the library's primary-backed checker to the existing server chain.
+type deletedUsers struct{ store *tombstone.Store }
 
-// tombstones returns the check of deleted users.
-func tombstones(*postgres.DB) server.Tombstones {
-	// TODO(FIN-110): the tombstone library on db. A service that stores no user data keeps
-	// NoTombstones; every data service must replace it (grpc-api.md 7).
-	return server.NoTombstones{}
+func (d deletedUsers) IsDeleted(ctx context.Context, id string) (bool, error) {
+	return d.store.Deleted(ctx, id)
 }
