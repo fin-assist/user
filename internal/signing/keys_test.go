@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -146,6 +147,24 @@ func TestMalformedKeyFiles(t *testing.T) {
 	}
 	if _, err := StagePublicKeys("/missing"); err == nil {
 		t.Fatal("missing public keys accepted")
+	}
+}
+
+func TestPublicKeyCountIncludesActiveKey(t *testing.T) {
+	var extra keySet
+	for i := 0; i < 64; i++ {
+		extra.Keys = append(extra.Keys, publicKey{Type: "OKP", Curve: "Ed25519", ID: fmt.Sprintf("k-%d", i), X: base64.RawURLEncoding.EncodeToString(make([]byte, 32))})
+	}
+	b, err := json.Marshal(extra)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "keys.json")
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(Options{PrivateKeyFile: keyFile(t), PublicKeysFile: path, KeyID: "active", Issuer: "user", Audience: "app", Clock: time.Now}); err == nil {
+		t.Fatal("65 published keys accepted")
 	}
 }
 

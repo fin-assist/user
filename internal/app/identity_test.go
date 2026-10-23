@@ -18,6 +18,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/prometheus/client_golang/prometheus"
 
+	tombstone "github.com/fin-assist/go-tombstone"
+
+	"github.com/fin-assist/user/internal/adapter/postgres"
 	"github.com/fin-assist/user/internal/adapter/postgres/migrate/migratetest"
 	"github.com/fin-assist/user/internal/config"
 	"github.com/fin-assist/user/internal/signing"
@@ -133,5 +136,41 @@ func TestNewRequiresSigningKey(t *testing.T) {
 func TestLibraryMigrationSources(t *testing.T) {
 	for _, source := range MigrationSources() {
 		t.Run(source.Name, func(t *testing.T) { migratetest.CheckUpDownUp(t, source) })
+	}
+}
+
+func TestStageVerifierCannotStartInProd(t *testing.T) {
+	cfg := config.Config{Env: config.EnvProd, Service: "user", Signing: signingConfig(t), Auth: config.AuthConfig{Mode: config.AuthVerify, ServiceMode: "stage", ServiceIssuer: "stage"}}
+	keys, err := signing.Load(signing.Options{PrivateKeyFile: cfg.Signing.PrivateKeyFile, KeyID: cfg.Signing.KeyID, Issuer: cfg.Signing.Issuer, Audience: cfg.Signing.Audience, Clock: time.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := keys.JWKS(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "stage.json")
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Auth.StagePublicKeysFile = path
+	if _, err := buildIdentity(cfg, keys, prometheus.NewRegistry()); err == nil {
+		t.Fatal("stage verifier enabled in prod")
+	}
+}
+
+func TestTombstoneServerAdapter(t *testing.T) {
+	db, err := postgres.Open(t.Context(), postgres.Options{PrimaryDSN: migratetest.DSN(t), MaxConns: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store, err := tombstone.New(db, db.Primary(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An invalid subject must fail closed rather than query or silently accept it.
+	if _, err := (deletedUsers{store}).IsDeleted(t.Context(), "invalid-subject"); err == nil {
+		t.Fatal("invalid subject accepted")
 	}
 }
