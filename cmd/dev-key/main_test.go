@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fin-assist/user/internal/config"
 	"github.com/fin-assist/user/internal/signing"
 )
 
@@ -40,6 +41,28 @@ func TestGenerateDoesNotReplaceExistingKey(t *testing.T) {
 	}
 }
 
+func TestAESKeyIsPrivateAndNeverReplaced(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.key")
+	if err := generateAES(path); err != nil {
+		t.Fatal(err)
+	}
+	c := config.SessionsConfig{IdempotencyKeyFile: path, RefreshTTL: time.Hour, MaxConns: 1}
+	before, err := config.LoadSessionKey(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := generateAES(path); err != nil {
+		t.Fatal(err)
+	}
+	after, err := config.LoadSessionKey(c)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("AES key replaced", err)
+	}
+	if err := generateAES(filepath.Join(t.TempDir(), "absent", "key")); err == nil {
+		t.Fatal("missing directory accepted")
+	}
+}
+
 func TestDevKeyCLI(t *testing.T) {
 	if os.Getenv("FINASSIST_TEST_DEV_KEY") == "1" {
 		var args []string
@@ -60,6 +83,7 @@ func TestDevKeyCLI(t *testing.T) {
 		code int
 	}{
 		{nil, 2}, {[]string{filepath.Join(t.TempDir(), "absent", "key")}, 1}, {[]string{path}, 0},
+		{[]string{"--aes", filepath.Join(t.TempDir(), "aes.key")}, 0},
 	} {
 		args, err := json.Marshal(tt.args)
 		if err != nil {

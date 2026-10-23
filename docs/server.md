@@ -108,4 +108,10 @@ key_unavailable/forbidden/user_id. ACL выполняет сервер, поэт
 Обязателен внешний алерт на возраст > 3600 секунд для всех target; включение в infra
 учитывается отдельно. Сборка, остановка, повторы и тесты — [profile.md](profile.md).
 
+Register/Refresh подключают `finassist_idempotency_requests_total{endpoint,outcome}`:
+endpoint — два полных имени RPC, outcome — new/replay/conflict/in_progress. Это решения
+библиотеки до commit, а не число закоммиченных эффектов. Секреты и ключи метками не
+становятся. Рост conflict/in_progress и ошибки auth-cleanup отслеживаются внешними
+правилами мониторинга; параметры порога задаются в infra. Детали — [auth.md](auth.md).
+
 `internal/worker`: `worker.Run(ctx, log, jobs...)` — задание с ошибкой или паникой перезапускается через 5 с; `worker.Every(name, interval, log, fn)` — периодическое. Задания работают в каждом поде; единственность — блокировкой или `FOR UPDATE SKIP LOCKED`, как в outbox. Задания возвращает `wire()`.

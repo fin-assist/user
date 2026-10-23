@@ -31,6 +31,9 @@ primary-пул OUTBOX_DB_MAX_CONNS; его ёмкость не меньше чи
 | `JWT_KEY_ID` | — | kid активного ключа access JWT, обязателен при старте |
 | `JWT_ISSUER` | — | iss access JWT, обязателен; одинаков у всех потребителей |
 | `JWT_AUDIENCE` | — | aud access JWT, обязателен; одинаков у всех потребителей |
+| `AUTH_IDEMPOTENCY_KEY_FILE` | — | файл 0600 с 32 raw-байтами AES-256 для шифрования ответов Register/Refresh; обязателен, общий для реплик; сохранять ключ не менее 24 ч после последней записи |
+| `AUTH_DB_MAX_CONNS` | `8` | отдельный primary pool транзакций авторизации; лимиты используют обычный pool, чтобы ошибки токена не откатывали учёт попыток |
+| `REFRESH_TOKEN_TTL` | `1440h` | скользящий срок refresh-токена; по умолчанию 60 суток, продлевается каждой ротацией |
 | `SERVICE_AUTH_MODE` | `kubernetes` | kubernetes — ServiceAccount; stage — подписанные JWT сервисов, только dev/stage |
 | `SERVICE_TOKEN_ISSUER` | — | iss сервисных токенов; для kubernetes — issuer кластера, для stage — общий issuer стенда |
 | `STAGE_SIGNING_KEY_FILE` | — | приватный PKCS#8 Ed25519 ключ этого сервиса для SERVICE_AUTH_MODE=stage |

@@ -8,10 +8,11 @@ import (
 	"math"
 	"strings"
 	"time"
-	_ "time/tzdata" // Keep IANA validation available in the distroless image.
 
 	"github.com/fin-assist/contracts/gen/go/finerr"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
+
+	"github.com/fin-assist/user/internal/domain"
 )
 
 // Consent describes the active grant and the current document version.
@@ -87,7 +88,7 @@ func (s *Service) Update(ctx context.Context, id string, patch Patch) (out Recor
 	if patch.Theme != nil && !validTheme(*patch.Theme) {
 		return Record{}, invalid("theme")
 	}
-	if patch.Timezone != nil && !validTimezone(*patch.Timezone) {
+	if patch.Timezone != nil && !domain.ValidTimezone(*patch.Timezone) {
 		return Record{}, invalid("timezone")
 	}
 	err = s.tx.Run(ctx, func(ctx context.Context) error {
@@ -238,13 +239,6 @@ func validRecord(p Record) error {
 }
 
 func validTheme(s string) bool { return s == "system" || s == "light" || s == "dark" }
-func validTimezone(s string) bool {
-	if s == "" || s == "Local" || len(s) > 64 {
-		return false
-	}
-	_, err := time.LoadLocation(s)
-	return err == nil
-}
 func validID(s string) bool {
 	if len(s) != 36 || s[8] != '-' || s[13] != '-' || s[18] != '-' || s[23] != '-' {
 		return false

@@ -1,7 +1,7 @@
 # Профиль, согласия и часовой пояс
 
 Этап FIN-219 добавляет GetProfile, UpdateProfile, GrantAssistantConsent,
-RevokeAssistantConsent и GetAssistantConsentStatus. AuthService и DeleteAccount остаются
+RevokeAssistantConsent и GetAssistantConsentStatus. Создание заявки, Watch и DeleteAccount остаются
 следующими этапами. API-тесты используют явно тестовые документы и пользователей;
 регистрация реальных пользователей требует утверждённых документов согласий.
 

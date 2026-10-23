@@ -104,4 +104,13 @@ func setSigningKey(t *testing.T) {
 	t.Setenv("JWT_KEY_ID", "serve-test")
 	t.Setenv("JWT_ISSUER", "test-user")
 	t.Setenv("JWT_AUDIENCE", "test-app")
+	secretPath := filepath.Join(t.TempDir(), "auth.key")
+	var secret [32]byte
+	if _, err := rand.Read(secret[:]); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secretPath, secret[:], 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AUTH_IDEMPOTENCY_KEY_FILE", secretPath)
 }

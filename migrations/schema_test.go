@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"io/fs"
 	"log/slog"
 	"os"
 	"strconv"
@@ -855,7 +856,11 @@ func TestSchemaHasNoRulesOrLogic(t *testing.T) {
 func TestDownLeavesNothing(t *testing.T) {
 	db, dsn := schema(t)
 	ctx := context.Background()
-	if err := migrate.Down(ctx, config(dsn), source(), 1); err != nil {
+	files, err := fs.Glob(migrations.FS, "*.up.sql")
+	if err != nil || len(files) == 0 {
+		t.Fatal("migration sources", err)
+	}
+	if err := migrate.Down(ctx, config(dsn), source(), len(files)); err != nil {
 		t.Fatal(err)
 	}
 	var tables int

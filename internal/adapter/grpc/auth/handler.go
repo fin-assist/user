@@ -1,0 +1,202 @@
+// Package auth exposes the implemented AuthService methods. The shared library
+// validates metadata keys and commits encrypted replies with session effects.
+package auth
+
+import (
+	"context"
+	"errors"
+
+	userv1 "github.com/fin-assist/contracts/gen/go/finassist/user/v1"
+	"github.com/fin-assist/contracts/gen/go/finerr"
+	idempotency "github.com/fin-assist/go-idempotency"
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
+
+	usecase "github.com/fin-assist/user/internal/auth"
+	"github.com/fin-assist/user/internal/ratelimit"
+	"github.com/fin-assist/user/internal/reqctx"
+)
+
+// Sessions is the consumer interface of the three implemented RPCs.
+type Sessions interface {
+	Register(context.Context, usecase.RegisterInput) (usecase.Registered, error)
+	Refresh(context.Context, string) (usecase.Rotation, error)
+	CompleteReuse(context.Context, string) error
+	Logout(context.Context, string) error
+}
+
+// Engine is the library surface used by this transport adapter.
+type Engine interface {
+	UnaryInterceptor(func(context.Context) (string, error)) grpc.UnaryServerInterceptor
+	WithCompletion(context.Context) (context.Context, context.CancelFunc)
+	Do(context.Context, idempotency.Request, func(context.Context) (idempotency.Response, error)) (idempotency.Result, error)
+}
+
+// Transactions commits an explicit service transaction.
+type Transactions interface {
+	Run(context.Context, func(context.Context) error) error
+}
+
+// Limits counts requests before token checks, including rejected secrets.
+type Limits interface {
+	Check(context.Context, ratelimit.Operation, string, string) (ratelimit.Decision, ratelimit.Receipt, error)
+}
+
+// ReplayOwners binds successful no-user replies to their actual account.
+type ReplayOwners interface {
+	BindReplay(context.Context, string, string, string) error
+	ReplayOwner(context.Context, string, string) (string, error)
+}
+
+// Guard rechecks cached replies against deletion before they leave the transaction.
+type Guard interface {
+	Guard(context.Context, string) (bool, error)
+}
+
+// Handler keeps the idempotency transaction separate from the attempt-counter
+// transaction: a non-cacheable 401 must still consume an IP attempt.
+type Handler struct {
+	userv1.UnimplementedAuthServiceServer
+	sessions        Sessions
+	engine          Engine
+	state, attempts Transactions
+	limits          Limits
+	owners          ReplayOwners
+	guard           Guard
+}
+
+// Register installs session RPCs; phone creation and Watch remain UNIMPLEMENTED
+// until the next stage supplies a provider-independent confirmation lifecycle.
+func Register(server grpc.ServiceRegistrar, sessions Sessions, engine Engine, state, attempts Transactions, limits Limits, owners ReplayOwners, guard Guard) {
+	userv1.RegisterAuthServiceServer(server, &Handler{sessions: sessions, engine: engine, state: state, attempts: attempts, limits: limits, owners: owners, guard: guard})
+}
+
+func (h *Handler) Register(ctx context.Context, in *userv1.RegisterRequest) (*userv1.RegisterResponse, error) {
+	out := new(userv1.RegisterResponse)
+	err := h.run(ctx, userv1.AuthService_Register_FullMethodName, in, out, ratelimit.Register, func(ctx context.Context) (proto.Message, string, bool, error) {
+		r, err := h.sessions.Register(ctx, usecase.RegisterInput{Token: in.GetRegistrationToken(), Accepted: in.GetPdConsentAccepted(), ConsentVersion: in.GetPdConsentVersion(), Timezone: in.Timezone})
+		return &userv1.RegisterResponse{Tokens: pair(r.Pair), UserId: r.UserID}, r.UserID, false, err
+	}, nil)
+	return out, err
+}
+
+func (h *Handler) RefreshTokens(ctx context.Context, in *userv1.RefreshTokensRequest) (*userv1.RefreshTokensResponse, error) {
+	out := new(userv1.RefreshTokensResponse)
+	err := h.run(ctx, userv1.AuthService_RefreshTokens_FullMethodName, in, out, ratelimit.Refresh, func(ctx context.Context) (proto.Message, string, bool, error) {
+		r, err := h.sessions.Refresh(ctx, in.GetRefreshToken())
+		return &userv1.RefreshTokensResponse{Tokens: pair(r.Pair)}, r.UserID, r.Reused, err
+	}, func(ctx context.Context) error { return h.sessions.CompleteReuse(ctx, in.GetRefreshToken()) })
+	return out, err
+}
+
+func (h *Handler) Logout(ctx context.Context, in *userv1.LogoutRequest) (*userv1.LogoutResponse, error) {
+	if err := h.sessions.Logout(ctx, in.GetRefreshToken()); err != nil {
+		return nil, err
+	}
+	return &userv1.LogoutResponse{}, nil
+}
+
+type action func(context.Context) (proto.Message, string, bool, error)
+
+func (h *Handler) run(ctx context.Context, method string, in, out proto.Message, op ratelimit.Operation, perform action, completeReuse func(context.Context) error) error {
+	// Run the library's extraction interceptor here, after the server has already
+	// checked service identity/access. This avoids a second key parser or identity
+	// interceptor and keeps extraction confined to the implemented auth methods.
+	_, err := h.engine.UnaryInterceptor(func(context.Context) (string, error) { return "", nil })(ctx, in, &grpc.UnaryServerInfo{FullMethod: method}, func(ctx context.Context, _ any) (any, error) {
+		return nil, h.execute(ctx, in, out, op, perform, completeReuse)
+	})
+	return err
+}
+
+func (h *Handler) execute(ctx context.Context, in, out proto.Message, op ratelimit.Operation, perform action, completeReuse func(context.Context) error) error {
+	request, ok := idempotency.FromContext(ctx)
+	if !ok {
+		return errors.New("auth: idempotency context required")
+	}
+	var err error
+	request.Hash, err = idempotency.HashProto(in)
+	if err != nil {
+		return err
+	}
+	completion, cancel := h.engine.WithCompletion(ctx)
+	defer cancel()
+	var result idempotency.Result
+	var reused bool
+	err = h.state.Run(completion, func(ctx context.Context) error {
+		var doErr error
+		result, doErr = h.engine.Do(ctx, request, func(effect context.Context) (idempotency.Response, error) {
+			// completion has no outer transaction. Commit the counter in the
+			// ordinary pool before checking a secret in the dedicated auth pool.
+			if err := h.attempt(completion, op); err != nil {
+				return idempotency.Response{}, err
+			}
+			msg, id, reuse, err := perform(effect)
+			reused = reuse
+			if err != nil {
+				return idempotency.Response{}, err
+			}
+			if err := h.owners.BindReplay(effect, request.Endpoint, request.Key, id); err != nil {
+				return idempotency.Response{}, err
+			}
+			body, err := proto.Marshal(msg)
+			return idempotency.Response{Body: body}, err
+		})
+		if doErr != nil {
+			return doErr
+		}
+		if result.Err == nil && result.Replayed {
+			id, err := h.owners.ReplayOwner(ctx, request.Endpoint, request.Key)
+			if err != nil {
+				return err
+			}
+			alive, err := h.guard.Guard(ctx, id)
+			if err != nil {
+				return err
+			}
+			if !alive {
+				if request.Endpoint == userv1.AuthService_Register_FullMethodName {
+					return finerr.InvalidToken()
+				}
+				return finerr.TokenRevoked()
+			}
+		}
+		return nil
+	})
+	if errors.Is(err, idempotency.ErrNotStored) {
+		if reused && completeReuse != nil {
+			if err := completeReuse(completion); err != nil {
+				return err
+			}
+		}
+		return result.Err
+	}
+	if err != nil {
+		return err
+	}
+	if result.Err != nil {
+		return result.Err
+	}
+	return proto.Unmarshal(result.Response.Body, out)
+}
+
+func (h *Handler) attempt(ctx context.Context, op ratelimit.Operation) error {
+	var d ratelimit.Decision
+	var receipt ratelimit.Receipt
+	err := h.attempts.Run(ctx, func(ctx context.Context) error {
+		var err error
+		d, receipt, err = h.limits.Check(ctx, op, "", reqctx.ClientIP(ctx))
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	receipt.Committed()
+	if !d.Allowed {
+		return finerr.RateLimited(d.RetryAt)
+	}
+	return nil
+}
+
+func pair(p usecase.Pair) *userv1.TokenPair {
+	return &userv1.TokenPair{AccessToken: p.Access, RefreshToken: p.Refresh}
+}

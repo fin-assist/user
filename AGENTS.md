@@ -40,8 +40,9 @@ updates them in the same PR. A service made from the template rewrites the first
 ## Current implementation (FIN-219)
 
 Functional RPCs: GetConsentDocument, GetSigningKeys, GetAssistantConsentStatus, GetProfile,
-UpdateProfile, GrantAssistantConsent and RevokeAssistantConsent. AuthService and DeleteAccount
-are later FIN-219 stages (DeleteAccount still returns UNIMPLEMENTED). Do not describe
+UpdateProfile, GrantAssistantConsent, RevokeAssistantConsent, Register, RefreshTokens
+and Logout. StartPhoneVerification, WatchPhoneVerification and DeleteAccount
+are later FIN-219 stages (still UNIMPLEMENTED). Do not describe
 this as a complete sign-in service. go-identity v0.1.0 supplies only the verifiers
 and token sources: keep the existing server ACL and reqctx chain, without a second identity
 interceptor. The signing package supplies its local JWKS provider (no self-RPC). go-tombstone
@@ -57,6 +58,15 @@ go-outbox v0.1.0 publishes timezone changes in the same transaction. Its dispatc
 a dedicated primary pool and operator-configured recipients (two by default), with system
 credentials only. Missing configured peer addresses fail startup. See docs/profile.md.
 
+Register and RefreshTokens use go-idempotency v0.1.0 with encrypted no-user replies.
+Their key/effect transactions use a dedicated primary pool; IP attempts commit in
+the ordinary pool before token checks, even for rejected secrets. Reuse rolls the
+non-cacheable 401 back, then rechecks and commits revocation before returning it.
+auth_replay_owner binds cached secrets to the actual account: replay takes its
+tombstone guard, deletion must purge its keys before removing the association.
+Two distinct confirmed registration tokens for one phone create separate sessions
+without overwriting an existing account (owner decision, FIN-219). See docs/auth.md.
+
 ## Repository map
 
 | What | Where |
@@ -65,6 +75,8 @@ credentials only. Missing configured peer addresses fail startup. See docs/profi
 | Assembly: identity, pools, server; wiring of adapters, usecases and handlers (`wire()`), the access table (`AccessPolicy()`), migration sources | `internal/app/` (`app.go`, `wire.go`) |
 | The whole service in-process for API tests | `internal/app/apitest/` |
 | Access JWT signing, rotation snapshot, local public JWKS | `internal/signing/` |
+| Opaque 256-bit secrets, shared IANA timezone validation | `internal/token/`, `internal/domain/` |
+| Registration, refresh rotation/reuse and logout | `internal/auth/`, `internal/adapter/grpc/auth/`, `internal/adapter/postgres/auth.go` |
 | Current consent-document usecase | `internal/consent/` |
 | Profile settings, consent lifecycle and system status | `internal/profile/`, `internal/adapter/grpc/profile/`, `internal/adapter/postgres/profile.go` |
 | Versioned timezone events and dispatcher assembly | `internal/adapter/outbox/`, `internal/app/outbox.go` |
