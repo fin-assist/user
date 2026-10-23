@@ -570,3 +570,59 @@ func TestStartAPIRejectionKeepsBusyKeyForPhoneScopedDeletion(t *testing.T) {
 		t.Fatal("other phone's no-user replay removed", again, err)
 	}
 }
+
+func TestStartAPIDeletionRetriesBusyPreAccountCacheKey(t *testing.T) {
+	p := &creationProvider{}
+	env := startEnv(t, p)
+	key, phone := authKey(), "+79001234567"
+	initial, err := startCall(t, env, key, phone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The reply has no OwnerID: deletion must discover it through the phone link.
+	seedProfiles(t, env)
+	hold, err := env.App.DB.Primary().Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = hold.Rollback(context.Background()) }()
+	if _, err = hold.Exec(t.Context(), `SELECT 1 FROM idempotency_keys WHERE key=$1 AND owner_id IS NULL FOR UPDATE`, key); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 6*time.Second)
+	defer cancel()
+	profiles := userv1.NewProfileServiceClient(env.Conn)
+	deleted := make(chan error, 1)
+	go func() {
+		_, err := profiles.DeleteAccount(apitest.User(ctx, profileUserA), &userv1.DeleteAccountRequest{})
+		deleted <- err
+	}()
+	replayed := make(chan error, 1)
+	go func() {
+		_, err := userv1.NewAuthServiceClient(env.Conn).StartPhoneVerification(authContext(ctx, key), &userv1.StartPhoneVerificationRequest{Phone: phone})
+		replayed <- err
+	}()
+	eventually(t, func() bool {
+		var waiting bool
+		err := env.App.DB.Primary().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND application_name='user-auth' AND wait_event_type='Lock')`).Scan(&waiting)
+		return err == nil && waiting
+	})
+	theme := userv1.Theme_THEME_DARK
+	if _, err = profiles.UpdateProfile(apitest.User(ctx, profileUserA), &userv1.UpdateProfileRequest{Theme: &theme}); err != nil {
+		t.Fatal("deletion held guard while waiting for no-user Start key", err)
+	}
+	if err = hold.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err = awaitStart(t, deleted); err != nil {
+		t.Fatal(err)
+	}
+	// A replay serialized after deletion may be refused or create a genuinely new
+	// request; it must not resurrect the old cached secret or its verification row.
+	_ = awaitStart(t, replayed)
+	var count int
+	h := token.Sum(initial.GetVerificationToken())
+	if err = env.App.DB.Primary().QueryRow(t.Context(), `SELECT count(*) FROM phone_verification WHERE token_hash=$1`, h[:]).Scan(&count); err != nil || count != 0 {
+		t.Fatal("deleted verification survived", count, err)
+	}
+}
