@@ -86,8 +86,8 @@ func Start(t *testing.T, mutate ...func(*config.Config)) *Env {
 		Auth:     config.AuthConfig{Mode: config.AuthInsecureDev},
 		DB:       config.DBConfig{PrimaryDSN: dsn, MaxConns: 4},
 		GRPC:     config.GRPCConfig{MaxRecvMsgSize: 4 << 20},
-		Peers:    map[string]string{"assistant": "passthrough:///127.0.0.1:1", "bank-statement-data": "passthrough:///127.0.0.1:1"},
-		Outbox:   config.OutboxConfig{TimezoneTargets: []string{"bank-statement-data", "assistant"}, MaxConns: 5, PollInterval: 20 * time.Millisecond},
+		Peers:    map[string]string{"analytics": "passthrough:///127.0.0.1:1", "assistant": "passthrough:///127.0.0.1:1", "bank-statement-data": "passthrough:///127.0.0.1:1"},
+		Outbox:   config.OutboxConfig{DeletionTargets: []string{"bank-statement-data", "analytics", "assistant"}, TimezoneTargets: []string{"bank-statement-data", "assistant"}, MaxConns: 6, PollInterval: 20 * time.Millisecond},
 		Limits:   ratelimit.Defaults(),
 		Sessions: config.SessionsConfig{IdempotencyKeyFile: secretPath, RefreshTTL: 60 * 24 * time.Hour, MaxConns: 4},
 	}

@@ -15,7 +15,7 @@ import (
 )
 
 func TestOutboxAssemblyFailsClosed(t *testing.T) {
-	a := &App{Cfg: config.Config{Outbox: config.OutboxConfig{TimezoneTargets: []string{"assistant", "bank-statement-data"}, MaxConns: 5, PollInterval: time.Second}}}
+	a := &App{Cfg: config.Config{Outbox: config.OutboxConfig{DeletionTargets: []string{"bank-statement-data", "analytics", "assistant"}, TimezoneTargets: []string{"assistant", "bank-statement-data"}, MaxConns: 6, PollInterval: time.Second}}}
 	if _, _, _, err := wireOutbox(t.Context(), a, prometheus.NewRegistry()); err == nil || !strings.Contains(err.Error(), "peer address required") {
 		t.Fatal(err)
 	}
@@ -23,8 +23,8 @@ func TestOutboxAssemblyFailsClosed(t *testing.T) {
 	if _, _, _, err := wireOutbox(t.Context(), a, prometheus.NewRegistry()); err == nil {
 		t.Fatal("insufficient pool")
 	}
-	a.Cfg.Outbox.MaxConns = 5
-	a.Cfg.Peers = map[string]string{"assistant": "passthrough:///peer", "bank-statement-data": "passthrough:///peer"}
+	a.Cfg.Outbox.MaxConns = 6
+	a.Cfg.Peers = map[string]string{"analytics": "passthrough:///peer", "assistant": "passthrough:///peer", "bank-statement-data": "passthrough:///peer"}
 	a.Cfg.DB.PrimaryDSN = ":invalid-dsn"
 	if _, _, _, err := wireOutbox(t.Context(), a, prometheus.NewRegistry()); err == nil {
 		t.Fatal("invalid dedicated pool")
@@ -44,7 +44,7 @@ func TestOutboxConstructionFailureClosesDedicatedPool(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := &App{DB: db, Tokens: client.DevToken("user"), Clients: metrics, Log: slog.New(slog.DiscardHandler), Cfg: config.Config{
-		Service: "constructor-test", DB: config.DBConfig{PrimaryDSN: dsn}, Outbox: config.OutboxConfig{TimezoneTargets: []string{"assistant", "bank-statement-data"}, MaxConns: 5, PollInterval: time.Second}, Peers: map[string]string{"assistant": "passthrough:///127.0.0.1:1", "bank-statement-data": "dns:///%"},
+		Service: "constructor-test", DB: config.DBConfig{PrimaryDSN: dsn}, Outbox: config.OutboxConfig{DeletionTargets: []string{"bank-statement-data", "analytics", "assistant"}, TimezoneTargets: []string{"assistant", "bank-statement-data"}, MaxConns: 6, PollInterval: time.Second}, Peers: map[string]string{"analytics": "passthrough:///127.0.0.1:1", "assistant": "passthrough:///127.0.0.1:1", "bank-statement-data": "dns:///%"},
 	}}
 	if _, _, _, err := wireOutbox(t.Context(), a, reg); err == nil {
 		t.Fatal("invalid second peer accepted")

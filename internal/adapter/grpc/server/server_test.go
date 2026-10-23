@@ -627,3 +627,18 @@ func TestMaskMessage(t *testing.T) {
 		t.Fatal("nil")
 	}
 }
+
+func TestDeletedAdmissionRequiresExactUserRule(t *testing.T) {
+	for _, r := range []Rule{{Callers: []string{"bank-bff"}, Model: ModelNoUser, AllowDeleted: true}, {Callers: []string{"bank-bff"}, Model: ModelMixed, AllowDeleted: true}} {
+		if err := (Policy{"/test.Profile/Delete": r}).validate(grpc.NewServer()); err == nil {
+			t.Fatal("non-user deleted admission accepted")
+		}
+	}
+	r := Rule{Callers: []string{"bank-bff"}, Model: ModelUser, AllowDeleted: true}
+	if err := (Policy{"/test.Profile/*": r}).validate(grpc.NewServer()); err == nil {
+		t.Fatal("wildcard deleted admission accepted")
+	}
+	if err := (Policy{"/test.Profile/Delete": r}).validate(grpc.NewServer()); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -34,7 +34,7 @@ func TestSessionsAssemblyFailuresCloseDedicatedPools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := &App{DB: db, Tokens: client.DevToken("user"), Clients: metrics, Log: slog.New(slog.DiscardHandler), Cfg: config.Config{Service: "assembly-test", DB: config.DBConfig{PrimaryDSN: dsn}, Sessions: config.SessionsConfig{RefreshTTL: time.Hour, MaxConns: 1}, Outbox: config.OutboxConfig{TimezoneTargets: []string{"assistant"}, MaxConns: 4, PollInterval: time.Second}, Peers: map[string]string{"assistant": "passthrough:///127.0.0.1:1"}}}
+	a := &App{DB: db, Tokens: client.DevToken("user"), Clients: metrics, Log: slog.New(slog.DiscardHandler), Cfg: config.Config{Service: "assembly-test", DB: config.DBConfig{PrimaryDSN: dsn}, Sessions: config.SessionsConfig{RefreshTTL: time.Hour, MaxConns: 1}, Outbox: config.OutboxConfig{DeletionTargets: []string{"bank-statement-data", "analytics", "assistant"}, TimezoneTargets: []string{"assistant"}, MaxConns: 6, PollInterval: time.Second}, Peers: map[string]string{"analytics": "passthrough:///127.0.0.1:1", "bank-statement-data": "passthrough:///127.0.0.1:1", "assistant": "passthrough:///127.0.0.1:1"}}}
 	if _, _, err := wire(t.Context(), a, reg); err == nil {
 		t.Fatal("missing key accepted")
 	}

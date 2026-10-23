@@ -8,6 +8,7 @@
 - [docs/config.md](docs/config.md) — переменные окружения.
 - [docs/migrations.md](docs/migrations.md) — миграции и запросы на pgx ([FIN-115](https://finassist.youtrack.cloud/issue/FIN-115)).
 - [docs/schema.md](docs/schema.md) — схема БД `user`: сущности, инварианты, ожидаемые запросы и индексы ([FIN-112](https://finassist.youtrack.cloud/issue/FIN-112)).
+- [docs/deletion.md](docs/deletion.md) — атомарное удаление аккаунта и доставка PurgeUserData.
 - [AGENTS.md](AGENTS.md) — карта и правила для агентов, Code Review Rules.
 
 ## Автоматизация обновлений зависимостей
@@ -34,7 +35,11 @@ Register, RefreshTokens и Logout работают через go-idempotency v0.
 сессии; настройки и согласия уже созданного аккаунта сохраняются. Детали —
 [docs/auth.md](docs/auth.md).
 
-Реализованы 10 из 13 RPC. StartPhoneVerification, WatchPhoneVerification и DeleteAccount
+DeleteAccount синхронно удаляет локальные данные, отзывает сессии и сохраняет tombstone
+вместе с заданием PurgeUserData для bank-statement-data, analytics и assistant. Повтор
+успешен без нового задания. Детали — [docs/deletion.md](docs/deletion.md).
+
+Реализованы 11 из 13 RPC. StartPhoneVerification и WatchPhoneVerification
 ещё возвращают UNIMPLEMENTED. Реальных и автоматически подтверждающих провайдеров
 нет (FIN-139/FIN-122); runtime не создаёт подтверждённых заявок и не имеет ручки
 обхода звонка. В API-тестах используются явно тестовые подтверждённые заявки.
@@ -61,7 +66,8 @@ internal/app/apitest/              the whole service in-process for API tests
 internal/signing/                  access JWT signing and public JWKS loaded from trusted files
 internal/consent/                  current consent-document usecase
 internal/profile/                  profile settings and assistant-consent usecases
-internal/adapter/outbox/            versioned timezone event encoding
+internal/deletion/                 atomic account deletion and remote purge scheduling
+internal/adapter/outbox/            timezone and deletion event encoding
 internal/ratelimit/                authentication limit policies and commit-aware metrics
 internal/domain/                   entities and invariants, no infrastructure imports
 internal/<feature>/                usecases; interfaces of repositories and clients they need
@@ -101,7 +107,10 @@ make run
 
 Настройки stage/prod и ротация ключей — [docs/config.md](docs/config.md).
 Миграции go-tombstone и go-outbox применяются до запуска новой сборки.
-Для каждого OUTBOX_TIMEZONE_TARGETS обязателен PEER_<NAME>_ADDR. Примеры compose/make run
+Для каждого получателя OUTBOX_TIMEZONE_TARGETS и OUTBOX_DELETION_TARGETS обязателен
+PEER_<NAME>_ADDR, в том числе новый обязательный PEER_ANALYTICS_ADDR. Удаление всегда
+включает bank-statement-data, analytics и assistant. Пул outbox — не меньше числа
+уникальных соседей + 3 (по умолчанию минимум 6, настройка 8). Примеры compose/make run
 задают адреса соседей, но сами соседние сервисы не поднимают: до их готовности события
 остаются в outbox и повторяются. Конкретные адреса стенда задаются в его окружении.
 

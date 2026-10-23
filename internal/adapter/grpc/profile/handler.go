@@ -21,14 +21,20 @@ type Usecases interface {
 	Revoke(context.Context, string) error
 }
 
-type handler struct {
-	userv1.UnimplementedProfileServiceServer
-	service Usecases
+// Deletions is separate from profile settings and consents.
+type Deletions interface {
+	Delete(context.Context, string) error
 }
 
-// Register installs profile RPCs; account deletion arrives in its own FIN-219 stage.
-func Register(s grpc.ServiceRegistrar, service Usecases) {
-	userv1.RegisterProfileServiceServer(s, &handler{service: service})
+type handler struct {
+	userv1.UnimplementedProfileServiceServer
+	service   Usecases
+	deletions Deletions
+}
+
+// Register installs profile RPCs and the atomic account-deletion usecase.
+func Register(s grpc.ServiceRegistrar, service Usecases, deletions Deletions) {
+	userv1.RegisterProfileServiceServer(s, &handler{service: service, deletions: deletions})
 }
 
 func (h *handler) GetProfile(ctx context.Context, _ *userv1.GetProfileRequest) (*userv1.GetProfileResponse, error) {
@@ -78,6 +84,17 @@ func (h *handler) RevokeAssistantConsent(ctx context.Context, _ *userv1.RevokeAs
 		return nil, err
 	}
 	return &userv1.RevokeAssistantConsentResponse{}, nil
+}
+
+func (h *handler) DeleteAccount(ctx context.Context, _ *userv1.DeleteAccountRequest) (*userv1.DeleteAccountResponse, error) {
+	id, ok := reqctx.UserID(ctx)
+	if !ok {
+		return nil, finerr.InvalidToken()
+	}
+	if err := h.deletions.Delete(ctx, id); err != nil {
+		return nil, err
+	}
+	return &userv1.DeleteAccountResponse{}, nil
 }
 
 // Message maps a validated profile snapshot to its generated API representation.

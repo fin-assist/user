@@ -47,6 +47,9 @@ const AnyCaller = "*"
 type Rule struct {
 	Callers []string // ServiceAccount names (bank-bff, user, ...), or AnyCaller
 	Model   Model
+	// AllowDeleted admits authenticated retries of account deletion only.
+	// It must be an exact user-method rule, never a service wildcard.
+	AllowDeleted bool
 }
 
 // Policy is the table «method → allowed callers → model» of grpc-api.md 3.3. A key is a
@@ -89,6 +92,9 @@ func (p Policy) validate(srv *grpc.Server) error {
 		}
 		if len(r.Callers) == 0 {
 			return fmt.Errorf("access policy: %s has no callers", key)
+		}
+		if r.AllowDeleted && (r.Model != ModelUser || strings.HasSuffix(key, "/*")) {
+			return fmt.Errorf("access policy: %s cannot admit deleted users", key)
 		}
 		if r.Model < ModelUser || r.Model > ModelNoUser {
 			return fmt.Errorf("access policy: %s has no model", key)

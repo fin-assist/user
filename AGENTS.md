@@ -40,8 +40,8 @@ updates them in the same PR. A service made from the template rewrites the first
 ## Current implementation (FIN-219)
 
 Functional RPCs: GetConsentDocument, GetSigningKeys, GetAssistantConsentStatus, GetProfile,
-UpdateProfile, GrantAssistantConsent, RevokeAssistantConsent, Register, RefreshTokens
-and Logout. StartPhoneVerification, WatchPhoneVerification and DeleteAccount
+UpdateProfile, GrantAssistantConsent, RevokeAssistantConsent, Register, RefreshTokens,
+Logout and DeleteAccount. StartPhoneVerification and WatchPhoneVerification
 are later FIN-219 stages (still UNIMPLEMENTED). Do not describe
 this as a complete sign-in service. go-identity v0.1.0 supplies only the verifiers
 and token sources: keep the existing server ACL and reqctx chain, without a second identity
@@ -55,8 +55,9 @@ Profile writes take the tombstone guard and the user row lock in one primary tra
 Assistant consent is effective only for the current document version; Status is primary-only,
 assistant-only SYSTEM per grpc-api.md 3.3, despite the mixed-model comment in the proto.
 go-outbox v0.1.0 publishes timezone changes in the same transaction. Its dispatcher uses
-a dedicated primary pool and operator-configured recipients (two by default), with system
-credentials only. Missing configured peer addresses fail startup. See docs/profile.md.
+a dedicated primary pool and operator-configured recipients, with system credentials only.
+Timezone defaults to bank-statement-data and assistant; deletion requires bank-statement-data,
+analytics and assistant. Pool capacity is at least the union of recipients + 3. Missing configured peer addresses fail startup. See docs/profile.md.
 
 Register and RefreshTokens use go-idempotency v0.2.0 with encrypted no-user replies and result ownership (FIN-226).
 Their key/effect transactions use a dedicated primary pool; IP attempts commit in
@@ -66,6 +67,13 @@ Response.OwnerID binds cached secrets to the actual account in idempotency_keys:
 replay requires an owner and takes its tombstone guard; deletion purges scope OR owner_id.
 Two distinct confirmed registration tokens for one phone create separate sessions
 without overwriting an existing account (owner decision, FIN-219). See docs/auth.md.
+
+DeleteAccount uses the exact ModelUser AllowDeleted rule so a verified old access token
+can repeat deletion; other calls still reject tombstoned identities. Purge atomically removes
+local data, owned/scoped cached credentials, every request of the phone and old timezone
+jobs, then schedules user.deleted. Repeats add no jobs. Cached-key locks use NOWAIT:
+a busy replay rolls back the whole deletion before retrying, bounded by the caller and
+10 seconds. Never wait for an auth key while retaining the tombstone guard. See docs/deletion.md.
 
 ## Repository map
 
@@ -79,7 +87,8 @@ without overwriting an existing account (owner decision, FIN-219). See docs/auth
 | Registration, refresh rotation/reuse and logout | `internal/auth/`, `internal/adapter/grpc/auth/`, `internal/adapter/postgres/auth.go` |
 | Current consent-document usecase | `internal/consent/` |
 | Profile settings, consent lifecycle and system status | `internal/profile/`, `internal/adapter/grpc/profile/`, `internal/adapter/postgres/profile.go` |
-| Versioned timezone events and dispatcher assembly | `internal/adapter/outbox/`, `internal/app/outbox.go` |
+| Atomic deletion and local data purge | `internal/deletion/`, `internal/adapter/postgres/deletion.go` |
+| Timezone/deletion events and dispatcher assembly | `internal/adapter/outbox/`, `internal/app/outbox.go` |
 | Entities and invariants (no pgx, gRPC or generated code) | `internal/domain/` |
 | Usecases and the interfaces of repositories and clients they need | `internal/<feature>/` |
 | gRPC server, interceptors, access table types, identity and tombstone interfaces | `internal/adapter/grpc/server/`; rules — `docs/server.md` |

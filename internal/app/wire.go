@@ -17,6 +17,7 @@ import (
 	"github.com/fin-assist/user/internal/adapter/postgres"
 	"github.com/fin-assist/user/internal/adapter/postgres/migrate"
 	"github.com/fin-assist/user/internal/consent"
+	"github.com/fin-assist/user/internal/deletion"
 	"github.com/fin-assist/user/internal/profile"
 	"github.com/fin-assist/user/internal/worker"
 	"github.com/fin-assist/user/migrations"
@@ -26,6 +27,7 @@ import (
 func AccessPolicy() server.Policy {
 	return server.Policy{
 		"/finassist.user.v1.AuthService/*":                                  {Callers: []string{"bank-bff"}, Model: server.ModelNoUser},
+		userv1.ProfileService_DeleteAccount_FullMethodName:                  {Callers: []string{"bank-bff"}, Model: server.ModelUser, AllowDeleted: true},
 		"/finassist.user.v1.ProfileService/*":                               {Callers: []string{"bank-bff"}, Model: server.ModelUser},
 		userv1.ConsentDocumentService_GetConsentDocument_FullMethodName:     {Callers: []string{"bank-bff"}, Model: server.ModelNoUser},
 		userv1.UserInternalService_GetSigningKeys_FullMethodName:            {Callers: []string{server.AnyCaller}, Model: server.ModelNoUser},
@@ -47,7 +49,7 @@ func MigrationSources() []migrate.Source {
 	}
 }
 
-// wire registers document, signing, profile and consent RPCs plus durable timezone delivery.
+// wire registers user RPCs and durable timezone/deletion delivery.
 func wire(ctx context.Context, a *App, reg prometheus.Registerer) (jobs []worker.Job, closeAll func(), err error) {
 	events, dispatch, closeOutbox, err := wireOutbox(ctx, a, reg)
 	if err != nil {
@@ -59,7 +61,8 @@ func wire(ctx context.Context, a *App, reg prometheus.Registerer) (jobs []worker
 		return nil, nil, err
 	}
 	profiles := profile.New(a.DB, postgres.NewProfiles(a.DB), a.Tombstones, events, time.Now)
-	profilegrpc.Register(a.GRPC.GRPC(), profiles)
+	deletions := deletion.New(a.DB, a.Tombstones, postgres.NewAccounts(a.DB), events)
+	profilegrpc.Register(a.GRPC.GRPC(), profiles, deletions)
 	documents := consent.New(postgres.NewConsentDocuments(a.DB))
 	consentgrpc.Register(a.GRPC.GRPC(), documents, a.Users, a.Tombstones)
 	signinggrpc.Register(a.GRPC.GRPC(), a.Signing, profiles)
