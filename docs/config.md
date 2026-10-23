@@ -37,6 +37,20 @@
 | `DB_PRIMARY_DSN` / `_FILE` | — (обязательна) | DSN primary (`-rw`) |
 | `DB_REPLICA_DSN` / `_FILE` | — | DSN реплик (`-ro`); пусто — чтение тоже с primary. На стенде оба указывают на один PostgreSQL |
 | `DB_MAX_CONNS` | `10` | размер каждого пула |
+| `LIMIT_VERIFICATION_PHONE_SHORT` | `3` | StartPhoneVerification: предел короткого окна на телефон |
+| `WINDOW_VERIFICATION_PHONE_SHORT` | `1h` | StartPhoneVerification: короткое UTC-окно на телефон |
+| `LIMIT_VERIFICATION_PHONE_LONG` | `10` | StartPhoneVerification: предел длинного окна на телефон |
+| `WINDOW_VERIFICATION_PHONE_LONG` | `24h` | StartPhoneVerification: длинное UTC-окно на телефон |
+| `LIMIT_VERIFICATION_IP_SHORT` | `30` | StartPhoneVerification: предел короткого окна на IP |
+| `WINDOW_VERIFICATION_IP_SHORT` | `1m` | StartPhoneVerification: короткое UTC-окно на IP |
+| `LIMIT_VERIFICATION_IP_LONG` | `300` | StartPhoneVerification: предел длинного окна на IP |
+| `WINDOW_VERIFICATION_IP_LONG` | `1h` | StartPhoneVerification: длинное UTC-окно на IP |
+| `LIMIT_WATCH_IP` | `60` | WatchPhoneVerification: предел попыток открыть поток на IP, до проверки токена |
+| `WINDOW_WATCH_IP` | `1m` | WatchPhoneVerification: UTC-окно попыток открыть поток |
+| `LIMIT_REGISTER_IP` | `30` | Register: предел запросов на IP, после идемпотентности, до проверки токена |
+| `WINDOW_REGISTER_IP` | `1m` | Register: UTC-окно запросов на IP |
+| `LIMIT_REFRESH_IP` | `120` | RefreshTokens: предел запросов на IP, после идемпотентности, до проверки токена |
+| `WINDOW_REFRESH_IP` | `1m` | RefreshTokens: UTC-окно запросов на IP |
 | `GRPC_ADDR` | `:9090` | gRPC |
 | `GRPC_MAX_RECV_MSG_SIZE` | `4194304` | байт; 16 МиБ там, где обслуживается `SearchOperations` (grpc-api.md 9) |
 | `HTTP_ADDR` | `:9091` | `/metrics`, `/healthz`, `/readyz` |

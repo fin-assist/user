@@ -1,6 +1,9 @@
 package app
 
 import (
+	"context"
+	"time"
+
 	userv1 "github.com/fin-assist/contracts/gen/go/finassist/user/v1"
 	tombstone "github.com/fin-assist/go-tombstone"
 
@@ -40,5 +43,12 @@ func wire(a *App) (jobs []worker.Job, closeAll func(), err error) {
 	documents := consent.New(postgres.NewConsentDocuments(a.DB))
 	consentgrpc.Register(a.GRPC.GRPC(), documents, a.Users, a.Tombstones)
 	signinggrpc.Register(a.GRPC.GRPC(), a.Signing)
-	return nil, func() {}, nil
+	limits := postgres.NewLimits(a.DB)
+	cleanup := worker.Every("rate-limit-cleanup", time.Minute, a.Log, func(ctx context.Context) error {
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		_, err := limits.Cleanup(ctx, time.Now().Add(-time.Hour), 1000)
+		return err
+	})
+	return []worker.Job{cleanup}, func() {}, nil
 }

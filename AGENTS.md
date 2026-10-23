@@ -70,6 +70,7 @@ create an ignored .local key through `cmd/dev-key` (not shipped in the service i
 | Background jobs | `internal/worker/` |
 | Configuration: every variable with its default and description | `internal/config/vars.go` (`Vars`); generated tables — `docs/config.md` |
 | Request-scoped values (request ID, caller, user, bank-bff hints) | `internal/reqctx/` |
+| Authentication limits, fixed windows and commit-aware metrics; integration rules | `internal/ratelimit/`, `internal/adapter/postgres/limits.go`, `docs/limits.md` |
 | Logger, metrics endpoint, readiness | `internal/logx/`, `internal/ops/` |
 | Image, local run, stand | `Dockerfile`, `compose.yaml`, `Makefile`, `deploy/systemd/` |
 | CI, lint | `.github/workflows/ci.yml`, `.golangci.yml`, `.squawk.toml` |

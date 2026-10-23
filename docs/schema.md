@@ -132,14 +132,25 @@
 
 ### `rate_limit_window` — лимиты (FIN-81, 1.1–1.4)
 
-Счётчики фиксированных окон: `(scope, subject, window_start)` — PK, `window_end`, `hits`. `scope` — лимит и длина окна (`verification_phone_1h`, `verification_ip_1d`, `verification_global_1h`, `watch_ip_1m`, `register_ip_1m`, `refresh_ip_1m`), `subject` — номер, `x-client-ip` или `''` для глобального потолка. Одна попытка — один оператор:
+Счётчики фиксированных окон: `(scope, subject, window_start)` — PK, `window_end`, `hits`.
+В реализации FIN-219 `scope` — имя политики и длина окна в секундах (`watch_ip:60`),
+`subject` — телефон или доверенный `x-client-ip`. Глобальный потолок с `subject = ''`
+остаётся FIN-81. Схема не меняется. Для нескольких окон сначала блокируются все строки
+в стабильном порядке scope, без увеличения hits:
 
 ```sql
 INSERT INTO rate_limit_window (scope, subject, window_start, window_end, hits)
-VALUES ($1, $2, $3, $4, 1)
-ON CONFLICT (scope, subject, window_start) DO UPDATE SET hits = rate_limit_window.hits + 1
+VALUES ($1, $2, $3, $4, 0)
+ON CONFLICT (scope, subject, window_start) DO UPDATE SET hits = rate_limit_window.hits
 RETURNING hits;
 ```
+
+Если хотя бы один счётчик достиг предела, ни один не увеличивается. Иначе все hits
+увеличиваются на 1 в той же primary-транзакции. Это предотвращает частичное списание
+при исчерпанном другом окне и сериализует гонку на отсутствующей строке. Ошибка или
+откат последующего эффекта откатывает все счётчики. Подробности и момент учёта метрик —
+[limits.md](limits.md); `TestLimitsMultipleWindowsAndReset`,
+`TestLimitsConcurrentAttemptsCanonicalIPAndScopes`, `TestLimitsRollbackDurationChangeAndFailures`.
 
 - Только primary («PostgreSQL»: всё, что проверяет «уже было»). Значения лимитов и окна — конфигурация сервиса, не схема.
 - «Попытку списывает выполнение, а не воспроизведение» и «429 по лимиту попытку не списывает» (api.md 1.1) — порядок шагов в коде: проверить остаток, затем инкремент в транзакции эффекта (или отдельно для 429 дубля).

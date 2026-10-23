@@ -89,6 +89,14 @@ key_unavailable/forbidden/user_id. ACL выполняет сервер, поэт
 
 - **Логи** — `slog`, JSON (text в dev), в каждой строке `service`, `request_id`, `caller`, `user_id` из контекста (методы `*Context`). Строка на вызов: `method`, `code`, `reason`, `duration_ms`, `error` (исходная ошибка обработчика — только здесь, клиенту не уходит). На `debug` — metadata и запрос: `authorization`, `x-service-authorization`, `idempotency-key`, ключи и поля с `token` в имени маскируются, поля `bytes` (файл выписки, ключ) очищаются независимо от имени.
 - **Метрики** (`/metrics` на `HTTP_ADDR`): `grpc_server_handled_total{method,code,reason}`, `grpc_server_handling_seconds{method}`, `finassist_grpc_denied_total{method,caller,cause}`, `grpc_client_handled_total{peer,method,code}`, `grpc_client_handling_seconds{peer,method}`, метрики Go и процесса. **Без `user_id` и других неограниченных значений в метках.**
+
+Лимиты FIN-219: `finassist_rate_limit_configured_limit{scope}`,
+`finassist_rate_limit_window_seconds{scope}`, `finassist_rate_limit_checks_total{scope,result}`,
+`finassist_rate_limit_consumed_total{scope}`, `finassist_rate_limit_window_utilization_ratio{scope}`
+(histogram). Семь фиксированных scope, result — allowed/denied/error. Настройки публикуются
+сразу; списания и заполнение — только после коммита через Receipt.Committed. Смысл
+показателей, границы применения и выражения алертов — [limits.md](limits.md).
+
 - **Проверки**: `/healthz` — процесс жив, `/readyz` — БД отвечает; то же в gRPC health. Работает и под systemd без проб Kubernetes.
 
 ## Фоновые задания

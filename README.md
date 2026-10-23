@@ -27,6 +27,12 @@ GetAssistantConsentStatus. Реальных и автоматически под
 (FIN-139/FIN-122); текущая сборка не выполняет вход и не подтверждает номера.
 Go-idempotency и go-outbox подключаются вместе с использующими их сценариями.
 
+Подготовлен общий механизм лимитов аутентификации (`internal/ratelimit`): фиксированные
+UTC-окна в primary PostgreSQL, атомарная проверка нескольких окон, настройки и метрики.
+При старте публикуются настройки семи политик; фоновая очистка удаляет старые окна.
+Подключение проверок к AuthService приходит вместе с реализацией его RPC: текущая
+сборка ещё не обслуживает вход. Правила интеграции и наблюдаемость — [docs/limits.md](docs/limits.md).
+
 Документы согласий публикуются миграциями данных в consent_document: новая строка с
 версией, утверждённым названием и URL; прежний is_current снимается перед включением
 нового в одной транзакции. В этом этапе нет выдуманных юридических текстов или ссылок;
@@ -41,6 +47,7 @@ internal/app/                      assembly: identity, pools, server, wire() (ha
 internal/app/apitest/              the whole service in-process for API tests
 internal/signing/                  access JWT signing and public JWKS loaded from trusted files
 internal/consent/                  current consent-document usecase
+internal/ratelimit/                authentication limit policies and commit-aware metrics
 internal/domain/                   entities and invariants, no infrastructure imports
 internal/<feature>/                usecases; interfaces of repositories and clients they need
 internal/adapter/grpc/server/      gRPC server, interceptors, access table types, identity interfaces
