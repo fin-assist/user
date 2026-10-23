@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -155,6 +156,101 @@ func TestLimitsConcurrentAttemptsCanonicalIPAndScopes(t *testing.T) {
 		if d, err := takeLimit(t.Context(), db, l, tt.op, "", tt.ip); err != nil || !d.Allowed {
 			t.Fatalf("independent scope/subject: %+v %v", d, err)
 		}
+	}
+}
+
+func TestLimitsConcurrentStartOverlappingWindows(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		phone, ip   func(int) string
+		wantAllowed int
+	}{
+		{"same_phone_different_ips", func(int) string { return "+79001234567" }, func(i int) string { return fmt.Sprintf("192.0.2.%d", i+1) }, 3},
+		{"different_phones_same_ip", func(i int) string { return fmt.Sprintf("+7900%07d", i) }, func(int) string { return "192.0.2.1" }, 5},
+		{"crossing_phones_and_ips", func(i int) string { return fmt.Sprintf("+7900%07d", i%4) }, func(i int) string { return fmt.Sprintf("192.0.2.%d", (i/4)%4+1) }, 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			db := limitsDB(t)
+			rules := ratelimit.Defaults()
+			rules[ratelimit.VerificationIPShort] = ratelimit.Rule{Limit: 5, Window: time.Minute}
+			rules[ratelimit.VerificationIPLong] = ratelimit.Rule{Limit: 8, Window: time.Hour}
+			now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
+			l, err := ratelimit.New(rules, NewLimits(db), func() time.Time { return now }, prometheus.NewRegistry())
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			var wg sync.WaitGroup
+			start := make(chan struct{})
+			var mu sync.Mutex
+			phones, ips := map[string]int{}, map[string]int{}
+			allowed := 0
+			for i := 0; i < 40; i++ {
+				wg.Go(func() {
+					<-start
+					phone, ip := tt.phone(i), tt.ip(i)
+					d, err := takeLimit(ctx, db, l, ratelimit.Start, phone, ip)
+					if err != nil {
+						t.Errorf("concurrent Start: %v", err)
+						return
+					}
+					if d.Allowed {
+						mu.Lock()
+						allowed++
+						phones[phone]++
+						ips[ip]++
+						mu.Unlock()
+					}
+				})
+			}
+			close(start)
+			wg.Wait()
+			if allowed == 0 || tt.wantAllowed > 0 && allowed != tt.wantAllowed {
+				t.Fatalf("allowed: %d, expected %d", allowed, tt.wantAllowed)
+			}
+			rows, err := db.Primary().Query(ctx, `SELECT scope,subject,hits FROM rate_limit_window`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rows.Close()
+			totals := map[string]int{}
+			for rows.Next() {
+				var scope, subject string
+				var hits int
+				if err := rows.Scan(&scope, &subject, &hits); err != nil {
+					t.Fatal(err)
+				}
+				var expected, limit int
+				switch scope {
+				case "verification_phone_short:3600":
+					expected, limit = phones[subject], 3
+				case "verification_phone_long:86400":
+					expected, limit = phones[subject], 10
+				case "verification_ip_short:60":
+					expected, limit = ips[subject], 5
+				case "verification_ip_long:3600":
+					expected, limit = ips[subject], 8
+				default:
+					t.Fatalf("unexpected scope %s", scope)
+				}
+				if hits != expected || hits > limit {
+					t.Fatalf("partial/extra consumption: %s hits=%d accepted=%d limit=%d", scope, hits, expected, limit)
+				}
+				totals[scope] += hits
+			}
+			if err := rows.Err(); err != nil {
+				t.Fatal(err)
+			}
+			if len(totals) != 4 {
+				t.Fatalf("missing windows: %v", totals)
+			}
+			for scope, total := range totals {
+				if total != allowed {
+					t.Fatalf("%s total=%d allowed=%d", scope, total, allowed)
+				}
+			}
+		})
 	}
 }
 
