@@ -19,6 +19,15 @@ func TestAuthRepositoryPrimaryLocksAndConstraintTranslation(t *testing.T) {
 	repo := NewAuth(db)
 	ctx := t.Context()
 	now := time.Now().UTC()
+	if version, err := repo.CurrentPD(ctx); err != nil || version != "" {
+		t.Fatal("unpublished document", version, err)
+	}
+	if err := db.Run(ctx, func(ctx context.Context) error { _, err := repo.LockLink(ctx, token.Sum("missing"), now); return err }); !errors.Is(err, auth.ErrMissing) {
+		t.Fatal("missing session", err)
+	}
+	if err := db.Run(ctx, func(ctx context.Context) error { return repo.CloseVerification(ctx, 999, profileID, now) }); !errors.Is(err, auth.ErrMissing) {
+		t.Fatal("missing verification", err)
+	}
 	if _, err := db.Primary().Exec(ctx, `INSERT INTO consent_document(type,version,title,url,is_current) VALUES('personal_data','v1','Test only','https://example.test/pd',true)`); err != nil {
 		t.Fatal(err)
 	}
@@ -73,6 +82,43 @@ func TestAuthRepositoryPrimaryLocksAndConstraintTranslation(t *testing.T) {
 	}
 	if !errors.Is(authError(context.Canceled), context.Canceled) {
 		t.Fatal("context lost")
+	}
+}
+
+func TestAuthRepositoryStorageFailurePreservesAtomicity(t *testing.T) {
+	db, _, _ := profileDB(t)
+	repo := NewAuth(db)
+	now := time.Now().UTC()
+	ctx := t.Context()
+	// A cancelled statement is a real pgx failure, not a mock of the driver.
+	for _, call := range []func(context.Context) error{
+		func(ctx context.Context) error {
+			_, _, err := repo.CreateUser(ctx, "+79000000009", "UTC", now)
+			return err
+		},
+		func(ctx context.Context) error {
+			return repo.Rotate(ctx, token.Sum("old"), token.Sum("next"), auth.Link{}, now, now.Add(time.Hour))
+		},
+		func(ctx context.Context) error { return repo.CloseVerification(ctx, 999, profileID, now) },
+		func(ctx context.Context) error { _, err := repo.CleanupSessions(ctx, now, 1000); return err },
+	} {
+		err := db.Run(ctx, func(ctx context.Context) error {
+			cancelled, cancel := context.WithCancel(ctx)
+			cancel()
+			return call(cancelled)
+		})
+		if !errors.Is(err, context.Canceled) {
+			t.Fatal("storage cancellation lost", err)
+		}
+	}
+	if err := db.Run(ctx, func(ctx context.Context) error {
+		return repo.Rotate(ctx, token.Sum("missing"), token.Sum("new"), auth.Link{}, now, now.Add(time.Hour))
+	}); !errors.Is(err, auth.ErrMissing) {
+		t.Fatal("missing live link", err)
+	}
+	var n int
+	if err := db.Primary().QueryRow(ctx, `SELECT count(*) FROM app_user`).Scan(&n); err != nil || n != 2 {
+		t.Fatal("partial user", n, err)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -18,6 +19,9 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/fin-assist/user/internal/app"
 	"github.com/fin-assist/user/internal/app/apitest"
 	"github.com/fin-assist/user/internal/config"
 	"github.com/fin-assist/user/internal/ratelimit"
@@ -161,6 +165,204 @@ func TestAuthAPIRegisterErrorsDoNotConsumeTheResult(t *testing.T) {
 	}
 	if _, err := c.Register(authContext(t.Context(), authKey()), registrationRequest("valid")); err != nil {
 		t.Fatal("error consumed token", err)
+	}
+}
+
+func TestAuthAPIConcurrentRegisterSameKeyIsOneEffect(t *testing.T) {
+	env := apitest.Start(t)
+	seedDocuments(t, env)
+	seedRegistration(t, env, "reg", "+79001234567", time.Now().UTC().Add(-6*time.Minute))
+	c := userv1.NewAuthServiceClient(env.Conn)
+	key := authKey()
+	start := make(chan struct{})
+	results := make(chan *userv1.RegisterResponse, 2)
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() {
+			<-start
+			r, err := c.Register(authContext(t.Context(), key), registrationRequest("reg"))
+			results <- r
+			errs <- err
+		}()
+	}
+	close(start)
+	a, b := <-results, <-results
+	if err := <-errs; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-errs; err != nil {
+		t.Fatal(err)
+	}
+	if !proto.Equal(a, b) {
+		t.Fatal("different cached registration results")
+	}
+	var sessions, hits int
+	if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM auth_session),(SELECT hits FROM rate_limit_window WHERE scope='register_ip:60')`).Scan(&sessions, &hits); err != nil || sessions != 1 || hits != 1 {
+		t.Fatal("double registration effect", sessions, hits, err)
+	}
+}
+
+func TestAuthAPICleanupDrainsBatchesAndKeepsLiveState(t *testing.T) {
+	env := apitest.Start(t)
+	seedDocuments(t, env)
+	registered, _ := registerAPI(t, env, "reg", "+79001234567")
+	if _, err := env.App.DB.Primary().Exec(t.Context(), `INSERT INTO idempotency_keys(scope,endpoint,key,request_hash,expires_at) SELECT '00000000-0000-0000-0000-000000000000',$1,md5(n::text)::uuid,$2,$3 FROM generate_series(1,1001) n`, userv1.AuthService_RefreshTokens_FullMethodName, make([]byte, 32), time.Now().Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.App.DB.Primary().Exec(t.Context(), `INSERT INTO auth_replay_owner(endpoint,key,user_id) SELECT endpoint,key,$1 FROM idempotency_keys WHERE endpoint=$2`, registered.GetUserId(), userv1.AuthService_RefreshTokens_FullMethodName); err != nil {
+		t.Fatal(err)
+	}
+	var run func(context.Context) error
+	for _, job := range env.App.Jobs {
+		if job.Name == "auth-cleanup" {
+			run = job.Run
+		}
+	}
+	if run == nil {
+		t.Fatal("cleanup missing")
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- run(ctx) }()
+	eventually(t, func() bool {
+		var keys, owners int
+		err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM idempotency_keys),(SELECT count(*) FROM auth_replay_owner)`).Scan(&keys, &owners)
+		return err == nil && keys == 1 && owners == 1
+	})
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("cleanup did not stop")
+	}
+	if _, err := userv1.NewAuthServiceClient(env.Conn).RefreshTokens(authContext(t.Context(), authKey()), &userv1.RefreshTokensRequest{RefreshToken: registered.GetTokens().GetRefreshToken()}); err != nil {
+		t.Fatal("cleanup removed live session", err)
+	}
+}
+
+func TestAuthAPIRequestInProgressDoesNotConsumeSecondAttempt(t *testing.T) {
+	for _, method := range []string{"register", "refresh"} {
+		t.Run(method, func(t *testing.T) {
+			env := apitest.Start(t)
+			seedDocuments(t, env)
+			registered, _ := registerAPI(t, env, "initial", "+79001234567")
+			c := userv1.NewAuthServiceClient(env.Conn)
+			blocker, err := env.App.DB.Primary().Begin(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = blocker.Rollback(context.Background()) }()
+			var call func(context.Context) error
+			scope := "refresh_ip:60"
+			expected := 1
+			query := `SELECT id FROM auth_session FOR UPDATE`
+			if method == "register" {
+				seedRegistration(t, env, "next", "+79001234567", time.Now().UTC().Add(-6*time.Minute))
+				scope = "register_ip:60"
+				expected = 2
+				query = `SELECT id FROM app_user FOR UPDATE`
+				call = func(ctx context.Context) error { _, err := c.Register(ctx, registrationRequest("next")); return err }
+			} else {
+				call = func(ctx context.Context) error {
+					_, err := c.RefreshTokens(ctx, &userv1.RefreshTokensRequest{RefreshToken: registered.GetTokens().GetRefreshToken()})
+					return err
+				}
+			}
+			if _, err := blocker.Exec(t.Context(), query); err != nil {
+				t.Fatal(err)
+			}
+			key := authKey()
+			done := make(chan error, 1)
+			go func() { done <- call(authContext(t.Context(), key)) }()
+			eventually(t, func() bool {
+				var hits int
+				err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT hits FROM rate_limit_window WHERE scope=$1`, scope).Scan(&hits)
+				return err == nil && hits == expected
+			})
+			if err := call(authContext(t.Context(), key)); apitest.Reason(err) != "REQUEST_IN_PROGRESS" {
+				t.Fatal("busy key", err)
+			}
+			if err := blocker.Commit(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			if err := call(authContext(t.Context(), key)); err != nil {
+				t.Fatal("completed key not replayed", err)
+			}
+			var hits int
+			if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT hits FROM rate_limit_window WHERE scope=$1`, scope).Scan(&hits); err != nil || hits != expected {
+				t.Fatal("busy/replay consumed attempts", hits, err)
+			}
+		})
+	}
+}
+
+type authFailureLog struct{ errors chan string }
+
+func (h authFailureLog) Enabled(context.Context, slog.Level) bool { return true }
+func (h authFailureLog) Handle(_ context.Context, r slog.Record) error {
+	if r.Level >= slog.LevelError {
+		select {
+		case h.errors <- r.Message:
+		default:
+		}
+	}
+	return nil
+}
+func (h authFailureLog) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h authFailureLog) WithGroup(string) slog.Handler      { return h }
+
+func TestAuthAPICleanupFailureLogsAndStops(t *testing.T) {
+	for _, table := range []string{"idempotency_keys", "auth_replay_owner", "refresh_token"} {
+		t.Run(table, func(t *testing.T) {
+			env := apitest.Start(t)
+			log := authFailureLog{errors: make(chan string, 1)}
+			a, err := app.New(t.Context(), env.App.Cfg, slog.New(log), prometheus.NewRegistry())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer a.Close()
+			// Table is from this test's fixed list, never from request input.
+			if _, err := env.App.DB.Primary().Exec(t.Context(), `DROP TABLE `+table); err != nil {
+				t.Fatal(err)
+			}
+			var run func(context.Context) error
+			for _, job := range a.Jobs {
+				if job.Name == "auth-cleanup" {
+					run = job.Run
+				}
+			}
+			if run == nil {
+				t.Fatal("cleanup absent")
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { done <- run(ctx) }()
+			select {
+			case msg := <-log.errors:
+				if msg != "job iteration failed" {
+					t.Fatal(msg)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("cleanup failure not logged")
+			}
+			cancel()
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("failed cleanup did not stop")
+			}
+		})
 	}
 }
 
