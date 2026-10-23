@@ -14,7 +14,7 @@
 - **Время бизнес-правил пишет сервис** из внедрённых часов (`AGENTS.md`, Time): `expires_at`, `verified_at`, `released_at`, `rotated_at`, `revoked_at`, `granted_at`, `updated_at`. `now()` по умолчанию — только у технических `created_at` и у начального `updated_at`.
 - **ID** («Идентификаторы»): `app_user.id` выходит за пределы БД — `uuid` UUIDv7 (`uuidv7()` PostgreSQL 18). Остальные ID внутренние — `integer GENERATED ALWAYS AS IDENTITY`: ширина по числу вставок за жизнь таблицы. Самая быстрорастущая — `phone_verification` (заявка на каждый вход): 2,1 млрд заявок — это порядка 600 млн ₽ звонков по тарифу Zvonok, раньше упрёмся в бюджет FIN-81. Сессии — по одной на вход, согласия — единицы на пользователя. `settings_version`, `generation`, `hits` — тоже `integer`. Правило squawk `prefer-bigint-over-int` выключено в `.squawk.toml` с этим обоснованием (ревью PR #2).
 - **Тексты-коды** (`theme`, тип согласия, `provider`) — `text`, а не `enum` PostgreSQL: допустимые значения знает код (и контракт), новое значение не требует миграции, а значение `enum` нельзя удалить.
-- **Таблицы библиотек** (outbox FIN-109, идемпотентность FIN-78, tombstone FIN-110) здесь не создаются: у библиотек свои источники миграций и таблицы версий (`docs/migrations.md`). Сейчас библиотеки — каркасы без миграций и тегов, поэтому в `MigrationSources()` они появятся вместе с их выпуском.
+- **Таблицы библиотек** (outbox FIN-109, идемпотентность FIN-78, tombstone FIN-110) здесь не создаются: у выпущенных библиотек свои источники миграций и таблицы версий (`docs/migrations.md`); они подключены перед сервисным источником.
 
 ## Сущности
 
@@ -240,6 +240,15 @@ TestProfilesConsentHistoryAndVersionSwitch, TestProfilesRollbackConcurrencyAndDe
 | Очистка (задания) | `phone_verification_created_idx`, `refresh_token_expires_idx`, `rate_limit_window_end_idx` |
 
 ## Очистка
+
+Register/Refresh/Logout и auth-cleanup реализованы FIN-219; детали — [auth.md](auth.md).
+Владелец зашифрованного no-user ответа хранится библиотекой go-idempotency в
+idempotency_keys.owner_id (FIN-226), вместе с payload/эффектом. Новых сервисных
+таблиц нет. Успешный replay требует владельца и проверяет tombstone до отправки.
+DeleteAccount должен адресно удалить строки scope OR owner_id в своей транзакции;
+общий nil-scope целиком не очищается. Библиотечный cleanup удаляет владельца вместе
+с ключом. Реализация — auth.Service и authgrpc.Handler; проверки — auth_test.go
+на трёх уровнях, свойства хранения владельца проверены также в библиотеке.
 
 Задания сервиса, пачками, не миграции:
 

@@ -13,6 +13,7 @@ x-env: &env
   JWT_KEY_ID: local
   JWT_ISSUER: local-user
   JWT_AUDIENCE: local-app
+  AUTH_IDEMPOTENCY_KEY_FILE: /run/secrets/auth-idempotency
   LOG_FORMAT: text
   LOG_LEVEL: debug
   DB_PRIMARY_DSN: postgres://user_service:user_service@postgres:5432/user?sslmode=disable
@@ -45,7 +46,7 @@ services:
     build: .
     # Preserve non-root access to the host's 0600 local key.
     user: "${LOCAL_UID:-65532}:${LOCAL_GID:-65532}"
-    volumes: ["./.local/jwt-signing.pem:/run/secrets/user-signing:ro"]
+    volumes: ["./.local/jwt-signing.pem:/run/secrets/user-signing:ro", "./.local/auth-idempotency.key:/run/secrets/auth-idempotency:ro"]
     command: ["serve"]
     environment: *env
     ports: ["127.0.0.1:9090:9090", "127.0.0.1:9091:9091"]

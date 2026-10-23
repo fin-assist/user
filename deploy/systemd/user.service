@@ -12,6 +12,7 @@ After=network-online.target postgresql.service
 Wants=network-online.target
 
 [Service]
+# AUTH_IDEMPOTENCY_KEY_FILE must name a private 32-byte AES key shared by replicas.
 Type=exec
 ExecStart=/opt/finassist/user/user serve
 EnvironmentFile=/etc/finassist/user/env

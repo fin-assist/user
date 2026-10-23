@@ -71,16 +71,25 @@ func Start(t *testing.T, mutate ...func(*config.Config)) *Env {
 	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	secretPath := filepath.Join(t.TempDir(), "auth.key")
+	var secret [32]byte
+	if _, err := rand.Read(secret[:]); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secretPath, secret[:], 0o600); err != nil {
+		t.Fatal(err)
+	}
 	cfg := config.Config{
-		Service: "user",
-		Signing: config.SigningConfig{PrivateKeyFile: keyPath, KeyID: "apitest", Issuer: "apitest-user", Audience: "apitest-client"},
-		Env:     config.EnvDev,
-		Auth:    config.AuthConfig{Mode: config.AuthInsecureDev},
-		DB:      config.DBConfig{PrimaryDSN: dsn, MaxConns: 4},
-		GRPC:    config.GRPCConfig{MaxRecvMsgSize: 4 << 20},
-		Peers:   map[string]string{"assistant": "passthrough:///127.0.0.1:1", "bank-statement-data": "passthrough:///127.0.0.1:1"},
-		Outbox:  config.OutboxConfig{TimezoneTargets: []string{"bank-statement-data", "assistant"}, MaxConns: 5, PollInterval: 20 * time.Millisecond},
-		Limits:  ratelimit.Defaults(),
+		Service:  "user",
+		Signing:  config.SigningConfig{PrivateKeyFile: keyPath, KeyID: "apitest", Issuer: "apitest-user", Audience: "apitest-client"},
+		Env:      config.EnvDev,
+		Auth:     config.AuthConfig{Mode: config.AuthInsecureDev},
+		DB:       config.DBConfig{PrimaryDSN: dsn, MaxConns: 4},
+		GRPC:     config.GRPCConfig{MaxRecvMsgSize: 4 << 20},
+		Peers:    map[string]string{"assistant": "passthrough:///127.0.0.1:1", "bank-statement-data": "passthrough:///127.0.0.1:1"},
+		Outbox:   config.OutboxConfig{TimezoneTargets: []string{"bank-statement-data", "assistant"}, MaxConns: 5, PollInterval: 20 * time.Millisecond},
+		Limits:   ratelimit.Defaults(),
+		Sessions: config.SessionsConfig{IdempotencyKeyFile: secretPath, RefreshTTL: 60 * 24 * time.Hour, MaxConns: 4},
 	}
 	for _, m := range mutate {
 		m(&cfg)

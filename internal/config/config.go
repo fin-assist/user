@@ -40,17 +40,18 @@ const (
 
 // Config is the whole configuration of the serve command.
 type Config struct {
-	Service string // service name: logs, metrics, application_name, the caller name it presents
-	Env     Env
-	Log     LogConfig
-	GRPC    GRPCConfig
-	HTTP    HTTPConfig
-	DB      DBConfig
-	Signing SigningConfig
-	Auth    AuthConfig
-	Limits  ratelimit.Rules
-	Outbox  OutboxConfig
-	Peers   map[string]string // other services: name -> gRPC target, from PEER_<NAME>_ADDR
+	Service  string // service name: logs, metrics, application_name, the caller name it presents
+	Env      Env
+	Log      LogConfig
+	GRPC     GRPCConfig
+	HTTP     HTTPConfig
+	DB       DBConfig
+	Signing  SigningConfig
+	Auth     AuthConfig
+	Limits   ratelimit.Rules
+	Outbox   OutboxConfig
+	Sessions SessionsConfig
+	Peers    map[string]string // other services: name -> gRPC target, from PEER_<NAME>_ADDR
 	// ShutdownDelay keeps serving after NOT_SERVING so balancers stop sending new calls.
 	ShutdownDelay time.Duration
 	// ShutdownTimeout bounds the graceful stop; calls still running after it are cut.
@@ -166,6 +167,7 @@ func load(getenv func(string) string, readFile func(string) ([]byte, error), env
 		Peers:           map[string]string{},
 		Limits:          r.limits(),
 		Outbox:          r.outbox(),
+		Sessions:        r.sessions(),
 		ShutdownDelay:   r.duration("SHUTDOWN_DELAY"),
 		ShutdownTimeout: r.duration("SHUTDOWN_TIMEOUT"),
 	}
