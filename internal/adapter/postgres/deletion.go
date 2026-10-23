@@ -54,8 +54,8 @@ func (r *Accounts) Remove(ctx context.Context, id string) error {
 			return fmt.Errorf("deletion: remove phone requests: %w", err)
 		}
 	}
-	// Superseded settings events are no longer needed. In-flight deliveries hold
-	// their row lock until completion; receivers also fence delayed messages.
+	// Superseded settings events are no longer needed. In-flight RPCs run without
+	// row locks and may still finish; receivers fence delayed writes with tombstones.
 	if _, err = tx.Exec(ctx, `DELETE FROM outbox_events WHERE topic='user.timezone_changed' AND event_key=$1`, id); err != nil {
 		return fmt.Errorf("deletion: remove settings events: %w", err)
 	}

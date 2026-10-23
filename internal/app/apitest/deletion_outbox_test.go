@@ -11,6 +11,7 @@ import (
 
 	userv1 "github.com/fin-assist/contracts/gen/go/finassist/user/v1"
 	userdeletionv1 "github.com/fin-assist/contracts/gen/go/finassist/userdeletion/v1"
+	usersettingsv1 "github.com/fin-assist/contracts/gen/go/finassist/usersettings/v1"
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -71,7 +72,7 @@ func (p *deletionPeer) PurgeUserData(ctx context.Context, in *userdeletionv1.Pur
 	}
 	return &userdeletionv1.PurgeUserDataResponse{}, nil
 }
-func serveDeletionPeer(t *testing.T, p *deletionPeer) string {
+func serveDeletionPeer(t *testing.T, p *deletionPeer, timezone ...*timezonePeer) string {
 	t.Helper()
 	p.t = t
 	p.started = make(chan struct{}, 32)
@@ -83,6 +84,9 @@ func serveDeletionPeer(t *testing.T, p *deletionPeer) string {
 	}
 	s := grpc.NewServer()
 	userdeletionv1.RegisterUserDeletionServiceServer(s, p)
+	for _, settings := range timezone {
+		usersettingsv1.RegisterUserSettingsSyncServiceServer(s, settings)
+	}
 	go func() { _ = s.Serve(lis) }()
 	t.Cleanup(func() { s.Stop(); _ = lis.Close() })
 	return "passthrough:///" + lis.Addr().String()
@@ -174,5 +178,70 @@ func TestDeletionOutboxIndependentTargetsAndProcessRestart(t *testing.T) {
 	})
 	if fast.calls.Load() != fastCalls {
 		t.Fatal("acknowledged recipient redelivered after restart")
+	}
+}
+
+func TestDeleteAccountDuringInflightTimezoneDelivery(t *testing.T) {
+	blocked := make(chan struct{})
+	var release sync.Once
+	unblock := func() { release.Do(func() { close(blocked) }) }
+	defer unblock()
+	settings := &timezonePeer{t: t, block: blocked, started: make(chan *usersettingsv1.SetUserTimezoneRequest, 16), applied: make(chan *usersettingsv1.SetUserTimezoneRequest, 16)}
+	bank, analytics, assistant := &deletionPeer{}, &deletionPeer{}, &deletionPeer{}
+	peers := map[string]string{"bank-statement-data": serveDeletionPeer(t, bank), "analytics": serveDeletionPeer(t, analytics), "assistant": serveDeletionPeer(t, assistant, settings)}
+	env := apitest.Start(t, func(c *config.Config) { c.Peers = peers; c.Outbox.TimezoneTargets = []string{"assistant"} })
+	seedDocuments(t, env)
+	r, _ := registerAPI(t, env, "inflight-timezone", "+79001234567")
+	stop := runOutbox(t, env)
+	defer stop()
+	started := receiveTimezone(t, settings.started)
+	if started.GetUserId() != r.GetUserId() {
+		t.Fatal(started)
+	}
+	client := userv1.NewProfileServiceClient(env.Conn)
+	// The shared dispatcher releases row locks before the external RPC, retaining
+	// only its own session advisory lock. Deletion must finish while it is blocked.
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	if _, err := client.DeleteAccount(apitest.User(ctx, r.GetUserId()), &userv1.DeleteAccountRequest{}); err != nil {
+		t.Fatal("slow timezone delayed deletion", err)
+	}
+	var users, keys, verifications, sessions, consents, tombstones, timezone int
+	err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM app_user),(SELECT count(*) FROM idempotency_keys WHERE owner_id=$1),(SELECT count(*) FROM phone_verification),(SELECT count(*) FROM auth_session),(SELECT count(*) FROM user_consent),(SELECT count(*) FROM tombstone_users),(SELECT count(*) FROM outbox_events WHERE topic='user.timezone_changed')`, r.GetUserId()).Scan(&users, &keys, &verifications, &sessions, &consents, &tombstones, &timezone)
+	if err != nil || users+keys+verifications+sessions+consents+timezone != 0 || tombstones != 1 {
+		t.Fatal("partial deletion", users, keys, verifications, sessions, consents, tombstones, timezone, err)
+	}
+	for _, peer := range []*deletionPeer{bank, analytics} {
+		if got := receiveDeletion(t, peer.applied); got != r.GetUserId() {
+			t.Fatal(got)
+		}
+	}
+	select {
+	case <-settings.applied:
+		t.Fatal("timezone was not held during deletion")
+	default:
+	}
+	if assistant.calls.Load() != 0 {
+		t.Fatal("blocked target unexpectedly acknowledged purge")
+	}
+	// The old in-flight call may finish after local deletion. Its final ack must
+	// not recreate the removed row or consume the separately queued deletion event.
+	unblock()
+	late := receiveTimezone(t, settings.applied)
+	if late.GetUserId() != r.GetUserId() {
+		t.Fatal(late)
+	}
+	if got := receiveDeletion(t, assistant.applied); got != r.GetUserId() {
+		t.Fatal(got)
+	}
+	eventually(t, func() bool {
+		var n int
+		err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT count(*) FROM outbox_events`).Scan(&n)
+		return err == nil && n == 0
+	})
+	for _, peer := range []*deletionPeer{bank, analytics, assistant} {
+		if peer.calls.Load() != 1 {
+			t.Fatal("duplicate or lost deletion", peer.calls.Load())
+		}
 	}
 }
