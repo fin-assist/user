@@ -58,12 +58,12 @@ go-outbox v0.1.0 publishes timezone changes in the same transaction. Its dispatc
 a dedicated primary pool and operator-configured recipients (two by default), with system
 credentials only. Missing configured peer addresses fail startup. See docs/profile.md.
 
-Register and RefreshTokens use go-idempotency v0.1.0 with encrypted no-user replies.
+Register and RefreshTokens use go-idempotency v0.2.0 with encrypted no-user replies and result ownership (FIN-226).
 Their key/effect transactions use a dedicated primary pool; IP attempts commit in
 the ordinary pool before token checks, even for rejected secrets. Reuse rolls the
 non-cacheable 401 back, then rechecks and commits revocation before returning it.
-auth_replay_owner binds cached secrets to the actual account: replay takes its
-tombstone guard, deletion must purge its keys before removing the association.
+Response.OwnerID binds cached secrets to the actual account in idempotency_keys:
+replay requires an owner and takes its tombstone guard; deletion purges scope OR owner_id.
 Two distinct confirmed registration tokens for one phone create separate sessions
 without overwriting an existing account (owner decision, FIN-219). See docs/auth.md.
 

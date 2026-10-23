@@ -181,31 +181,6 @@ func (r *Auth) CloseVerification(ctx context.Context, id int32, user string, now
 	return nil
 }
 
-// BindReplay associates an encrypted no-user result with its actual account.
-func (r *Auth) BindReplay(ctx context.Context, endpoint, key, id string) error {
-	if _, ok := Tx(ctx); !ok {
-		return errAuthTx
-	}
-	_, err := r.db.Writer(ctx).Exec(ctx, `INSERT INTO auth_replay_owner(endpoint,key,user_id) VALUES($1,$2,$3) ON CONFLICT(endpoint,key) DO UPDATE SET user_id=excluded.user_id`, endpoint, key, id)
-	return authError(err)
-}
-
-// ReplayOwner lets a saved no-user response pass its owner's current tombstone guard.
-func (r *Auth) ReplayOwner(ctx context.Context, endpoint, key string) (string, error) {
-	var id string
-	err := r.db.Writer(ctx).QueryRow(ctx, `SELECT user_id::text FROM auth_replay_owner WHERE endpoint=$1 AND key=$2`, endpoint, key).Scan(&id)
-	return id, authError(err)
-}
-
-// CleanupReplayOwners removes a bounded batch whose idempotency row was purged.
-func (r *Auth) CleanupReplayOwners(ctx context.Context, batch int) (int64, error) {
-	if _, ok := Tx(ctx); !ok {
-		return 0, errAuthTx
-	}
-	tag, err := r.db.Writer(ctx).Exec(ctx, `DELETE FROM auth_replay_owner WHERE (endpoint,key) IN (SELECT o.endpoint,o.key FROM auth_replay_owner o WHERE NOT EXISTS(SELECT 1 FROM idempotency_keys k WHERE k.scope='00000000-0000-0000-0000-000000000000' AND k.endpoint=o.endpoint AND k.key=o.key) LIMIT $1 FOR UPDATE OF o SKIP LOCKED)`, batch)
-	return tag.RowsAffected(), authError(err)
-}
-
 // CleanupSessions removes expired links and then only chains with no links left.
 // Rotated links survive until their own expiry, preserving reuse detection.
 func (r *Auth) CleanupSessions(ctx context.Context, now time.Time, batch int) (int64, error) {

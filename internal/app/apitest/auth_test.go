@@ -264,10 +264,7 @@ func TestAuthAPICleanupDrainsBatchesAndKeepsLiveState(t *testing.T) {
 	env := apitest.Start(t)
 	seedDocuments(t, env)
 	registered, _ := registerAPI(t, env, "reg", "+79001234567")
-	if _, err := env.App.DB.Primary().Exec(t.Context(), `INSERT INTO idempotency_keys(scope,endpoint,key,request_hash,expires_at) SELECT '00000000-0000-0000-0000-000000000000',$1,md5(n::text)::uuid,$2,$3 FROM generate_series(1,1001) n`, userv1.AuthService_RefreshTokens_FullMethodName, make([]byte, 32), time.Now().Add(-time.Minute)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := env.App.DB.Primary().Exec(t.Context(), `INSERT INTO auth_replay_owner(endpoint,key,user_id) SELECT endpoint,key,$1 FROM idempotency_keys WHERE endpoint=$2`, registered.GetUserId(), userv1.AuthService_RefreshTokens_FullMethodName); err != nil {
+	if _, err := env.App.DB.Primary().Exec(t.Context(), `INSERT INTO idempotency_keys(scope,endpoint,key,request_hash,expires_at,owner_id) SELECT '00000000-0000-0000-0000-000000000000',$1,md5(n::text)::uuid,$2,$3,$4 FROM generate_series(1,1001) n`, userv1.AuthService_RefreshTokens_FullMethodName, make([]byte, 32), time.Now().Add(-time.Minute), registered.GetUserId()); err != nil {
 		t.Fatal(err)
 	}
 	var run func(context.Context) error
@@ -285,7 +282,7 @@ func TestAuthAPICleanupDrainsBatchesAndKeepsLiveState(t *testing.T) {
 	go func() { done <- run(ctx) }()
 	eventually(t, func() bool {
 		var keys, owners int
-		err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM idempotency_keys),(SELECT count(*) FROM auth_replay_owner)`).Scan(&keys, &owners)
+		err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT count(*),count(owner_id) FROM idempotency_keys`).Scan(&keys, &owners)
 		return err == nil && keys == 1 && owners == 1
 	})
 	cancel()
@@ -377,7 +374,7 @@ func (h authFailureLog) WithAttrs([]slog.Attr) slog.Handler { return h }
 func (h authFailureLog) WithGroup(string) slog.Handler      { return h }
 
 func TestAuthAPICleanupFailureLogsAndStops(t *testing.T) {
-	for _, table := range []string{"idempotency_keys", "auth_replay_owner", "refresh_token"} {
+	for _, table := range []string{"idempotency_keys", "refresh_token"} {
 		t.Run(table, func(t *testing.T) {
 			env := apitest.Start(t)
 			log := authFailureLog{errors: make(chan string, 1)}
@@ -703,12 +700,12 @@ func TestAuthAPICancelAfterEffectStillCommitsAndReplays(t *testing.T) {
 	}
 }
 
-func TestAuthAPIFailedReplayBindingRollsBackEveryRegistrationEffect(t *testing.T) {
+func TestAuthAPIFailedOwnerStorageRollsBackEveryRegistrationEffect(t *testing.T) {
 	env := apitest.Start(t)
 	seedDocuments(t, env)
 	c := userv1.NewAuthServiceClient(env.Conn)
 	seedRegistration(t, env, "reg", "+79001234567", time.Now().UTC().Add(-6*time.Minute))
-	if _, err := env.App.DB.Primary().Exec(t.Context(), `DROP TABLE auth_replay_owner`); err != nil {
+	if _, err := env.App.DB.Primary().Exec(t.Context(), `ALTER TABLE idempotency_keys DROP COLUMN owner_id`); err != nil {
 		t.Fatal(err)
 	}
 	_, err := c.Register(authContext(t.Context(), authKey()), registrationRequest("reg"))
@@ -781,4 +778,39 @@ func counterValue(t *testing.T, env *apitest.Env, name, label, value string) flo
 	}
 	t.Fatal("metric absent", name)
 	return 0
+}
+
+func TestAuthAPICachedOwnerIntegrityFailsClosed(t *testing.T) {
+	env := apitest.Start(t)
+	seedDocuments(t, env)
+	registered, registerKey := registerAPI(t, env, "reg", "+79001234567")
+	client := userv1.NewAuthServiceClient(env.Conn)
+	refreshKey := authKey()
+	req := &userv1.RefreshTokensRequest{RefreshToken: registered.GetTokens().GetRefreshToken()}
+	if _, err := client.RefreshTokens(authContext(t.Context(), refreshKey), req); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{registerKey, refreshKey} {
+		var owner string
+		if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT owner_id::text FROM idempotency_keys WHERE key=$1`, key).Scan(&owner); err != nil || owner != registered.GetUserId() {
+			t.Fatal("wrong result owner", owner, err)
+		}
+	}
+	// A missing or transplanted owner must never release the cached credentials.
+	if _, err := env.App.DB.Primary().Exec(t.Context(), `UPDATE idempotency_keys SET owner_id=NULL WHERE key=$1`, registerKey); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Register(authContext(t.Context(), registerKey), registrationRequest("reg")); status.Code(err) != codes.Internal || apitest.Reason(err) != "" {
+		t.Fatal(err)
+	}
+	if _, err := env.App.DB.Primary().Exec(t.Context(), `UPDATE idempotency_keys SET owner_id=$1 WHERE key=$2`, authKey(), refreshKey); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.RefreshTokens(authContext(t.Context(), refreshKey), req); status.Code(err) != codes.Internal || apitest.Reason(err) != "" {
+		t.Fatal(err)
+	}
+	var links, registerHits, refreshHits int
+	if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM refresh_token),(SELECT hits FROM rate_limit_window WHERE scope='register_ip:60'),(SELECT hits FROM rate_limit_window WHERE scope='refresh_ip:60')`).Scan(&links, &registerHits, &refreshHits); err != nil || links != 2 || registerHits != 1 || refreshHits != 1 {
+		t.Fatal("corruption reran effects/limits", links, registerHits, refreshHits, err)
+	}
 }

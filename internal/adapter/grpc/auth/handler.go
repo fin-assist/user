@@ -42,12 +42,6 @@ type Limits interface {
 	Check(context.Context, ratelimit.Operation, string, string) (ratelimit.Decision, ratelimit.Receipt, error)
 }
 
-// ReplayOwners binds successful no-user replies to their actual account.
-type ReplayOwners interface {
-	BindReplay(context.Context, string, string, string) error
-	ReplayOwner(context.Context, string, string) (string, error)
-}
-
 // Guard rechecks cached replies against deletion before they leave the transaction.
 type Guard interface {
 	Guard(context.Context, string) (bool, error)
@@ -61,14 +55,13 @@ type Handler struct {
 	engine          Engine
 	state, attempts Transactions
 	limits          Limits
-	owners          ReplayOwners
 	guard           Guard
 }
 
 // Register installs session RPCs; phone creation and Watch remain UNIMPLEMENTED
 // until the next stage supplies a provider-independent confirmation lifecycle.
-func Register(server grpc.ServiceRegistrar, sessions Sessions, engine Engine, state, attempts Transactions, limits Limits, owners ReplayOwners, guard Guard) {
-	userv1.RegisterAuthServiceServer(server, &Handler{sessions: sessions, engine: engine, state: state, attempts: attempts, limits: limits, owners: owners, guard: guard})
+func Register(server grpc.ServiceRegistrar, sessions Sessions, engine Engine, state, attempts Transactions, limits Limits, guard Guard) {
+	userv1.RegisterAuthServiceServer(server, &Handler{sessions: sessions, engine: engine, state: state, attempts: attempts, limits: limits, guard: guard})
 }
 
 func (h *Handler) Register(ctx context.Context, in *userv1.RegisterRequest) (*userv1.RegisterResponse, error) {
@@ -135,21 +128,17 @@ func (h *Handler) execute(ctx context.Context, in, out proto.Message, op ratelim
 			if err != nil {
 				return idempotency.Response{}, err
 			}
-			if err := h.owners.BindReplay(effect, request.Endpoint, request.Key, id); err != nil {
-				return idempotency.Response{}, err
-			}
 			body, err := proto.Marshal(msg)
-			return idempotency.Response{Body: body}, err
+			return idempotency.Response{Body: body, OwnerID: id}, err
 		})
 		if doErr != nil {
 			return doErr
 		}
 		if result.Err == nil && result.Replayed {
-			id, err := h.owners.ReplayOwner(ctx, request.Endpoint, request.Key)
-			if err != nil {
-				return err
+			if result.Response.OwnerID == "" {
+				return errors.New("auth: cached result owner required")
 			}
-			alive, err := h.guard.Guard(ctx, id)
+			alive, err := h.guard.Guard(ctx, result.Response.OwnerID)
 			if err != nil {
 				return err
 			}

@@ -242,13 +242,13 @@ TestProfilesConsentHistoryAndVersionSwitch, TestProfilesRollbackConcurrencyAndDe
 ## Очистка
 
 Register/Refresh/Logout и auth-cleanup реализованы FIN-219; детали — [auth.md](auth.md).
-Миграция 000002 добавляет auth_replay_owner(endpoint,key,user_id): связь зашифрованного
-no-user ответа с его владельцем для tombstone на replay и адресной очистки при удалении.
-FK на app_user отсутствует намеренно: связь должна пережить удаление строки пользователя.
-Неизменяемые миграции библиотек этот PR не редактирует. Ассоциация пишется вместе с
-эффектом/ключом; осиротевшие связи чистятся после ключей. DeleteAccount должен удалить
-ключи по этим связям в своей транзакции, затем связи. Реализация — postgres.Auth,
-auth.Service и authgrpc.Handler; проверки — auth_test.go на трёх уровнях.
+Владелец зашифрованного no-user ответа хранится библиотекой go-idempotency в
+idempotency_keys.owner_id (FIN-226), вместе с payload/эффектом. Новых сервисных
+таблиц нет. Успешный replay требует владельца и проверяет tombstone до отправки.
+DeleteAccount должен адресно удалить строки scope OR owner_id в своей транзакции;
+общий nil-scope целиком не очищается. Библиотечный cleanup удаляет владельца вместе
+с ключом. Реализация — auth.Service и authgrpc.Handler; проверки — auth_test.go
+на трёх уровнях, свойства хранения владельца проверены также в библиотеке.
 
 Задания сервиса, пачками, не миграции:
 

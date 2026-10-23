@@ -6,10 +6,8 @@ import (
 	"testing"
 	"time"
 
-	idempotency "github.com/fin-assist/go-idempotency"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/fin-assist/user/internal/adapter/postgres/migrate"
 	"github.com/fin-assist/user/internal/auth"
 	"github.com/fin-assist/user/internal/token"
 )
@@ -68,8 +66,7 @@ func TestAuthRepositoryPrimaryLocksAndConstraintTranslation(t *testing.T) {
 		func() error { _, e := repo.Registration(ctx, token.Sum("x"), true); return e }, func() error { _, _, e := repo.CreateUser(ctx, "+79000000001", "UTC", now); return e },
 		func() error { return repo.LockUser(ctx, profileID) }, func() error { return repo.GrantPD(ctx, profileID, "v1", now) },
 		func() error { return repo.CreateSession(ctx, profileID, 1, token.Sum("x"), now, now) }, func() error { return repo.CloseVerification(ctx, 1, profileID, now) },
-		func() error { return repo.BindReplay(ctx, "method", "019c7714-3b77-74d1-9866-e1f484aae201", profileID) },
-		func() error { _, e := repo.CleanupReplayOwners(ctx, 1); return e }, func() error { _, e := repo.CleanupSessions(ctx, now, 1); return e },
+		func() error { _, e := repo.CleanupSessions(ctx, now, 1); return e },
 	} {
 		if err := call(); !errors.Is(err, errAuthTx) {
 			t.Fatal("write outside transaction", err)
@@ -122,14 +119,11 @@ func TestAuthRepositoryStorageFailurePreservesAtomicity(t *testing.T) {
 	}
 }
 
-func TestAuthRepositoryCleanupKeepsLiveLinksAndReplayOwners(t *testing.T) {
+func TestAuthRepositoryCleanupKeepsLiveLinks(t *testing.T) {
 	db, _, _ := profileDB(t)
 	repo := NewAuth(db)
 	ctx := t.Context()
 	now := time.Now().UTC()
-	if err := migrate.Up(ctx, migrate.DefaultConfig(db.primary.Config().ConnConfig.ConnString()), []migrate.Source{{Name: idempotency.MigrationsName, Table: idempotency.MigrationsTable, FS: idempotency.Migrations}}); err != nil {
-		t.Fatal(err)
-	}
 	var verification int32
 	h := token.Sum("verification")
 	if err := db.Primary().QueryRow(ctx, `INSERT INTO phone_verification(phone,token_hash,provider,created_at,expires_at,verified_at,is_new_user,user_id) VALUES('+79001234567',$1,'test',$2,$3,$2,false,$4) RETURNING id`, h[:], now, now.Add(5*time.Minute), profileID).Scan(&verification); err != nil {
@@ -171,34 +165,6 @@ func TestAuthRepositoryCleanupKeepsLiveLinksAndReplayOwners(t *testing.T) {
 	}
 	if err := db.Run(ctx, func(ctx context.Context) error { return repo.CloseVerification(ctx, verification, otherProfileID, now) }); !errors.Is(err, auth.ErrMissing) {
 		t.Fatal("foreign result", err)
-	}
-	key1, key2 := "019c7714-3b77-74d1-9866-e1f484aae201", "019c7714-3b77-74d1-9866-e1f484aae202"
-	if err := db.Run(ctx, func(ctx context.Context) error {
-		if err := repo.BindReplay(ctx, "method", key1, profileID); err != nil {
-			return err
-		}
-		if err := repo.BindReplay(ctx, "method", key2, otherProfileID); err != nil {
-			return err
-		}
-		_, err := db.Writer(ctx).Exec(ctx, `INSERT INTO idempotency_keys(scope,endpoint,key,request_hash,expires_at) VALUES('00000000-0000-0000-0000-000000000000','method',$1,$2,$3)`, key1, h[:], now.Add(time.Hour))
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Run(ctx, func(ctx context.Context) error {
-		n, err := repo.CleanupReplayOwners(ctx, 1)
-		if n != 1 {
-			t.Fatal(n)
-		}
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if id, err := repo.ReplayOwner(ctx, "method", key1); err != nil || id != profileID {
-		t.Fatal(id, err)
-	}
-	if _, err := repo.ReplayOwner(ctx, "method", key2); !errors.Is(err, auth.ErrMissing) {
-		t.Fatal(err)
 	}
 	if err := db.Run(ctx, func(ctx context.Context) error {
 		_, err := repo.CleanupSessions(ctx, now.Add(2*time.Hour), 10)
