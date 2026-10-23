@@ -7,6 +7,7 @@ require (
 	buf.build/go/protovalidate v1.4.0
 	github.com/fin-assist/contracts/gen/go v0.4.0
 	github.com/fin-assist/go-identity v0.1.0
+	github.com/fin-assist/go-outbox v0.1.0
 	github.com/fin-assist/go-tombstone v0.1.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/golang-migrate/migrate/v4 v4.20.1

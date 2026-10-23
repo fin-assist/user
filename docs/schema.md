@@ -183,7 +183,17 @@ RETURNING hits;
 
 Повтор для удалённого — tombstone найден → OK. Отдельной метки удаления в `app_user` нет (см. «`app_user`»).
 
-Пока библиотеки не выпущены, шаги 1 и 4 подключить нельзя: в `MigrationSources()` они встанут перед источником сервиса, когда у библиотек появятся миграции и теги (`README.md`, «Библиотеки и обновления»).
+go-tombstone v0.1.0 и go-outbox v0.1.0 подключены, их миграции стоят перед источником
+сервиса. Сам DeleteAccount и события PurgeUserData остаются следующим этапом FIN-219.
+Текущий профильный этап использует Guard библиотеки tombstone и события смены пояса.
+
+Профиль/согласие читаются одним SELECT с LEFT JOIN активного user_consent и текущего
+consent_document. Системный статус и пишущие операции используют primary. Записи берут
+Guard и FOR UPDATE app_user; смена пояса и outbox атомарны, повтор того же значения
+не увеличивает settings_version. Действующим считается согласие на текущую версию;
+отзыв и повтор выдачи сохраняют историю. Реализация и тесты — internal/profile,
+internal/adapter/postgres/profile.go, TestProfilesSettingsOutboxAndPrimaryReads,
+TestProfilesConsentHistoryAndVersionSwitch, TestProfilesRollbackConcurrencyAndDeletion.
 
 ## Инварианты в коде сервиса
 

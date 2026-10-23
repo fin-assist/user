@@ -101,4 +101,11 @@ key_unavailable/forbidden/user_id. ACL выполняет сервер, поэт
 
 ## Фоновые задания
 
+`outbox` доставляет `user.timezone_changed` через go-outbox v0.1.0, на отдельном primary-пуле.
+Метрики: `finassist_outbox_rows{target}`, `finassist_outbox_oldest_age_seconds{target}`,
+`finassist_outbox_delivery_errors_total{target}`; target ограничен настройкой получателей,
+пустой строкой до fanout и unconfigured. Содержимое событий и user_id метками не становятся.
+Обязателен внешний алерт на возраст > 3600 секунд для всех target; включение в infra
+учитывается отдельно. Сборка, остановка, повторы и тесты — [profile.md](profile.md).
+
 `internal/worker`: `worker.Run(ctx, log, jobs...)` — задание с ошибкой или паникой перезапускается через 5 с; `worker.Every(name, interval, log, fn)` — периодическое. Задания работают в каждом поде; единственность — блокировкой или `FOR UPDATE SKIP LOCKED`, как в outbox. Задания возвращает `wire()`.

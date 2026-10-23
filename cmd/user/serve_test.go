@@ -12,7 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fin-assist/user/internal/adapter/postgres/migrate"
 	"github.com/fin-assist/user/internal/adapter/postgres/migrate/migratetest"
+	"github.com/fin-assist/user/internal/app"
 )
 
 func TestServeFailsBeforeConnectingWithoutSigningKey(t *testing.T) {
@@ -28,8 +30,13 @@ func TestServeFailsBeforeConnectingWithoutSigningKey(t *testing.T) {
 // The whole serve path against a real database: config, pools, server, ops listener,
 // readiness and an orderly stop on cancel.
 func TestServeRunsAndStops(t *testing.T) {
+	t.Setenv("PEER_BANK_STATEMENT_DATA_ADDR", "passthrough:///127.0.0.1:1")
+	t.Setenv("PEER_ASSISTANT_ADDR", "passthrough:///127.0.0.1:1")
 	setSigningKey(t)
 	dsn := migratetest.DSN(t)
+	if err := migrate.Up(t.Context(), migrate.DefaultConfig(dsn), app.MigrationSources()); err != nil {
+		t.Fatal(err)
+	}
 	for k, v := range map[string]string{
 		"SERVICE_NAME": "user", "ENV": "dev", "AUTH_MODE": "insecure-dev", "LOG_LEVEL": "error",
 		"DB_PRIMARY_DSN": dsn, "GRPC_ADDR": "127.0.0.1:0", "HTTP_ADDR": "127.0.0.1:0",
@@ -54,11 +61,13 @@ func TestServeRunsAndStops(t *testing.T) {
 
 func TestServeFailsOnBadInput(t *testing.T) {
 	setSigningKey(t)
-	base := map[string]string{"SERVICE_NAME": "user", "ENV": "dev", "AUTH_MODE": "insecure-dev", "LOG_LEVEL": "error"}
+	base := map[string]string{"SERVICE_NAME": "user", "ENV": "dev", "AUTH_MODE": "insecure-dev", "LOG_LEVEL": "error",
+		"PEER_BANK_STATEMENT_DATA_ADDR": "passthrough:///127.0.0.1:1", "PEER_ASSISTANT_ADDR": "passthrough:///127.0.0.1:1"}
 	cases := map[string]map[string]string{
 		"config":   {"DB_PRIMARY_DSN": ""},
 		"database": {"DB_PRIMARY_DSN": "postgres://nobody@127.0.0.1:1/db?connect_timeout=1"},
 		"listen":   {"DB_PRIMARY_DSN": migratetest.DSN(t), "GRPC_ADDR": "256.0.0.1:1"},
+		"outbox":   {"DB_PRIMARY_DSN": migratetest.DSN(t), "PEER_ASSISTANT_ADDR": ""},
 	}
 	for name, extra := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -70,6 +79,8 @@ func TestServeFailsOnBadInput(t *testing.T) {
 			}
 			if err := runServe(t.Context()); err == nil {
 				t.Fatal("want an error")
+			} else if name == "outbox" && !strings.Contains(err.Error(), "peer address required") {
+				t.Fatal(err)
 			}
 		})
 	}

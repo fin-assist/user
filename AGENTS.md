@@ -37,18 +37,25 @@ updates them in the same PR. A service made from the template rewrites the first
   non-radical. The owner writes backend code himself and is strong in PostgreSQL: schemas and queries are proposed
   with arguments, not decided for him.
 
-## Current implementation (FIN-219, foundation)
+## Current implementation (FIN-219)
 
-The registered functional RPCs are GetConsentDocument and GetSigningKeys. AuthService,
-ProfileService and GetAssistantConsentStatus are subsequent FIN-219 stages; the embedded
-UserInternalService handler still returns UNIMPLEMENTED for consent status. Do not describe
-this foundation as a complete sign-in service. go-identity v0.1.0 supplies only the verifiers
+Functional RPCs: GetConsentDocument, GetSigningKeys, GetAssistantConsentStatus, GetProfile,
+UpdateProfile, GrantAssistantConsent and RevokeAssistantConsent. AuthService and DeleteAccount
+are later FIN-219 stages (DeleteAccount still returns UNIMPLEMENTED). Do not describe
+this as a complete sign-in service. go-identity v0.1.0 supplies only the verifiers
 and token sources: keep the existing server ACL and reqctx chain, without a second identity
 interceptor. The signing package supplies its local JWKS provider (no self-RPC). go-tombstone
 v0.1.0 reads primary and its migration source precedes the service. Assistant documents check
 the conditional user token and tombstone in their handler; personal-data documents are public
 to authenticated bank-bff. Signing key files are required even in insecure-dev. Make up/run
 create an ignored .local key through `cmd/dev-key` (not shipped in the service image); never put that directory in git or the Docker build context.
+
+Profile writes take the tombstone guard and the user row lock in one primary transaction.
+Assistant consent is effective only for the current document version; Status is primary-only,
+assistant-only SYSTEM per grpc-api.md 3.3, despite the mixed-model comment in the proto.
+go-outbox v0.1.0 publishes timezone changes in the same transaction. Its dispatcher uses
+a dedicated primary pool and operator-configured recipients (two by default), with system
+credentials only. Missing configured peer addresses fail startup. See docs/profile.md.
 
 ## Repository map
 
@@ -59,6 +66,8 @@ create an ignored .local key through `cmd/dev-key` (not shipped in the service i
 | The whole service in-process for API tests | `internal/app/apitest/` |
 | Access JWT signing, rotation snapshot, local public JWKS | `internal/signing/` |
 | Current consent-document usecase | `internal/consent/` |
+| Profile settings, consent lifecycle and system status | `internal/profile/`, `internal/adapter/grpc/profile/`, `internal/adapter/postgres/profile.go` |
+| Versioned timezone events and dispatcher assembly | `internal/adapter/outbox/`, `internal/app/outbox.go` |
 | Entities and invariants (no pgx, gRPC or generated code) | `internal/domain/` |
 | Usecases and the interfaces of repositories and clients they need | `internal/<feature>/` |
 | gRPC server, interceptors, access table types, identity and tombstone interfaces | `internal/adapter/grpc/server/`; rules — `docs/server.md` |

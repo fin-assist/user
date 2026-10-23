@@ -21,11 +21,16 @@ Ed25519-подпись access JWT на 15 минут, GetSigningKeys и GetConse
 через go-tombstone v0.1.0 и его миграции. Для документа assistant требуется валидный
 пользовательский токен и отсутствие tombstone. Документы читаются с primary.
 
-AuthService, ProfileService и GetAssistantConsentStatus ещё не реализованы — следующие
-PR FIN-219. Зарегистрированный UserInternalService пока возвращает UNIMPLEMENTED для
-GetAssistantConsentStatus. Реальных и автоматически подтверждающих провайдеров нет
+Реализованы GetProfile, UpdateProfile, GrantAssistantConsent, RevokeAssistantConsent
+и GetAssistantConsentStatus. Смена пояса атомарно пишет событие go-outbox v0.1.0;
+доставщик независимо отправляет SetUserTimezone в bank-statement-data и assistant.
+Маршруты настраиваются без изменения производителя события, для доставки выделен
+отдельный primary-пул. Детали и ограничения — [docs/profile.md](docs/profile.md).
+
+AuthService и DeleteAccount ещё не реализованы (DeleteAccount возвращает UNIMPLEMENTED).
+Реальных и автоматически подтверждающих провайдеров нет
 (FIN-139/FIN-122); текущая сборка не выполняет вход и не подтверждает номера.
-Go-idempotency и go-outbox подключаются вместе с использующими их сценариями.
+Go-idempotency подключится вместе со сценариями входа.
 
 Подготовлен общий механизм лимитов аутентификации (`internal/ratelimit`): фиксированные
 UTC-окна в primary PostgreSQL, атомарная проверка нескольких окон, настройки и метрики.
@@ -47,6 +52,8 @@ internal/app/                      assembly: identity, pools, server, wire() (ha
 internal/app/apitest/              the whole service in-process for API tests
 internal/signing/                  access JWT signing and public JWKS loaded from trusted files
 internal/consent/                  current consent-document usecase
+internal/profile/                  profile settings and assistant-consent usecases
+internal/adapter/outbox/            versioned timezone event encoding
 internal/ratelimit/                authentication limit policies and commit-aware metrics
 internal/domain/                   entities and invariants, no infrastructure imports
 internal/<feature>/                usecases; interfaces of repositories and clients they need
@@ -85,7 +92,10 @@ make run
 Каталог .local исключён из git и Docker build context. make run использует тот же ключ.
 
 Настройки stage/prod и ротация ключей — [docs/config.md](docs/config.md).
-Новые миграции go-tombstone должны быть применены до запуска новой сборки.
+Миграции go-tombstone и go-outbox применяются до запуска новой сборки.
+Для каждого OUTBOX_TIMEZONE_TARGETS обязателен PEER_<NAME>_ADDR. Примеры compose/make run
+задают адреса соседей, но сами соседние сервисы не поднимают: до их готовности события
+остаются в outbox и повторяются. Конкретные адреса стенда задаются в его окружении.
 
 ## Библиотеки и обновления
 
