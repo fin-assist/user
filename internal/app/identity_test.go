@@ -18,8 +18,8 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/fin-assist/user/internal/config"
 	"github.com/fin-assist/user/internal/adapter/postgres/migrate/migratetest"
+	"github.com/fin-assist/user/internal/config"
 	"github.com/fin-assist/user/internal/signing"
 )
 
@@ -131,7 +131,7 @@ func TestNewRequiresSigningKey(t *testing.T) {
 }
 
 func TestLibraryMigrationSources(t *testing.T) {
-	for _,source:=range MigrationSources(){
-		t.Run(source.Name,func(t *testing.T){migratetest.CheckUpDownUp(t,source)})
+	for _, source := range MigrationSources() {
+		t.Run(source.Name, func(t *testing.T) { migratetest.CheckUpDownUp(t, source) })
 	}
 }

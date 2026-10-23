@@ -75,9 +75,13 @@ func TestDocumentAPI(t *testing.T) {
 	if _, err := c.GetConsentDocument(ctx, &userv1.GetConsentDocumentRequest{Type: userv1.ConsentType_CONSENT_TYPE_PERSONAL_DATA}); apitest.Reason(err) != "NOT_FOUND" {
 		t.Fatalf("unpublished: %v", err)
 	}
-	if _,err:=env.App.DB.Primary().Exec(t.Context(),`DROP TABLE consent_document CASCADE`);err!=nil{t.Fatal(err)}
-	_,err=c.GetConsentDocument(ctx,&userv1.GetConsentDocumentRequest{Type:userv1.ConsentType_CONSENT_TYPE_PERSONAL_DATA})
-	if status.Code(err)!=codes.Internal || apitest.Reason(err)!="" || strings.Contains(status.Convert(err).Message(),"consent_document") {t.Fatalf("database error leaked: %v",err)}
+	if _, err := env.App.DB.Primary().Exec(t.Context(), `DROP TABLE consent_document CASCADE`); err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.GetConsentDocument(ctx, &userv1.GetConsentDocumentRequest{Type: userv1.ConsentType_CONSENT_TYPE_PERSONAL_DATA})
+	if status.Code(err) != codes.Internal || apitest.Reason(err) != "" || strings.Contains(status.Convert(err).Message(), "consent_document") {
+		t.Fatalf("database error leaked: %v", err)
+	}
 }
 
 func TestSigningKeysAPI(t *testing.T) {

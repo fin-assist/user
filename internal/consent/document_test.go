@@ -28,7 +28,7 @@ func TestCurrentDocument(t *testing.T) {
 		}
 	}
 	repo := &documents{}
-	if _, err := New(repo).Current(t.Context(), "unknown"); server.Reason(err)!="NOT_FOUND" {
+	if _, err := New(repo).Current(t.Context(), "unknown"); server.Reason(err) != "NOT_FOUND" {
 		t.Fatal("unknown type accepted")
 	}
 	if repo.calls != 0 {

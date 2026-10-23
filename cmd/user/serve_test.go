@@ -78,13 +78,19 @@ func TestServeFailsOnBadInput(t *testing.T) {
 func setSigningKey(t *testing.T) {
 	t.Helper()
 	_, key, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil { t.Fatal(err) }
-	der,err:=x509.MarshalPKCS8PrivateKey(key)
-	if err!=nil {t.Fatal(err)}
-	path:=filepath.Join(t.TempDir(),"key.pem")
-	if err:=os.WriteFile(path,pem.EncodeToMemory(&pem.Block{Type:"PRIVATE KEY",Bytes:der}),0o600);err!=nil{t.Fatal(err)}
-	t.Setenv("JWT_SIGNING_KEY_FILE",path)
-	t.Setenv("JWT_KEY_ID","serve-test")
-	t.Setenv("JWT_ISSUER","test-user")
-	t.Setenv("JWT_AUDIENCE","test-app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "key.pem")
+	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("JWT_SIGNING_KEY_FILE", path)
+	t.Setenv("JWT_KEY_ID", "serve-test")
+	t.Setenv("JWT_ISSUER", "test-user")
+	t.Setenv("JWT_AUDIENCE", "test-app")
 }
