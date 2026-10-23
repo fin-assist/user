@@ -124,7 +124,7 @@ func handlerFixture(t *testing.T) (*Handler, *fakeSessions, *fakeEngine, *fakeLi
 	if err != nil {
 		t.Fatal(err)
 	}
-	parser, err := idempotency.New(parserTx{}, idempotency.Options{Clock: time.Now, Cipher: cipher, Registerer: prometheus.NewRegistry(), Methods: map[string]idempotency.Policy{userv1.AuthService_Register_FullMethodName: {Encrypt: true}, userv1.AuthService_RefreshTokens_FullMethodName: {Encrypt: true, TTL: time.Minute}}})
+	parser, err := idempotency.New(parserTx{}, idempotency.Options{Clock: time.Now, Cipher: cipher, Registerer: prometheus.NewRegistry(), Methods: map[string]idempotency.Policy{userv1.AuthService_StartPhoneVerification_FullMethodName: {Encrypt: true}, userv1.AuthService_Register_FullMethodName: {Encrypt: true}, userv1.AuthService_RefreshTokens_FullMethodName: {Encrypt: true, TTL: time.Minute}}})
 	if err != nil {
 		t.Fatal(err)
 	}

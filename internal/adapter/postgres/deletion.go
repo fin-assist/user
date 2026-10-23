@@ -41,6 +41,11 @@ func (r *Accounts) Remove(ctx context.Context, id string) error {
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("deletion: read account: %w", err)
 	}
+	if phone != "" {
+		if err = r.purgeStartKeys(ctx, phone); err != nil {
+			return err
+		}
+	}
 	// An absent local account without a tombstone still needs remote purges; a
 	// signed identity can outlive a partially restored database.
 	if _, err = tx.Exec(ctx, `DELETE FROM idempotency_keys WHERE scope=$1::uuid OR owner_id=$1::uuid`, id); err != nil {
@@ -58,6 +63,28 @@ func (r *Accounts) Remove(ctx context.Context, id string) error {
 	// row locks and may still finish; receivers fence delayed writes with tombstones.
 	if _, err = tx.Exec(ctx, `DELETE FROM outbox_events WHERE topic='user.timezone_changed' AND event_key=$1`, id); err != nil {
 		return fmt.Errorf("deletion: remove settings events: %w", err)
+	}
+	return nil
+}
+
+// Start keys may predate account creation and therefore have no OwnerID. The
+// workflow links every secret reply AND cached busy refusal to the phone's data.
+func (r *Accounts) purgeStartKeys(ctx context.Context, phone string) error {
+	q := r.db.Writer(ctx)
+	rows, err := q.Query(ctx, `SELECT 1 FROM idempotency_keys k JOIN phone_verification_start s ON s.idempotency_key=k.key JOIN phone_verification v ON v.id=s.verification_id WHERE v.phone=$1 AND k.scope='00000000-0000-0000-0000-000000000000'::uuid AND k.endpoint='/finassist.user.v1.AuthService/StartPhoneVerification' FOR UPDATE OF k NOWAIT`, phone)
+	if err != nil {
+		return deletionError(err)
+	}
+	for rows.Next() {
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return deletionError(err)
+	}
+	_, err = q.Exec(ctx, `DELETE FROM idempotency_keys k USING phone_verification_start s,phone_verification v WHERE s.idempotency_key=k.key AND v.id=s.verification_id AND v.phone=$1 AND k.scope='00000000-0000-0000-0000-000000000000'::uuid AND k.endpoint='/finassist.user.v1.AuthService/StartPhoneVerification'`, phone)
+	if err != nil {
+		return deletionError(err)
 	}
 	return nil
 }

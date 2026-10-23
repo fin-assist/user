@@ -2,7 +2,10 @@
 
 Задача — [FIN-112](https://finassist.youtrack.cloud/issue/FIN-112). Миграция — [`migrations/000001_init_schema.up.sql`](../migrations/000001_init_schema.up.sql), проверки ключей, каскадов и ожидаемых запросов — [`migrations/schema_test.go`](../migrations/schema_test.go). Смысл полей — `fin-assist/contracts`: `docs/api.md` 1–2, `docs/grpc-api.md` 6, 6.1, 7.1; решения — Confluence PF «Архитектура» («Аутентификация», «Идемпотентность», «Идентификаторы», «PostgreSQL», «Бэкапы»).
 
-Схема — предложение, принятое владельцем по ревью PR #2: решения ниже с аргументами и альтернативами, решения по вопросам — в конце (все закрыты 19.10.2026).
+Исходная схема принята владельцем по ревью PR #2. Дополнение FIN-219 —
+[`000002_phone_start.up.sql`](../migrations/000002_phone_start.up.sql): таблица
+создания/восстановления и адресной очистки кэша, согласована владельцем 23.10.2026.
+Ниже аргументы и инварианты; исходные вопросы в конце закрыты 19.10.2026.
 
 **Решение владельца 19.10.2026 (ревью PR #2):** в БД нет правил валидации и логики. В схеме — только `PRIMARY KEY`, `UNIQUE` (в том числе частичные уникальные индексы), `FOREIGN KEY` с каскадами, `NOT NULL` и `DEFAULT` (в том числе `uuidv7()`, `now()`). Нет `CHECK`, `EXCLUDE`, триггеров и функций; форматы, диапазоны, согласованность состояний и уведомления — код сервиса (раздел «Инварианты в коде сервиса»). `TestSchemaHasNoRulesOrLogic` не даёт новой миграции вернуть их незаметно.
 
@@ -102,6 +105,34 @@
 - `provider` — `zvonok`, `fake` (FIN-122) и будущие; открытый код.
 - `user_id` → `app_user` `ON DELETE CASCADE`: при удалении аккаунта удаляются заявки с его `user_id`: подтверждённые для существующего пользователя (`user_id` ставит подтверждение) и закрытые `Register` (`user_id` ставит регистрация). Неподтверждённые заявки и подтверждённые для нового пользователя без `Register` `user_id` не имеют — их `DeleteAccount` удаляет по номеру (`phone_verification_phone_idx`), см. «Удаление аккаунта (2.5)» и вопрос 6.
 
+### `phone_verification_start` — принадлежность создания и очистка ответов (FIN-219)
+
+| Столбец | Назначение |
+| --- | --- |
+| idempotency_key uuid PK | собственный ключ Start; ответы/секреты только в go-idempotency |
+| request_hash bytea NOT NULL | хеш всего protobuf-входа, в коде ровно 32 байта |
+| verification_id integer NOT NULL FK | phone_verification(id), ON DELETE CASCADE |
+| reserved_windows jsonb NOT NULL | исходные четыре окна лимитов своей незавершённой попытки; [] для завершённого или busy-ключа |
+
+Собственный ключ после сбоя восстанавливает свою попытку по хешу, не резервируя лимит
+повторно. Снимок окон содержит scope/subject/start/end и позволяет вернуть ровно исходные
+списания при доказанном отказе, даже после смены конфигурации/UTC-окна. Право компенсации
+даёт только действующий библиотечный резерв через ReleaseIfCurrent в той же транзакции.
+В таблице нет копий ответов, выбранных номеров или токенов.
+
+verification_id намеренно не UNIQUE: несколько кэшируемых busy-ключей ссылаются на
+один holder. Индекс phone_verification_start_request_idx обслуживает FK/cascade и
+проверку живых кэшей при очистке. Отказ провайдера освобождает holder и удаляет только
+собственную ссылку; чужие busy-ссылки сохраняются для удаления вместе с телефоном.
+Forget блокирует родительскую заявку перед дочерней ссылкой, как каскадная очистка.
+
+DeleteAccount по связям phone → request → start → idempotency_keys удаляет все
+сохранённые Start-ответы телефона, включая no-user ключи до создания аккаунта.
+Ключи дополнительно ограничиваются scope и endpoint и блокируются NOWAIT под Guard.
+Очистка не удаляет заявку/ссылки, пока жив соответствующий кэш (24 ч от завершения).
+Проверки — TestStartRepositoryOwnershipBusyAndAtomicCompletion,
+TestStartAPIRejectionKeepsBusyKeyForPhoneScopedDeletion и остальные TestStartAPI*.
+
 ### `auth_session`, `refresh_token` — refresh-сессии (1.2, 1.4, 1.5)
 
 Сессия — цепочка ротации; `refresh_token` — её звенья.
@@ -174,7 +205,7 @@ RETURNING hits;
 
 Одна транзакция `DeleteAccount` на primary:
 
-1. Guard пользователя (`go-tombstone`, FIN-110); если tombstone уже есть, немедленный OK; иначе блокировка ключей `scope = user_id OR owner_id = user_id` через `FOR UPDATE NOWAIT`, чтение телефона `app_user FOR UPDATE` и удаление адресных ключей;
+1. Guard пользователя (`go-tombstone`, FIN-110); если tombstone уже есть, немедленный OK; иначе блокировка ключей `scope = user_id OR owner_id = user_id` через `FOR UPDATE NOWAIT`, чтение телефона `app_user FOR UPDATE`; блокировка/удаление ключей Start телефона через phone_verification_start (тоже NOWAIT), затем удаление адресных ключей;
 2. `DELETE FROM app_user WHERE id = $1` — каскадом согласия, заявки с `user_id` (подтверждённые для существующего пользователя и закрытые `Register`), сессии и все refresh (синхронный отзыв);
 3. `DELETE FROM phone_verification WHERE phone = $1` — все остальные заявки номера (решение владельца 19.10.2026, вопрос 6, вариант (а)); индекс `phone_verification_phone_idx`;
 4. удаление оставшихся событий `user.timezone_changed` этого пользователя и запись события `user.deleted` для `PurgeUserData` в `bank-statement-data`, `analytics`, `assistant` (`go-outbox`, FIN-109);
@@ -188,8 +219,8 @@ go-tombstone v0.1.0 и go-outbox v0.1.0 подключены, их миграц�
 сервиса. DeleteAccount и доставка PurgeUserData реализованы FIN-219. При занятом ключе auth
 удаление откатывает Guard и повторяет транзакцию: это устраняет обратный порядок
 блокировок replay (key → Guard) и удаления (Guard → key). Повторы ограничены дедлайном
-запроса и 10 секундами. Создание заявки пока не реализовано;
-общее подтверждение и Watch — [verification.md](verification.md).
+запроса и 10 секундами. Создание заявки, общее подтверждение и Watch —
+[verification.md](verification.md).
 Подробности, доставка и проверки — [deletion.md](deletion.md).
 
 Профиль/согласие читаются одним SELECT с LEFT JOIN активного user_consent и текущего
@@ -206,11 +237,11 @@ TestProfilesConsentHistoryAndVersionSwitch, TestProfilesRollbackConcurrencyAndDe
 
 | # | Инвариант | Где в коде |
 |---|---|---|
-| 1 | Телефон — E.164, `+7` и 10 цифр (api.md 1.1) | protovalidate в контракте на входе; домен — тип номера с конструктором, который отклоняет иное; в БД номер попадает только через этот тип |
+| 1 | Телефон — `+7` и 10 цифр (api.md 1.1) | verification.validStartPhone до лимитов/заявки; неверный формат сохраняется библиотекой как VALIDATION_ERROR; unit и API-тесты |
 | 2 | Токены — 256 случайных бит; в БД только SHA-256, 32 байта (`token_hash`, `registration_token_hash`, `refresh_token.token_hash`) | один пакет: `NewToken()` (crypto/rand) и `Hash(token) [32]byte`; репозитории принимают `[32]byte`, а не `[]byte` — неверная длина не компилируется |
 | 3 | Согласованность заявки: подтверждена ⇔ есть `is_new_user`; существующий пользователь ⇒ `user_id`; новый ⇔ хеш `registration_token`; шифротекст ⇔ `result_key_id`, только у подтверждённой, стирается при закрытии; закрытая ⇒ подтверждена и `closed_at ≥ verified_at`, у нового — `user_id` от `Register`; подтверждение только с `provider_call_id` и в срок `[created_at, expires_at]` | переходы состояний — методы сущности домена (`Verify`, `Close`, `Release`), каждый пишет весь набор столбцов одним `UPDATE … WHERE` с условием исходного состояния (`verified_at IS NULL`, `closed_at IS NULL`); `RowsAffected = 0` — переход не применён (повтор постбэка, гонка) |
 | 4 | Одна заявка держит номер | **в схеме** — частичный `UNIQUE (phone) WHERE released_at IS NULL`; код освобождает держателя с прошедшим `expires_at` в транзакции создания (раздел заявок); «держатель не найден» после пустой вставки — повтор, не ошибка. Сериализацию даёт индекс, advisory-lock не нужен |
-| 5 | `expires_at > created_at`, срок 5 минут | `expires_at` вычисляет только сценарий 1.1 из часов: `now + 5m` |
+| 5 | `expires_at > created_at`, срок 5 минут | резерв — now+5m; финал — проверенный StartedAt+5m; новый call_id при восстановлении получает новый срок без переноса старого подтверждения, тот же call_id не продлевается |
 | 6 | Подтверждение будит `WatchPhoneVerification` | метод репозитория «подтвердить» в той же транзакции вызывает `pg_notify('phone_verification', id)`; другого способа записать `verified_at` у репозитория нет |
 | 7 | После удаления аккаунта не остаётся заявок на его номер (вопрос 6) | `DeleteAccount` в своей транзакции: `DELETE FROM app_user` (каскад) и `DELETE FROM phone_verification WHERE phone = $1`; номер берётся из строки `app_user`, прочитанной `FOR UPDATE` в начале той же транзакции |
 | 8 | Тема — `system`/`light`/`dark` | enum контракта `Theme` на входе (закрытый набор, api.md 2.2), в БД пишет код по таблице соответствия |
@@ -220,8 +251,11 @@ TestProfilesConsentHistoryAndVersionSwitch, TestProfilesRollbackConcurrencyAndDe
 | 12 | Документ согласия: `url` — `https://`, не длиннее 2000; `title` — от 1 до 500 символов; формат `type` и `version`; у каждого типа, который читает сервис, есть ровно одна текущая версия (схема держит «не больше одной») | документы приходят только миграцией данных; тест миграций данных проверяет все строки `consent_document` (появится с первой версией документа) |
 | 13 | Звено refresh: `generation > 0`, `expires_at > issued_at`, `rotated_at ≥ issued_at` | звенья пишет только сценарий выдачи (`generation = 1`) и ротации (`generation + 1`, время из часов) |
 | 14 | `provider`, `result_key_id`, `scope` лимита — известные значения | константы в коде; `provider` — имя реализации интерфейса провайдера, `scope` — из конфигурации лимитов |
-| 15 | Счётчик лимита: `hits > 0`, `window_end > window_start`, `subject` ≤ 64 | единственный `INSERT … ON CONFLICT DO UPDATE` счётчика; окно вычисляет функция домена |
-| 16 | `provider_call_id` — 1…128 символов. Внешний недоверенный ввод: приходит из ответа API и постбэка провайдера, а не из запроса клиента и не из констант | адаптер провайдера отклоняет пустое или длиннее 128 значение как ошибку рассогласования (лог и метрика, как отказ по дублю); в БД попадает только проверенное значение. Иначе пустые `call_id` сталкивались бы на `phone_verification_provider_call_key`, а значение в несколько КБ ломало бы вставку в индекс (bare `INTERNAL`) |
+| 15 | Счётчик лимита: `hits ≥ 0`, `window_end > window_start`, `subject` ≤ 64 | Lock вставляет 0, Check атомарно увеличивает все окна; Refund уменьшает только существующие исходные окна с hits>0; время вычисляет limiter, компенсация fenced библиотекой |
+| 16 | `provider_call_id` — 1…128 байт. Недоверенный ввод провайдера | validateCall отклоняет пустой/длинный ID с INTERNAL без ПДн и частичного завершения; общий Confirm проверяет Proof отдельно; неверный ответ не превращается в ErrProviderDuplicate и не даёт компенсацию неопределённого внешнего эффекта |
+| 17 | Принадлежность восстановления, request_hash32, windows — массив из 4 или 0 элементов | Starter сравнивает свой ключ/хеш, репозиторий проверяет сохранённую форму; Refund проверяет четыре фиксированных scope/порядок/границы; busy не даёт владения чужой попыткой; unit/PG/API-тесты |
+| 18 | Завершение не воскрешает удалённую/изменённую попытку | DoReserved fencing + Complete CAS по id/provider/placeholder hash/ключу/хешу и исходному pending-состоянию; selector и encrypted replay коммитятся вместе; тесты rollback/конкуренции с Delete |
+| 19 | callback_number принадлежит свежему ответу провайдера | validateCall: телефон/срок/call_id, 1–1000 номеров E.164; selector получает копию, результат проверяется по исходному списку; FIN-216 реализует выбор/хранение пула |
 
 Что осталось в схеме: первичные ключи, уникальность (телефон пользователя, одно действующее согласие на тип, одна текущая версия документа на тип, одна заявка держит номер, хеши токенов, `call_id`, одно живое звено refresh, поколение звена), внешние ключи с каскадами (удаление аккаунта, ссылки на версии документов, очистка заявок), `NOT NULL`, значения по умолчанию.
 
@@ -233,6 +267,8 @@ TestProfilesConsentHistoryAndVersionSwitch, TestProfilesRollbackConcurrencyAndDe
 |---|---|
 | Живой пользователь по телефону: `SELECT … FROM app_user WHERE phone = $1` | `app_user_phone_key` |
 | Заявка по хешу токена (1.2): `WHERE token_hash = $1` | `phone_verification_token_hash_key` |
+| Восстановление Start по ключу | `phone_verification_start_pkey` |
+| Живой кэш Start при очистке / каскад ссылок | `phone_verification_start_request_idx`, PK библиотеки idempotency_keys |
 | Заявка по хешу `registration_token` (1.3) | `phone_verification_registration_token_hash_key` |
 | Постбэк по `call_id` | `phone_verification_provider_call_key` |
 | Номер занят / `retry_at` дубля: `WHERE phone = $1 AND released_at IS NULL`; освобождение истёкшего держателя; `ON CONFLICT (phone) WHERE released_at IS NULL` | `phone_verification_phone_held_key` (частичный уникальный) |
@@ -260,8 +296,9 @@ phone-cleanup реализует очистку результатов и зая
 освобождает holder, другая отвязывает старые ссылки auth_session через SKIP LOCKED,
 третья удаляет старые заявки только без ссылок. Занятая сессия пропускается, её заявка
 остаётся до следующего прохода. Живой refresh не удаляется; результат в своём
-15-минутном окне сохраняется даже при неконсистентном возрасте строки. Новых таблиц
-и миграций нет. Проверки — TestPhoneCleanupSkipsBusySessionsAndPreservesRefresh,
+15-минутном окне сохраняется даже при неконсистентном возрасте строки. Живой кэш Start
+сохраняет заявку/ссылки до истечения 24 ч от завершения: дата создания может быть
+раньше на время внешнего вызова. Проверки — TestPhoneCleanupSkipsBusySessionsAndPreservesRefresh,
 TestPhoneConfirmationAtomicReplayAndPrimaryReads, API-тесты verification_test.go.
 
 Задания сервиса, пачками, не миграции:

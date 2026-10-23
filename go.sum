@@ -53,8 +53,8 @@ github.com/felixge/httpsnoop v1.1.0 h1:3YtUj32ZZkqZtt3sZZsClsymw/QDuVfpNhoA31zeO
 github.com/felixge/httpsnoop v1.1.0/go.mod h1:Zqxgdd+1Rkcz8euOqdr7lqgCRJztwr5hp9vDSi5UZCE=
 github.com/fin-assist/contracts/gen/go v0.4.0 h1:tXxehsDQ8olxaVgFZ4fEAVK/K+VHZZKiZ7uAo+SfMjo=
 github.com/fin-assist/contracts/gen/go v0.4.0/go.mod h1:R03qUcSFzz6G6LclYBDqybz9kqY7UDu7cA4FoS9Hivg=
-github.com/fin-assist/go-idempotency v0.2.0 h1:9+j0G2Qq057s71IlYQ2p3IruvkNJmIIs3zksTrUod+M=
-github.com/fin-assist/go-idempotency v0.2.0/go.mod h1:ZZPbRWt+o2AqZwpcgZxv/BNpQQoEQeBc7iwbscApTxU=
+github.com/fin-assist/go-idempotency v0.3.0 h1:e0iqrXJKkId/Seh73DL/QeL4Hy5E8C18UDxPxZ6LgNA=
+github.com/fin-assist/go-idempotency v0.3.0/go.mod h1:ZZPbRWt+o2AqZwpcgZxv/BNpQQoEQeBc7iwbscApTxU=
 github.com/fin-assist/go-identity v0.1.0 h1:Ofxc2VciXH+hQeFD39PXve1cSoz1lY+9ytHhu5Lt6U8=
 github.com/fin-assist/go-identity v0.1.0/go.mod h1:nl6akeMFFAXIoyJah3voo1g469DSbaX9o3sLCmwV4Fo=
 github.com/fin-assist/go-outbox v0.1.0 h1:uO1jiRsbEb9V2yjULnqWh3U/ibLKnDCMFyx4+53MVFY=

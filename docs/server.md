@@ -92,7 +92,8 @@ key_unavailable/forbidden/user_id. ACL выполняет сервер, поэт
 
 Лимиты FIN-219: `finassist_rate_limit_configured_limit{scope}`,
 `finassist_rate_limit_window_seconds{scope}`, `finassist_rate_limit_checks_total{scope,result}`,
-`finassist_rate_limit_consumed_total{scope}`, `finassist_rate_limit_window_utilization_ratio{scope}`
+`finassist_rate_limit_consumed_total{scope}`, `finassist_rate_limit_refunded_total{scope}`,
+`finassist_rate_limit_window_utilization_ratio{scope}`
 (histogram). Семь фиксированных scope, result — allowed/denied/error. Настройки публикуются
 сразу; списания и заполнение — только после коммита через Receipt.Committed. Смысл
 показателей, границы применения и выражения алертов — [limits.md](limits.md).
@@ -105,6 +106,9 @@ phone-notifications использует одно отдельное primary-с�
 phone-cleanup раз в минуту стирает истёкшие результаты, освобождает номера и удаляет
 старые заявки, сохраняя живые refresh-сессии. Обрыв LISTEN закрывает ожидающие Watch;
 worker пересоздаёт соединение, клиент возобновляет поток с тем же секретом.
+finassist_phone_verification_provider_duplicate_total считает отказы провайдера по
+дублю при локально свободном номере; без меток и ПДн. consumed/refunded публикуются
+после commit и различают резервирование попытки и его доказанную компенсацию.
 Метрики finassist_phone_watch_active_streams, finassist_phone_watch_max_streams,
 finassist_phone_watch_listener_ready и finassist_phone_watch_rejected_total{reason}
 показывают заполнение, предел и недоступность. reason — только capacity/not_ready,

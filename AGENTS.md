@@ -41,9 +41,10 @@ updates them in the same PR. A service made from the template rewrites the first
 
 Functional RPCs: GetConsentDocument, GetSigningKeys, GetAssistantConsentStatus, GetProfile,
 UpdateProfile, GrantAssistantConsent, RevokeAssistantConsent, Register, RefreshTokens,
-Logout, DeleteAccount and WatchPhoneVerification. StartPhoneVerification
-is a later FIN-219 stage (still UNIMPLEMENTED). Do not describe
-this as a complete sign-in service. go-identity v0.1.0 supplies only the verifiers
+Logout, DeleteAccount, WatchPhoneVerification and StartPhoneVerification (all 13 RPCs).
+The default executable has no provider/selector and refuses creation with INTERNAL;
+concrete Zvonok/fake adapters and number selection remain FIN-139/122/216. Do not claim
+production phone sign-in is ready. go-identity v0.1.0 supplies only the verifiers
 and token sources: keep the existing server ACL and reqctx chain, without a second identity
 interceptor. The signing package supplies its local JWKS provider (no self-RPC). go-tombstone
 v0.1.0 reads primary and its migration source precedes the service. Assistant documents check
@@ -59,7 +60,7 @@ a dedicated primary pool and operator-configured recipients, with system credent
 Timezone defaults to bank-statement-data and assistant; deletion requires bank-statement-data,
 analytics and assistant. Pool capacity is at least the union of recipients + 3. Missing configured peer addresses fail startup. See docs/profile.md.
 
-Register and RefreshTokens use go-idempotency v0.2.0 with encrypted no-user replies and result ownership (FIN-226).
+Start, Register and RefreshTokens use go-idempotency v0.3.0 with encrypted no-user replies and result ownership (FIN-226).
 Their key/effect transactions use a dedicated primary pool; IP attempts commit in
 the ordinary pool before token checks, even for rejected secrets. Reuse rolls the
 non-cacheable 401 back, then rechecks and commits revocation before returning it.
@@ -74,6 +75,17 @@ local data, owned/scoped cached credentials, every request of the phone and old 
 jobs, then schedules user.deleted. Repeats add no jobs. Cached-key locks use NOWAIT:
 a busy replay rolls back the whole deletion before retrying, bounded by the caller and
 10 seconds. Never wait for an auth key while retaining the tombstone guard. See docs/deletion.md.
+
+Start commits the library reservation, four rate-limit slots and phone claim before
+calling Provider.Create/Recover outside a transaction. Its durable phone_verification_start
+link owns recovery and the original refundable windows; completed and busy keys retain
+empty windows for phone-scoped deletion. Completion takes key -> guard/user -> request;
+fresh claims take key -> limits -> guard/user -> request -> link. Selector runs inside
+the completion transaction. Only ReleaseIfCurrent permits refund after a definite provider
+rejection, in the same transaction as release; uncertain outcomes keep their claim.
+Deletion also purges successful and busy Start caches through phone links, including
+keys created before the account existed. Cleanup keeps those links while a cache is live.
+Runtime backend injection is app.WithPhoneBackend; controlled adapters live in API tests only.
 
 Phone confirmation accepts provider-checked Proof through the trusted Go usecase only: no
 public confirmation hook. Watch commits an IP attempt before secret lookup. A shared
@@ -96,7 +108,7 @@ See docs/verification.md, including capacity/availability metrics and key retent
 | Access JWT signing, rotation snapshot, local public JWKS | `internal/signing/` |
 | Opaque 256-bit secrets, shared IANA timezone validation | `internal/token/`, `internal/domain/` |
 | Registration, refresh rotation/reuse and logout | `internal/auth/`, `internal/adapter/grpc/auth/`, `internal/adapter/postgres/auth.go` |
-| Common confirmation, snapshots, Watch, result cipher and notification fanout | `internal/verification/`, `internal/adapter/verificationcrypto/`, `internal/adapter/postgres/verification*.go`, `internal/app/phone.go` |
+| Phone creation/recovery, confirmation, snapshots, Watch and notification fanout | `internal/verification/`, `internal/adapter/verificationcrypto/`, `internal/adapter/postgres/verification*.go`, `internal/app/phone.go`, `internal/app/sessions.go` |
 | Current consent-document usecase | `internal/consent/` |
 | Profile settings, consent lifecycle and system status | `internal/profile/`, `internal/adapter/grpc/profile/`, `internal/adapter/postgres/profile.go` |
 | Atomic deletion and local data purge | `internal/deletion/`, `internal/adapter/postgres/deletion.go` |
@@ -304,8 +316,12 @@ Test changes to the report with `python3 -m unittest discover -s scripts -p 'tes
 - Waiting for the review: react to the PR's GitHub events when the session receives them; otherwise check 3 minutes
   after the request, then every 2 minutes. A reviewer has answered when it posted its review or summary for the
   latest commit; for Codex (`chatgpt-codex-connector[bot]`) «Didn't find any major issues» or a 👍 without a comment
-  also counts. A reviewer silent for 15 minutes after the last request: say so in the PR and to the owner, stop
-  waiting for it. The cycle ends when both answered the latest request and no thread is open.
+  also counts, only for the latest request/current commit. If Codex has no result after 5 minutes, request it
+  again on the current SHA; repeat every 5 minutes until a result, an explicit integration error or the owner's
+  stop command. Running and the eyes reaction are not results; no 15-minute cutoff applies to Codex.
+  Other reviewers silent for 15 minutes: report that in the PR and to the owner, then stop waiting for them.
+  The cycle ends when the requested reviewers answered the latest request and no thread is open (or their
+  explicit error/allowed timeout was reported). Follow the owner's choice of reviewers for the session.
 - Address findings in follow-up commits on the same branch, reply in the thread and resolve it, then request a
   review again. Agents never merge a PR; the owner does.
 

@@ -9,7 +9,7 @@
 - [docs/migrations.md](docs/migrations.md) — миграции и запросы на pgx ([FIN-115](https://finassist.youtrack.cloud/issue/FIN-115)).
 - [docs/schema.md](docs/schema.md) — схема БД `user`: сущности, инварианты, ожидаемые запросы и индексы ([FIN-112](https://finassist.youtrack.cloud/issue/FIN-112)).
 - [docs/deletion.md](docs/deletion.md) — атомарное удаление аккаунта и доставка PurgeUserData.
-- [docs/verification.md](docs/verification.md) — общее подтверждение, Watch, шифрование результата и очистка.
+- [docs/verification.md](docs/verification.md) — создание и восстановление заявки, общее подтверждение, Watch и очистка.
 - [AGENTS.md](AGENTS.md) — карта и правила для агентов, Code Review Rules.
 
 ## Автоматизация обновлений зависимостей
@@ -29,7 +29,7 @@ Ed25519-подпись access JWT на 15 минут, GetSigningKeys и GetConse
 Маршруты настраиваются без изменения производителя события, для доставки выделен
 отдельный primary-пул. Детали и ограничения — [docs/profile.md](docs/profile.md).
 
-Register, RefreshTokens и Logout работают через go-idempotency v0.2.0 с владельцем результата (FIN-226): зашифрованный
+StartPhoneVerification, Register, RefreshTokens и Logout работают через go-idempotency v0.3.0 с владельцем результата (FIN-226): зашифрованный
 повтор, одноразовая регистрация, скользящие refresh-сессии и отзыв цепочки при reuse.
 Регистрация атомарно сохраняет согласие на ПДн, первую сессию и начальный timezone.
 Две подтверждённые заявки одного нового номера получают один аккаунт и отдельные
@@ -40,22 +40,29 @@ DeleteAccount синхронно удаляет локальные данные,
 вместе с заданием PurgeUserData для bank-statement-data, analytics и assistant. Повтор
 успешен без нового задания. Детали — [docs/deletion.md](docs/deletion.md).
 
-Реализованы 12 из 13 RPC. WatchPhoneVerification читает primary, слушает общий
+Реализованы все 13 RPC. WatchPhoneVerification читает primary, слушает общий
 LISTEN/NOTIFY, отдаёт результат повторно 15 минут и применяет IP-лимит до секрета.
 Общее подтверждение атомарно сохраняет результат и сессию существующего пользователя;
 новый получает токен регистрации. Детали — [docs/verification.md](docs/verification.md).
 
-StartPhoneVerification ещё UNIMPLEMENTED. Реальных и автоматически подтверждающих
-провайдеров нет (FIN-139/FIN-122); runtime не создаёт заявки и не имеет публичной
-ручки обхода звонка. Автотесты создают явно тестовые pending-заявки и вызывают общий
-путь подтверждения. Создание заявок и подключение провайдеров — следующие этапы.
+StartPhoneVerification резервирует попытку до внешнего вызова и завершает её отдельной
+транзакцией: повтор отдаёт прежний секрет без списания, неопределённый исход
+восстанавливается своим ключом, явный отказ возвращает исходный резерв лимита.
+До запуска новой сборки нужна миграция 000002_phone_start.
+Реальных и автоматически подтверждающих провайдеров пока нет (FIN-139/FIN-122),
+выбор и хранение пула остаются FIN-216. Без пары доверенных адаптеров provider/selector
+штатный бинарь возвращает INTERNAL при создании, не резервируя попытку и не выдавая
+фиктивного успеха. Подключение — через Go-сборку internal/app.WithPhoneBackend;
+публичной ручки обхода звонка нет. API-тесты используют управляемые адаптеры и проходят
+полный вход через Start → Confirm → Watch → Register/Refresh/Logout.
 
 Подготовлен общий механизм лимитов аутентификации (`internal/ratelimit`): фиксированные
 UTC-окна в primary PostgreSQL, атомарная проверка нескольких окон, настройки и метрики.
 При старте публикуются настройки семи политик; фоновая очистка удаляет старые окна.
 Watch, Register и RefreshTokens считают попытки до проверки токена, включая отказы 401/403/422;
-повтор сохранённого ответа и конфликт ключа лимит не расходуют. Start подключится
-с созданием заявки. Правила интеграции и наблюдаемость — [docs/limits.md](docs/limits.md).
+повтор сохранённого ответа и конфликт ключа лимит не расходуют. Start применяет
+четыре окна до занятости номера, а возвраты резерва видны отдельным счётчиком.
+Правила интеграции и наблюдаемость — [docs/limits.md](docs/limits.md).
 
 Документы согласий публикуются миграциями данных в consent_document: новая строка с
 версией, утверждённым названием и URL; прежний is_current снимается перед включением
@@ -71,7 +78,7 @@ internal/app/                      assembly: identity, pools, server, wire() (ha
 internal/app/apitest/              the whole service in-process for API tests
 internal/signing/                  access JWT signing and public JWKS loaded from trusted files
 internal/consent/                  current consent-document usecase
-internal/verification/             common confirmation, primary snapshots, Watch and cleanup
+internal/verification/             phone creation/recovery, common confirmation, Watch and cleanup
 internal/adapter/verificationcrypto/ independent AES-GCM result encryption
 internal/profile/                  profile settings and assistant-consent usecases
 internal/deletion/                 atomic account deletion and remote purge scheduling
