@@ -74,7 +74,7 @@ make run
 
 При make up контейнер user работает с UID/GID локального пользователя, чтобы читать
 его ключ 0600; Dockerfile по-прежнему использует nonroot. Для прямого docker compose up
-сначала выполните make dev-key и передайте LOCAL_UID/LOCAL_GID. Требуется OpenSSL с Ed25519.
+сначала выполните make dev-key и передайте LOCAL_UID/LOCAL_GID. Ключ создаёт Go-команда cmd/dev-key; OpenSSL не требуется.
 Каталог .local исключён из git и Docker build context. make run использует тот же ключ.
 
 Настройки stage/prod и ротация ключей — [docs/config.md](docs/config.md).

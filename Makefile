@@ -44,4 +44,4 @@ migrate: build ## migrate up against the compose PostgreSQL
 # A throwaway local user-signing key; never replace an existing key on repeated runs.
 dev-key:
 	@mkdir -p .local
-	@test -s .local/jwt-signing.pem || (umask 077 && openssl genpkey -algorithm ED25519 -out .local/jwt-signing.pem)
+	@go run ./cmd/dev-key .local/jwt-signing.pem

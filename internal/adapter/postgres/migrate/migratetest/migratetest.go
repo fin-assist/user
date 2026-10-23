@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -152,7 +153,15 @@ const IrreversibleMarker = "-- irreversible"
 
 func irreversible(t *testing.T, src appmigrate.Source, v uint) bool {
 	t.Helper()
-	matches, err := fs.Glob(src.FS, fmt.Sprintf("%06d_*.down.sql", v))
+	files, err := fs.Glob(src.FS, "*_*.down.sql")
+	var matches []string
+	for _, name := range files {
+		prefix, _, _ := strings.Cut(name, "_")
+		n, parseErr := strconv.ParseUint(prefix, 10, 64)
+		if parseErr == nil && n == uint64(v) {
+			matches = append(matches, name)
+		}
+	}
 	if err != nil || len(matches) != 1 {
 		t.Fatalf("%s: down file of %d: %v %v", src.Name, v, matches, err)
 	}

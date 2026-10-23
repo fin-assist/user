@@ -48,7 +48,7 @@ interceptor. The signing package supplies its local JWKS provider (no self-RPC).
 v0.1.0 reads primary and its migration source precedes the service. Assistant documents check
 the conditional user token and tombstone in their handler; personal-data documents are public
 to authenticated bank-bff. Signing key files are required even in insecure-dev. Make up/run
-create an ignored .local key; never put that directory in git or the Docker build context.
+create an ignored .local key through `cmd/dev-key` (not shipped in the service image); never put that directory in git or the Docker build context.
 
 ## Repository map
 
