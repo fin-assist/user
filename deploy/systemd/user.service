@@ -18,7 +18,15 @@ EnvironmentFile=/etc/finassist/user/env
 Environment=ENV=stage
 LoadCredential=db-primary-dsn:/etc/finassist/user/db-primary-dsn
 Environment=DB_PRIMARY_DSN_FILE=%d/db-primary-dsn
-# The service token file of FIN-119 goes the same way:
+LoadCredential=jwt-signing:/etc/finassist/user/jwt-signing.pem
+Environment=JWT_SIGNING_KEY_FILE=%d/jwt-signing
+# env must set JWT_KEY_ID, JWT_ISSUER, JWT_AUDIENCE, SERVICE_AUTH_MODE and SERVICE_TOKEN_ISSUER.
+# With SERVICE_AUTH_MODE=stage:
+#LoadCredential=stage-signing:/etc/finassist/user/stage-signing.pem
+#Environment=STAGE_SIGNING_KEY_FILE=%d/stage-signing
+#Environment=STAGE_PUBLIC_KEYS_FILE=/etc/finassist/stage-public.jwks
+# With SERVICE_AUTH_MODE=kubernetes the projected credentials and CA are required.
+# The outgoing Kubernetes service token goes the same way:
 #LoadCredential=service-token:/etc/finassist/user/service-token
 #Environment=SERVICE_TOKEN_FILE=%d/service-token
 

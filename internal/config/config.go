@@ -44,6 +44,7 @@ type Config struct {
 	GRPC    GRPCConfig
 	HTTP    HTTPConfig
 	DB      DBConfig
+	Signing SigningConfig
 	Auth    AuthConfig
 	Peers   map[string]string // other services: name -> gRPC target, from PEER_<NAME>_ADDR
 	// ShutdownDelay keeps serving after NOT_SERVING so balancers stop sending new calls.
@@ -77,9 +78,18 @@ type DBConfig struct {
 	MaxConns   int32
 }
 
+// SigningConfig pins access-token identity and trusted key files.
+type SigningConfig struct {
+	PrivateKeyFile, PublicKeysFile, KeyID string
+	Issuer, Audience                      string
+}
+
 // AuthConfig configures identity checks.
 type AuthConfig struct {
-	Mode AuthMode
+	Mode                                                     AuthMode
+	ServiceMode, ServiceIssuer                               string
+	StageKeyFile, StagePublicKeysFile                        string
+	KubernetesJWKSURL, KubernetesCAFile, KubernetesTokenFile string
 	// ServiceTokenFile holds this service's ServiceAccount token, presented on outgoing calls.
 	ServiceTokenFile string
 }
@@ -138,8 +148,16 @@ func load(getenv func(string) string, readFile func(string) ([]byte, error), env
 			MaxConns:   int32(r.int("DB_MAX_CONNS")),
 		},
 		Auth: AuthConfig{
-			Mode:             AuthMode(r.str("AUTH_MODE")),
-			ServiceTokenFile: r.str("SERVICE_TOKEN_FILE"),
+			Mode:        AuthMode(r.str("AUTH_MODE")),
+			ServiceMode: r.str("SERVICE_AUTH_MODE"), ServiceIssuer: r.str("SERVICE_TOKEN_ISSUER"),
+			StageKeyFile: r.str("STAGE_SIGNING_KEY_FILE"), StagePublicKeysFile: r.str("STAGE_PUBLIC_KEYS_FILE"),
+			KubernetesJWKSURL: r.str("KUBERNETES_JWKS_URL"), KubernetesCAFile: r.str("KUBERNETES_CA_FILE"),
+			KubernetesTokenFile: r.str("KUBERNETES_TOKEN_FILE"),
+			ServiceTokenFile:    r.str("SERVICE_TOKEN_FILE"),
+		},
+		Signing: SigningConfig{
+			PrivateKeyFile: r.str("JWT_SIGNING_KEY_FILE"), PublicKeysFile: r.str("JWT_PUBLIC_KEYS_FILE"),
+			KeyID: r.str("JWT_KEY_ID"), Issuer: r.str("JWT_ISSUER"), Audience: r.str("JWT_AUDIENCE"),
 		},
 		Peers:           map[string]string{},
 		ShutdownDelay:   r.duration("SHUTDOWN_DELAY"),
@@ -183,6 +201,12 @@ func (c Config) validate() []error {
 	}
 	switch c.Auth.Mode {
 	case AuthVerify:
+		if c.Auth.ServiceMode != "kubernetes" && c.Auth.ServiceMode != "stage" {
+			errs = append(errs, errors.New("SERVICE_AUTH_MODE must be kubernetes or stage"))
+		}
+		if c.Auth.ServiceMode == "stage" && c.Env != EnvDev && c.Env != EnvStage {
+			errs = append(errs, errors.New("SERVICE_AUTH_MODE=stage is allowed only with ENV=dev or stage"))
+		}
 	case AuthInsecureDev:
 		if c.Env != EnvDev {
 			errs = append(errs, fmt.Errorf("AUTH_MODE=insecure-dev is allowed only with ENV=dev, not %q", c.Env))

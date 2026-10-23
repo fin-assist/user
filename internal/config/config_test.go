@@ -98,6 +98,23 @@ func TestInsecureDevOnlyInDev(t *testing.T) {
 	}
 }
 
+func TestServiceAuthenticationMode(t *testing.T) {
+	for _, tt := range []struct {
+		env, mode string
+		valid     bool
+	}{
+		{"prod", "stage", false}, {"stage", "stage", true}, {"dev", "stage", true}, {"prod", "kubernetes", true}, {"prod", "other", false},
+	} {
+		vars := base()
+		vars["ENV"], vars["SERVICE_AUTH_MODE"] = tt.env, tt.mode
+		get, list := env(vars)
+		_, err := load(get, noFiles, list)
+		if (err == nil) != tt.valid {
+			t.Fatalf("env=%s mode=%s: %v", tt.env, tt.mode, err)
+		}
+	}
+}
+
 func TestPeers(t *testing.T) {
 	vars := base()
 	vars["PEER_BANK_STATEMENT_DATA_ADDR"] = "dns:///bank-statement-data.finassist.svc.cluster.local:9090"

@@ -20,7 +20,19 @@
 |---|---|---|
 | `SERVICE_NAME` | — (обязательна) | имя сервиса: логи, `application_name`, токен в dev |
 | `ENV` | `prod` | `dev`, `stage` или `prod`. Reflection включён только при `dev` |
-| `AUTH_MODE` | `verify` | `verify` — проверка JWT и токенов ServiceAccount (FIN-119, пока не подключена: сервис не стартует); `insecure-dev` — токены `dev:<имя>` без проверки, только при `ENV=dev` |
+| `AUTH_MODE` | `verify` | `verify` — проверка JWT и сервисных токенов через go-identity; `insecure-dev` — токены `dev:<имя>` без проверки, только при `ENV=dev` |
+| `JWT_SIGNING_KEY_FILE` | — | PKCS#8 PEM Ed25519, приватный ключ access JWT; файл 0600, обязателен при старте |
+| `JWT_PUBLIC_KEYS_FILE` | — | необязательный публичный JWKS Ed25519 для перекрытия ключей при ротации |
+| `JWT_KEY_ID` | — | kid активного ключа access JWT, обязателен при старте |
+| `JWT_ISSUER` | — | iss access JWT, обязателен; одинаков у всех потребителей |
+| `JWT_AUDIENCE` | — | aud access JWT, обязателен; одинаков у всех потребителей |
+| `SERVICE_AUTH_MODE` | `kubernetes` | kubernetes — ServiceAccount; stage — подписанные JWT сервисов, только dev/stage |
+| `SERVICE_TOKEN_ISSUER` | — | iss сервисных токенов; для kubernetes — issuer кластера, для stage — общий issuer стенда |
+| `STAGE_SIGNING_KEY_FILE` | — | приватный PKCS#8 Ed25519 ключ этого сервиса для SERVICE_AUTH_MODE=stage |
+| `STAGE_PUBLIC_KEYS_FILE` | — | публичный JWKS сервисов стенда; kid — имя сервиса; отдельный от ключей пользователей |
+| `KUBERNETES_JWKS_URL` | `https://kubernetes.default.svc/openid/v1/jwks` | доверенный HTTPS endpoint JWKS API-сервера |
+| `KUBERNETES_CA_FILE` | `/var/run/secrets/kubernetes.io/serviceaccount/ca.crt` | доверенный CA API-сервера, TLS-проверка обязательна |
+| `KUBERNETES_TOKEN_FILE` | `/var/run/secrets/kubernetes.io/serviceaccount/token` | штатный API-server-audience токен пода для чтения JWKS; не finassist-internal |
 | `SERVICE_TOKEN_FILE` | — | файл с токеном ServiceAccount этого сервиса для исходящих вызовов (FIN-119) |
 | `DB_PRIMARY_DSN` / `_FILE` | — (обязательна) | DSN primary (`-rw`) |
 | `DB_REPLICA_DSN` / `_FILE` | — | DSN реплик (`-ro`); пусто — чтение тоже с primary. На стенде оба указывают на один PostgreSQL |
@@ -47,3 +59,37 @@
 <!-- generated:config-migrate:end -->
 
 Как действуют таймауты миграций — [migrations.md](migrations.md), «Таймауты».
+
+## Ключи access JWT и ротация
+
+JWT_SIGNING_KEY_FILE — PKCS#8 PEM Ed25519, права 0600 или строже. JWT_KEY_ID, JWT_ISSUER
+и JWT_AUDIENCE обязательны при старте, в том числе в dev. Issuer и audience задаются
+оператором одинаково для user и всех проверяющих сервисов; значений по умолчанию нет.
+Access JWT живёт 15 минут. Ключи загружаются при старте, изменения файлов требуют рестарта.
+
+JWT_PUBLIC_KEYS_FILE — необязательный публичный JWKS только с Ed25519-ключами. Активный
+ключ добавляется автоматически; совпавший kid должен иметь тот же публичный ключ.
+Приватные поля JWK и неизвестные поля отвергаются. Приватные файлы ограничены 8 KiB,
+JWKS — 1 MiB и 64 ключами, включая активный. GetSigningKeys никогда не возвращает приватный ключ.
+
+Ротация: сначала добавить новый публичный ключ к старому, перезапустить все реплики с
+прежним активным ключом и общим расширенным JWKS; выдержать минимум минуту для обновления
+кэшей потребителей. Затем развернуть новый приватный ключ и kid, сохраняя оба публичных.
+Старый публичный удалить только после истечения всех выданных им access JWT (15 минут
+после переключения последней реплики) и запаса на развёртывание. Не смешивать ключи
+пользователей и сервисов стенда.
+
+## Проверка сервисных токенов
+
+При AUTH_MODE=verify требуется SERVICE_TOKEN_ISSUER. В kubernetes также нужны
+SERVICE_TOKEN_FILE (projected audience finassist-internal), KUBERNETES_TOKEN_FILE
+(штатный audience API-сервера), CA и HTTPS JWKS URL. TLS не отключается и redirects
+не принимаются. Ключи пользователя обновляются из локального снимка, кластерные —
+заданием кэша go-identity. Внешняя загрузка ключей ограничена библиотекой пятью секундами.
+
+В stage: ENV=stage, SERVICE_AUTH_MODE=stage, отдельный STAGE_SIGNING_KEY_FILE этого
+сервиса и STAGE_PUBLIC_KEYS_FILE с публичными ключами всех разрешённых сервисов (kid —
+имя вызывающего). JWT_ISSUER/JWT_AUDIENCE относятся к пользователю, SERVICE_TOKEN_ISSUER
+— к сервисам; это разные границы доверия. Для смены stage-ключей нужен согласованный
+перезапуск источников и проверяющих сервисов; ротация сервиса с двумя ключами одного
+имени библиотекой пока не поддерживается.

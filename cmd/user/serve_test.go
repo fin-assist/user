@@ -2,6 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -9,12 +15,12 @@ import (
 	"github.com/fin-assist/user/internal/adapter/postgres/migrate/migratetest"
 )
 
-func TestServeFailsBeforeConnectingWithoutVerifiers(t *testing.T) {
+func TestServeFailsBeforeConnectingWithoutSigningKey(t *testing.T) {
 	t.Setenv("SERVICE_NAME", "user")
 	t.Setenv("DB_PRIMARY_DSN", "postgres://nowhere.invalid/db")
 	t.Setenv("ENV", "prod")
 	err := runServe(t.Context())
-	if err == nil || !strings.Contains(err.Error(), "FIN-119") {
+	if err == nil || !strings.Contains(err.Error(), "signing:") {
 		t.Fatalf("error %v", err)
 	}
 }
@@ -22,6 +28,7 @@ func TestServeFailsBeforeConnectingWithoutVerifiers(t *testing.T) {
 // The whole serve path against a real database: config, pools, server, ops listener,
 // readiness and an orderly stop on cancel.
 func TestServeRunsAndStops(t *testing.T) {
+	setSigningKey(t)
 	dsn := migratetest.DSN(t)
 	for k, v := range map[string]string{
 		"SERVICE_NAME": "user", "ENV": "dev", "AUTH_MODE": "insecure-dev", "LOG_LEVEL": "error",
@@ -46,6 +53,7 @@ func TestServeRunsAndStops(t *testing.T) {
 }
 
 func TestServeFailsOnBadInput(t *testing.T) {
+	setSigningKey(t)
 	base := map[string]string{"SERVICE_NAME": "user", "ENV": "dev", "AUTH_MODE": "insecure-dev", "LOG_LEVEL": "error"}
 	cases := map[string]map[string]string{
 		"config":   {"DB_PRIMARY_DSN": ""},
@@ -65,4 +73,24 @@ func TestServeFailsOnBadInput(t *testing.T) {
 			}
 		})
 	}
+}
+
+func setSigningKey(t *testing.T) {
+	t.Helper()
+	_, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "key.pem")
+	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("JWT_SIGNING_KEY_FILE", path)
+	t.Setenv("JWT_KEY_ID", "serve-test")
+	t.Setenv("JWT_ISSUER", "test-user")
+	t.Setenv("JWT_AUDIENCE", "test-app")
 }

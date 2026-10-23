@@ -31,14 +31,28 @@
 
 Health (`grpc.health.v1`) и reflection (только `ENV=dev`) открыты без токенов.
 
-## Идентичность до FIN-119
+## Идентичность
 
-Проверку токенов даёт библиотека FIN-119, сервер принимает её через интерфейсы `ServiceVerifier` и `UserVerifier`. Пока её нет:
+Верификаторы go-identity v0.1.0 подключены к прежним интерфейсам ServiceVerifier и
+UserVerifier. Таблица доступа и reqctx остаются у сервера; вторая цепочка идентичности
+не устанавливается. Ошибка access JWT, включая истечение, — INVALID_TOKEN.
 
-- `AUTH_MODE=insecure-dev` (только `ENV=dev`): токены `dev:<имя>` — `Bearer dev:bank-bff` в `x-service-authorization`, `Bearer dev:<user_id>` в `authorization`. Для локального запуска и тестов.
-- `AUTH_MODE=verify` (по умолчанию): `serve` не стартует с ошибкой про FIN-119. Сервис не работает с непроверенными идентичностями ни на стенде, ни в проде.
+- AUTH_MODE=insecure-dev разрешён только при ENV=dev.
+- AUTH_MODE=verify, SERVICE_AUTH_MODE=kubernetes: projected finassist-internal токен
+  для исходящих вызовов; JWKS API-сервера по HTTPS с cluster CA и отдельным штатным
+  API-server-audience токеном. Namespace finassist, audience finassist-internal,
+  issuer из конфигурации. Ошибка ключей не включает dev-режим.
+- SERVICE_AUTH_MODE=stage: отдельные Ed25519 ключи сервисов, общий issuer и доверенный
+  публичный JWKS (kid — имя сервиса). Библиотека отвергает этот режим в prod.
+- Пользовательские ключи берутся из локального public JWKS signing.Keys; bootstrap
+  не вызывает собственный GetSigningKeys. Задания кэша запускаются общим worker lifecycle.
+- Tombstone — go-tombstone v0.1.0 на primary; NoTombstones больше не используется в сборке.
 
-Tombstone (FIN-110) — интерфейс `Tombstones`; до библиотеки в шаблоне `NoTombstones`, сервис данных обязан заменить его (`tombstones()` в `internal/app/app.go`).
+GetConsentDocument проходит сервисный ACL как NoUser. Для типа ASSISTANT обработчик
+сам требует единственный корректный Bearer access-токен и проверяет tombstone на primary
+до чтения документа; PERSONAL_DATA доступен без access-токена. Неизвестный/неопубликованный
+тип — NOT_FOUND. GetSigningKeys требует проверенный сервисный токен, пользовательского
+токена не требует, отдаёт только публичные ключи.
 
 ## Сервер
 
@@ -66,6 +80,12 @@ Tombstone (FIN-110) — интерфейс `Tombstones`; до библиотек
 - `db.Tx(ctx)` — транзакция контекста для библиотек, которые пишут в одной транзакции с эффектом (идемпотентность, outbox): без транзакции они возвращают ошибку, а не пишут мимо неё.
 
 ## Наблюдаемость
+
+При AUTH_MODE=verify библиотека добавляет finassist_identity_rejected_total{kind,reason}:
+kind user/service/access и фиксированные причины invalid/expired/signature/audience/issuer/
+key_unavailable/forbidden/user_id. ACL выполняет сервер, поэтому его отказы остаются
+в finassist_grpc_denied_total. Идентификаторы пользователей, ключи и токены в метки не идут.
+
 
 - **Логи** — `slog`, JSON (text в dev), в каждой строке `service`, `request_id`, `caller`, `user_id` из контекста (методы `*Context`). Строка на вызов: `method`, `code`, `reason`, `duration_ms`, `error` (исходная ошибка обработчика — только здесь, клиенту не уходит). На `debug` — metadata и запрос: `authorization`, `x-service-authorization`, `idempotency-key`, ключи и поля с `token` в имени маскируются, поля `bytes` (файл выписки, ключ) очищаются независимо от имени.
 - **Метрики** (`/metrics` на `HTTP_ADDR`): `grpc_server_handled_total{method,code,reason}`, `grpc_server_handling_seconds{method}`, `finassist_grpc_denied_total{method,caller,cause}`, `grpc_client_handled_total{peer,method,code}`, `grpc_client_handling_seconds{peer,method}`, метрики Go и процесса. **Без `user_id` и других неограниченных значений в метках.**

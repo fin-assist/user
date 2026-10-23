@@ -14,11 +14,24 @@
 
 [Политика Renovate](docs/renovate-policy.md) (FIN-211): одна актуальная release/main, автомерж полностью ботских PR после обязательного CI, один повтор красного CI и закрытие с явным повтором через Dependency Dashboard. AndroidX/Compose остаются на ручной проверке. Исходные группировки, ограничения версий и расписания — `renovate-base.json`; generated target и quarantine — ветка `renovate-policy`. Активация требует отдельного токена и строгой защиты веток; по умолчанию выключена.
 
-## Что ещё не сделано из шагов шаблона
+## Реализованная часть FIN-219
 
-- Таблица доступа `AccessPolicy()` и обработчики `finassist.user.v1` в `wire()` — вместе с первыми методами.
-- Библиотеки `go-tombstone` (FIN-110), `go-outbox` (FIN-109), `go-idempotency` (FIN-78), `go-identity` (FIN-119) — после их выпуска.
-- Секреты репозитория (`CLAUDE_CODE_OAUTH_TOKEN`, `GO_MODULES_TOKEN`) и GitHub Apps (Claude, Codex) — владелец.
+Первый этап: проверка сервисных и пользовательских токенов через go-identity v0.1.0,
+Ed25519-подпись access JWT на 15 минут, GetSigningKeys и GetConsentDocument; tombstone
+через go-tombstone v0.1.0 и его миграции. Для документа assistant требуется валидный
+пользовательский токен и отсутствие tombstone. Документы читаются с primary.
+
+AuthService, ProfileService и GetAssistantConsentStatus ещё не реализованы — следующие
+PR FIN-219. Зарегистрированный UserInternalService пока возвращает UNIMPLEMENTED для
+GetAssistantConsentStatus. Реальных и автоматически подтверждающих провайдеров нет
+(FIN-139/FIN-122); текущая сборка не выполняет вход и не подтверждает номера.
+Go-idempotency и go-outbox подключаются вместе с использующими их сценариями.
+
+Документы согласий публикуются миграциями данных в consent_document: новая строка с
+версией, утверждённым названием и URL; прежний is_current снимается перед включением
+нового в одной транзакции. В этом этапе нет выдуманных юридических текстов или ссылок;
+неопубликованный тип возвращает NOT_FOUND. Перед запуском регистрации нужны реальные
+согласованные документы.
 
 ## Раскладка
 
@@ -26,6 +39,8 @@
 cmd/user/                          main: serve and migrate commands, listeners, shutdown
 internal/app/                      assembly: identity, pools, server, wire() (handlers, clients, jobs), access table, migration sources
 internal/app/apitest/              the whole service in-process for API tests
+internal/signing/                  access JWT signing and public JWKS loaded from trusted files
+internal/consent/                  current consent-document usecase
 internal/domain/                   entities and invariants, no infrastructure imports
 internal/<feature>/                usecases; interfaces of repositories and clients they need
 internal/adapter/grpc/server/      gRPC server, interceptors, access table types, identity interfaces
@@ -47,7 +62,7 @@ deploy/systemd/                    example unit for the stand
 ## Запуск
 
 ```bash
-# PostgreSQL 18, migrations and the service in Docker (dev mode, docs/config.md)
+# PostgreSQL 18, migrations and the service in Docker; creates .local/jwt-signing.pem (0600)
 make up
 # the same service on the host against the compose PostgreSQL
 make run
@@ -56,6 +71,14 @@ make run
 - **Образ** — `Dockerfile`: статический бинарь на distroless, пользователь `nonroot`. Один бинарь: `serve` в Deployment, `migrate up` в Job. Публикация в GHCR — FIN-148.
 - **Стенд** (FIN-149) — тот же бинарь под systemd: пример unit-файла с секретами через `LoadCredential` — [deploy/systemd/user.service](deploy/systemd/user.service). Скрипт деплоя запускает `migrate up` перед перезапуском unit.
 - **k3s** — манифесты в `fin-assist/infra` (FIN-147): ServiceAccount, projected token, headless Service, пробы `grpc`.
+
+При make up контейнер user работает с UID/GID локального пользователя, чтобы читать
+его ключ 0600; Dockerfile по-прежнему использует nonroot. Для прямого docker compose up
+сначала выполните make dev-key и передайте LOCAL_UID/LOCAL_GID. Ключ создаёт Go-команда cmd/dev-key; OpenSSL не требуется.
+Каталог .local исключён из git и Docker build context. make run использует тот же ключ.
+
+Настройки stage/prod и ротация ключей — [docs/config.md](docs/config.md).
+Новые миграции go-tombstone должны быть применены до запуска новой сборки.
 
 ## Библиотеки и обновления
 

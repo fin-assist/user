@@ -118,3 +118,5 @@ service migrate force <source> <version>  # выставить версию и �
 export TEST_DATABASE_URL='postgres://postgres@localhost:5432/postgres?sslmode=disable'
 go test ./...
 ```
+
+Проверка up → down → up в migratetest распознаёт числовую версию независимо от числа ведущих нулей: NNN у библиотек и NNNNNN у сервиса. Файлы миграций библиотек не переименовываются.
