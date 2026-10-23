@@ -6,8 +6,10 @@ import (
 	"testing"
 	"time"
 
+	tombstone "github.com/fin-assist/go-tombstone"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/fin-assist/user/internal/deletion"
 	"github.com/fin-assist/user/internal/ratelimit"
 	"github.com/fin-assist/user/internal/token"
 	"github.com/fin-assist/user/internal/verification"
@@ -19,6 +21,65 @@ func startRecord(key, phone string, now time.Time) verification.StartRecord {
 
 const startKeyA = "019c7714-3b77-74d1-9866-000000000001"
 const startKeyB = "019c7714-3b77-74d1-9866-000000000002"
+
+func TestStartDeletionRollsBackOnLockedNoOwnerKey(t *testing.T) {
+	db, _, _ := profileDB(t)
+	now := time.Now().UTC()
+	a := startRecord(startKeyA, "+79001234567", now)
+	if err := db.Run(t.Context(), func(ctx context.Context) error {
+		var err error
+		a, _, err = NewVerificationStarts(db).Claim(ctx, a)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Primary().Exec(t.Context(), `INSERT INTO idempotency_keys(scope,endpoint,key,request_hash,expires_at) VALUES('00000000-0000-0000-0000-000000000000','/finassist.user.v1.AuthService/StartPhoneVerification',$1,$2,$3)`, a.Key, a.Hash[:], now.Add(24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	locked, err := db.Primary().Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = locked.Rollback(context.Background()) }()
+	if _, err = locked.Exec(t.Context(), `SELECT 1 FROM idempotency_keys WHERE key=$1 FOR UPDATE`, a.Key); err != nil {
+		t.Fatal(err)
+	}
+	guard, err := tombstone.New(db, db.Primary(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	remove := func(ctx context.Context) error { return guard.Purge(ctx, profileID, NewAccounts(db).Remove) }
+	if err = db.Run(ctx, remove); !errors.Is(err, deletion.ErrReplayBusy) {
+		t.Fatal("deletion waited for no-owner key while holding guard/user", err)
+	}
+	// This runs before unlocking the key: rollback must have released both locks.
+	if err = db.Run(ctx, func(ctx context.Context) error {
+		tx, _ := db.Tx(ctx)
+		var free bool
+		if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1,110))`, profileID).Scan(&free); err != nil || !free {
+			t.Fatal("deletion retained guard", free, err)
+		}
+		_, err := tx.Exec(ctx, `SELECT 1 FROM app_user WHERE id=$1 FOR UPDATE NOWAIT`, profileID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = NewVerificationStarts(db).Find(ctx, a.Key); err != nil {
+		t.Fatal("partial deletion before rollback", err)
+	}
+	if err = locked.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Run(ctx, remove); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err = db.Primary().QueryRow(ctx, `SELECT (SELECT count(*) FROM idempotency_keys WHERE key=$1)+(SELECT count(*) FROM phone_verification_start WHERE idempotency_key=$1)+(SELECT count(*) FROM phone_verification WHERE id=$2)`, a.Key, a.Request.ID).Scan(&count); err != nil || count != 0 {
+		t.Fatal("phone caches survived successful retry", count, err)
+	}
+}
 
 func TestStartRepositoryOwnershipBusyAndAtomicCompletion(t *testing.T) {
 	db, _, _ := profileDB(t)
