@@ -3,12 +3,15 @@ package app
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
+	userdeletionv1 "github.com/fin-assist/contracts/gen/go/finassist/userdeletion/v1"
 	usersettingsv1 "github.com/fin-assist/contracts/gen/go/finassist/usersettings/v1"
 	outboxlib "github.com/fin-assist/go-outbox"
 	"github.com/prometheus/client_golang/prometheus"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/fin-assist/user/internal/adapter/client"
@@ -17,13 +20,17 @@ import (
 	"github.com/fin-assist/user/internal/worker"
 )
 
-func wireOutbox(ctx context.Context, a *App, reg prometheus.Registerer) (*events.Settings, worker.Job, func(), error) {
+func wireOutbox(ctx context.Context, a *App, reg prometheus.Registerer) (*events.Events, worker.Job, func(), error) {
 	if err := a.Cfg.Outbox.Validate(); err != nil {
 		return nil, worker.Job{}, nil, err
 	}
-	for _, target := range a.Cfg.Outbox.TimezoneTargets {
-		if a.Cfg.Peers[target] == "" {
-			return nil, worker.Job{}, nil, fmt.Errorf("outbox: peer address required for %s", target)
+	peers := map[string]bool{}
+	for _, targets := range [][]string{a.Cfg.Outbox.TimezoneTargets, a.Cfg.Outbox.DeletionTargets} {
+		for _, target := range targets {
+			if a.Cfg.Peers[target] == "" {
+				return nil, worker.Job{}, nil, fmt.Errorf("outbox: peer address required for %s", target)
+			}
+			peers[target] = true
 		}
 	}
 	pool, err := postgres.Open(ctx, postgres.Options{PrimaryDSN: a.Cfg.DB.PrimaryDSN, MaxConns: a.Cfg.Outbox.MaxConns, AppName: a.Cfg.Service + "-outbox"})
@@ -36,7 +43,7 @@ func wireOutbox(ctx context.Context, a *App, reg prometheus.Registerer) (*events
 			closers[i]()
 		}
 	}
-	fail := func(err error) (*events.Settings, worker.Job, func(), error) {
+	fail := func(err error) (*events.Events, worker.Job, func(), error) {
 		closeAll()
 		return nil, worker.Job{}, nil, err
 	}
@@ -44,23 +51,38 @@ func wireOutbox(ctx context.Context, a *App, reg prometheus.Registerer) (*events
 	if err != nil {
 		return fail(err)
 	}
-	routes := map[string]outboxlib.Delivery{}
-	method := usersettingsv1.UserSettingsSyncService_SetUserTimezone_FullMethodName
-	for _, target := range a.Cfg.Outbox.TimezoneTargets {
-		conn, err := client.Dial(a.Cfg.Peers[target], client.Options{Peer: target, Tokens: a.Tokens, Metrics: a.Clients, Retry: []string{strings.TrimPrefix(method, "/")}, DefaultTimeout: 30 * time.Second})
+	routes := outboxlib.Routes{events.TimezoneTopic: {}, events.DeletionTopic: {}}
+	connections := map[string]*grpc.ClientConn{}
+	names := make([]string, 0, len(peers))
+	for target := range peers {
+		names = append(names, target)
+	}
+	slices.Sort(names)
+	for _, target := range names {
+		conn, err := client.Dial(a.Cfg.Peers[target], client.Options{Peer: target, Tokens: a.Tokens, Metrics: a.Clients, Retry: []string{strings.TrimPrefix(usersettingsv1.UserSettingsSyncService_SetUserTimezone_FullMethodName, "/"), strings.TrimPrefix(userdeletionv1.UserDeletionService_PurgeUserData_FullMethodName, "/")}, DefaultTimeout: 30 * time.Second})
 		if err != nil {
 			return fail(err)
 		}
 		closers = append(closers, func() { _ = conn.Close() })
-		send, err := outboxlib.GRPCDelivery(conn, a.Tokens, method, func() proto.Message { return &usersettingsv1.SetUserTimezoneRequest{} }, func() proto.Message { return &usersettingsv1.SetUserTimezoneResponse{} })
+		connections[target] = conn
+	}
+	for _, target := range a.Cfg.Outbox.TimezoneTargets {
+		send, err := outboxlib.GRPCDelivery(connections[target], a.Tokens, usersettingsv1.UserSettingsSyncService_SetUserTimezone_FullMethodName, func() proto.Message { return &usersettingsv1.SetUserTimezoneRequest{} }, func() proto.Message { return &usersettingsv1.SetUserTimezoneResponse{} })
 		if err != nil {
 			return fail(err)
 		}
-		routes[target] = send
+		routes[events.TimezoneTopic][target] = send
 	}
-	dispatcher, err := outboxlib.NewDispatcher(outboxlib.Options{Pool: pool.Primary(), Routes: outboxlib.Routes{events.TimezoneTopic: routes}, Now: time.Now, Logger: a.Log, Registerer: reg, PollInterval: a.Cfg.Outbox.PollInterval})
+	for _, target := range a.Cfg.Outbox.DeletionTargets {
+		send, err := outboxlib.GRPCDelivery(connections[target], a.Tokens, userdeletionv1.UserDeletionService_PurgeUserData_FullMethodName, func() proto.Message { return &userdeletionv1.PurgeUserDataRequest{} }, func() proto.Message { return &userdeletionv1.PurgeUserDataResponse{} })
+		if err != nil {
+			return fail(err)
+		}
+		routes[events.DeletionTopic][target] = send
+	}
+	dispatcher, err := outboxlib.NewDispatcher(outboxlib.Options{Pool: pool.Primary(), Routes: routes, Now: time.Now, Logger: a.Log, Registerer: reg, PollInterval: a.Cfg.Outbox.PollInterval})
 	if err != nil {
 		return fail(err)
 	}
-	return events.NewSettings(publisher), worker.Job{Name: "outbox", Run: dispatcher.Run}, closeAll, nil
+	return events.NewEvents(publisher), worker.Job{Name: "outbox", Run: dispatcher.Run}, closeAll, nil
 }

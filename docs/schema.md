@@ -174,18 +174,22 @@ RETURNING hits;
 
 Одна транзакция `DeleteAccount` на primary:
 
-1. tombstone пользователя (таблица `go-tombstone`, FIN-110);
+1. Guard пользователя (`go-tombstone`, FIN-110); если tombstone уже есть, немедленный OK; иначе блокировка ключей `scope = user_id OR owner_id = user_id` через `FOR UPDATE NOWAIT`, чтение телефона `app_user FOR UPDATE` и удаление адресных ключей;
 2. `DELETE FROM app_user WHERE id = $1` — каскадом согласия, заявки с `user_id` (подтверждённые для существующего пользователя и закрытые `Register`), сессии и все refresh (синхронный отзыв);
 3. `DELETE FROM phone_verification WHERE phone = $1` — все остальные заявки номера (решение владельца 19.10.2026, вопрос 6, вариант (а)); индекс `phone_verification_phone_idx`;
-4. строки outbox `PurgeUserData` для `bank-statement-data`, `analytics`, `assistant` (`go-outbox`, FIN-109).
+4. удаление оставшихся событий `user.timezone_changed` этого пользователя и запись события `user.deleted` для `PurgeUserData` в `bank-statement-data`, `analytics`, `assistant` (`go-outbox`, FIN-109);
+5. запись tombstone и общий commit; ошибка любого шага откатывает всё.
 
 **Заявки на номер удалённого пользователя без `user_id`** — неподтверждённые (`pending`, `expired`) и подтверждённые для нового пользователя без `Register` (с `registration_token_hash` и до 15 минут с `result_ciphertext`) — каскад не затрагивает, поэтому шаг 3 удаляет их по номеру: после удаления аккаунта номера нет ни в одной таблице сервиса, кроме `rate_limit_window` (вопрос 8). Заявки других номеров не затрагиваются — `TestAccountDeletionRemovesAllRequestsOfThePhone`. Следствие: удаляется и заявка, которая ещё держит номер у провайдера; новая заявка на этот номер в оставшиеся минуты пройдёт по БД, а провайдер откажет по дублю — путь рассогласования (429 с `retry_at` + 5 минут, grpc-api.md 7.1). Вариант «отвязывать вместо удаления» отклонён.
 
 Повтор для удалённого — tombstone найден → OK. Отдельной метки удаления в `app_user` нет (см. «`app_user`»).
 
 go-tombstone v0.1.0 и go-outbox v0.1.0 подключены, их миграции стоят перед источником
-сервиса. Сам DeleteAccount и события PurgeUserData остаются следующим этапом FIN-219.
-Текущий профильный этап использует Guard библиотеки tombstone и события смены пояса.
+сервиса. DeleteAccount и доставка PurgeUserData реализованы FIN-219. При занятом ключе auth
+удаление откатывает Guard и повторяет транзакцию: это устраняет обратный порядок
+блокировок replay (key → Guard) и удаления (Guard → key). Повторы ограничены дедлайном
+запроса и 10 секундами. Новый запрос создания/Watch пока не реализован.
+Подробности, доставка и проверки — [deletion.md](deletion.md).
 
 Профиль/согласие читаются одним SELECT с LEFT JOIN активного user_consent и текущего
 consent_document. Системный статус и пишущие операции используют primary. Записи берут
@@ -245,7 +249,7 @@ Register/Refresh/Logout и auth-cleanup реализованы FIN-219; дета
 Владелец зашифрованного no-user ответа хранится библиотекой go-idempotency в
 idempotency_keys.owner_id (FIN-226), вместе с payload/эффектом. Новых сервисных
 таблиц нет. Успешный replay требует владельца и проверяет tombstone до отправки.
-DeleteAccount должен адресно удалить строки scope OR owner_id в своей транзакции;
+DeleteAccount адресно удаляет строки scope OR owner_id в своей транзакции;
 общий nil-scope целиком не очищается. Библиотечный cleanup удаляет владельца вместе
 с ключом. Реализация — auth.Service и authgrpc.Handler; проверки — auth_test.go
 на трёх уровнях, свойства хранения владельца проверены также в библиотеке.

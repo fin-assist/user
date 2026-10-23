@@ -53,7 +53,7 @@ func profileDB(t *testing.T) (*DB, *profile.Service, *Profiles) {
 		t.Fatal(err)
 	}
 	repo := NewProfiles(db)
-	return db, profile.New(db, repo, guard, events.NewSettings(publisher), clock), repo
+	return db, profile.New(db, repo, guard, events.NewEvents(publisher), clock), repo
 }
 
 func profileReason(err error) string {

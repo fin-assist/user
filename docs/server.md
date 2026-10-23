@@ -22,7 +22,7 @@
    | `ModelNoUser` | игнорируется | нет (вход: `AuthService`) |
 
    Ошибки проверки — из реестра (`INVALID_TOKEN`, `TOKEN_EXPIRED`, `TOKEN_REVOKED`), они доходят до клиента. Токен, принятый верификатором без `sub`, — тоже `INVALID_TOKEN`: пользовательский вызов не превращается в системный.
-8. **Tombstone** — удалённый пользователь в вызове от его имени получает `TOKEN_REVOKED`. Сбой проверки — голый `UNAVAILABLE` (обработчик ещё не выполнялся, повтор безопасен). Системные вызовы для удалённого пользователя обрабатывает сам обработчик: OK без действий (grpc-api.md 6.1).
+8. **Tombstone** — удалённый пользователь в вызове от его имени получает `TOKEN_REVOKED`. Исключение — точное правило `DeleteAccount` с `AllowDeleted`: повтор разрешён с проверенным пользовательским токеном и сервисным ACL; wildcard и модели кроме `ModelUser` с этим флагом запрещены при старте. Сбой проверки — голый `UNAVAILABLE` (обработчик ещё не выполнялся, повтор безопасен). Системные вызовы для удалённого пользователя обрабатывает сам обработчик: OK без действий (grpc-api.md 6.1).
 9. **protovalidate** — нарушения аннотаций `.proto` → `VALIDATION_ERROR` с `BadRequest` по полям; `reason` нарушения: `required` → `REQUIRED`, формат (`pattern`, `email`, `uuid`, `prefix`, `defined_only`, …) → `INVALID_FORMAT`, остальное (длины, диапазоны, размеры, CEL) → `OUT_OF_RANGE`. В потоках проверяется каждое входящее сообщение.
 
 10. **Нормализация ошибки обработчика** — вызывающему уходит только статус: обёрнутый `fmt.Errorf("…: %w", finerr.NotFound())` разворачивается до самого статуса (текст обёртки не уходит), ошибка без статуса (`pgx`, `io`, своя) становится голым `INTERNAL`, `context.Canceled` / `DeadlineExceeded` — голыми `CANCELLED` / `DEADLINE_EXCEEDED`. Без этого grpc-go отправил бы `UNKNOWN` с `err.Error()` в `status.message`. Исходная ошибка — в строке лога вызова (`error`).
@@ -101,12 +101,13 @@ key_unavailable/forbidden/user_id. ACL выполняет сервер, поэт
 
 ## Фоновые задания
 
-`outbox` доставляет `user.timezone_changed` через go-outbox v0.1.0, на отдельном primary-пуле.
+`outbox` доставляет `user.timezone_changed` и `user.deleted` через go-outbox v0.1.0, на отдельном primary-пуле.
 Метрики: `finassist_outbox_rows{target}`, `finassist_outbox_oldest_age_seconds{target}`,
 `finassist_outbox_delivery_errors_total{target}`; target ограничен настройкой получателей,
 пустой строкой до fanout и unconfigured. Содержимое событий и user_id метками не становятся.
 Обязателен внешний алерт на возраст > 3600 секунд для всех target; включение в infra
-учитывается отдельно. Сборка, остановка, повторы и тесты — [profile.md](profile.md).
+учитывается отдельно. Сборка, остановка, повторы и тесты — [profile.md](profile.md), [deletion.md](deletion.md).
+Темы объединены по target: правило возраста покрывает в том числе PurgeUserData.
 
 Register/Refresh подключают `finassist_idempotency_requests_total{endpoint,outcome}`:
 endpoint — два полных имени RPC, outcome — new/replay/conflict/in_progress. Это решения

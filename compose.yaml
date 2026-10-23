@@ -18,6 +18,7 @@ x-env: &env
   LOG_LEVEL: debug
   DB_PRIMARY_DSN: postgres://user_service:user_service@postgres:5432/user?sslmode=disable
   PEER_BANK_STATEMENT_DATA_ADDR: ${PEER_BANK_STATEMENT_DATA_ADDR:-dns:///bank-statement-data:9090}
+  PEER_ANALYTICS_ADDR: ${PEER_ANALYTICS_ADDR:-dns:///analytics:9090}
   PEER_ASSISTANT_ADDR: ${PEER_ASSISTANT_ADDR:-dns:///assistant:9090}
 
 services:

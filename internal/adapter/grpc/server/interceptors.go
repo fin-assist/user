@@ -113,7 +113,7 @@ func (s *Server) authorize(ctx context.Context, method string) (context.Context,
 		s.log.ErrorContext(ctx, "tombstone check failed", "method", method, "error", err)
 		return ctx, bare(codes.Unavailable) // nothing ran yet: safe to retry
 	}
-	if deleted {
+	if deleted && !rule.AllowDeleted {
 		return ctx, finerr.TokenRevoked()
 	}
 	return reqctx.WithUserID(ctx, userID), nil

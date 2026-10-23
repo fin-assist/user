@@ -73,7 +73,7 @@ func TestTimezoneOutboxRetriesUnavailableRecipient(t *testing.T) {
 	flaky.unavailable.Store(true)
 	fastAddr, flakyAddr := serveTimezonePeer(t, fast), serveTimezonePeer(t, flaky)
 	env := apitest.Start(t, func(c *config.Config) {
-		c.Peers = map[string]string{"bank-statement-data": fastAddr, "assistant": flakyAddr}
+		c.Peers = map[string]string{"analytics": "passthrough:///127.0.0.1:1", "bank-statement-data": fastAddr, "assistant": flakyAddr}
 	})
 	seedProfiles(t, env)
 	client := userv1.NewProfileServiceClient(env.Conn)
@@ -183,7 +183,7 @@ func TestTimezoneOutboxIndependentRecipientsRestartAndMetadata(t *testing.T) {
 	slow := &timezonePeer{t: t, block: blocked, started: make(chan *usersettingsv1.SetUserTimezoneRequest, 16), applied: make(chan *usersettingsv1.SetUserTimezoneRequest, 16)}
 	fastAddr, slowAddr := serveTimezonePeer(t, fast), serveTimezonePeer(t, slow)
 	env := apitest.Start(t, func(c *config.Config) {
-		c.Peers = map[string]string{"bank-statement-data": fastAddr, "assistant": slowAddr}
+		c.Peers = map[string]string{"analytics": "passthrough:///127.0.0.1:1", "bank-statement-data": fastAddr, "assistant": slowAddr}
 		c.Outbox.PollInterval = 20 * time.Millisecond
 	})
 	seedProfiles(t, env)

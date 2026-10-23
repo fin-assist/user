@@ -31,6 +31,7 @@ func TestServeFailsBeforeConnectingWithoutSigningKey(t *testing.T) {
 // readiness and an orderly stop on cancel.
 func TestServeRunsAndStops(t *testing.T) {
 	t.Setenv("PEER_BANK_STATEMENT_DATA_ADDR", "passthrough:///127.0.0.1:1")
+	t.Setenv("PEER_ANALYTICS_ADDR", "passthrough:///127.0.0.1:1")
 	t.Setenv("PEER_ASSISTANT_ADDR", "passthrough:///127.0.0.1:1")
 	setSigningKey(t)
 	dsn := migratetest.DSN(t)
@@ -62,7 +63,7 @@ func TestServeRunsAndStops(t *testing.T) {
 func TestServeFailsOnBadInput(t *testing.T) {
 	setSigningKey(t)
 	base := map[string]string{"SERVICE_NAME": "user", "ENV": "dev", "AUTH_MODE": "insecure-dev", "LOG_LEVEL": "error",
-		"PEER_BANK_STATEMENT_DATA_ADDR": "passthrough:///127.0.0.1:1", "PEER_ASSISTANT_ADDR": "passthrough:///127.0.0.1:1"}
+		"PEER_BANK_STATEMENT_DATA_ADDR": "passthrough:///127.0.0.1:1", "PEER_ANALYTICS_ADDR": "passthrough:///127.0.0.1:1", "PEER_ASSISTANT_ADDR": "passthrough:///127.0.0.1:1"}
 	cases := map[string]map[string]string{
 		"config":   {"DB_PRIMARY_DSN": ""},
 		"database": {"DB_PRIMARY_DSN": "postgres://nobody@127.0.0.1:1/db?connect_timeout=1"},
