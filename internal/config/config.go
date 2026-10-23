@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/fin-assist/user/internal/ratelimit"
 )
 
 // Env is the environment the binary runs in.
@@ -46,6 +48,7 @@ type Config struct {
 	DB      DBConfig
 	Signing SigningConfig
 	Auth    AuthConfig
+	Limits  ratelimit.Rules
 	Peers   map[string]string // other services: name -> gRPC target, from PEER_<NAME>_ADDR
 	// ShutdownDelay keeps serving after NOT_SERVING so balancers stop sending new calls.
 	ShutdownDelay time.Duration
@@ -160,6 +163,7 @@ func load(getenv func(string) string, readFile func(string) ([]byte, error), env
 			KeyID: r.str("JWT_KEY_ID"), Issuer: r.str("JWT_ISSUER"), Audience: r.str("JWT_AUDIENCE"),
 		},
 		Peers:           map[string]string{},
+		Limits:          r.limits(),
 		ShutdownDelay:   r.duration("SHUTDOWN_DELAY"),
 		ShutdownTimeout: r.duration("SHUTDOWN_TIMEOUT"),
 	}

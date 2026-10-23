@@ -35,13 +35,15 @@ import (
 	"github.com/fin-assist/user/internal/adapter/postgres/migrate/migratetest"
 	"github.com/fin-assist/user/internal/app"
 	"github.com/fin-assist/user/internal/config"
+	"github.com/fin-assist/user/internal/ratelimit"
 )
 
 // Env is a running service.
 type Env struct {
-	App  *app.App
-	Conn *grpc.ClientConn
-	DSN  string // the test database, for arranging and checking rows directly
+	App      *app.App
+	Conn     *grpc.ClientConn
+	DSN      string               // the test database, for arranging and checking rows directly
+	Registry *prometheus.Registry // the same collectors served by the operational endpoint
 }
 
 // Start runs the service for the test and stops it at the end. mutate, if given, adjusts
@@ -77,11 +79,13 @@ func Start(t *testing.T, mutate ...func(*config.Config)) *Env {
 		DB:      config.DBConfig{PrimaryDSN: dsn, MaxConns: 4},
 		GRPC:    config.GRPCConfig{MaxRecvMsgSize: 4 << 20},
 		Peers:   map[string]string{},
+		Limits:  ratelimit.Defaults(),
 	}
 	for _, m := range mutate {
 		m(&cfg)
 	}
-	a, err := app.New(ctx, cfg, slog.New(slog.DiscardHandler), prometheus.NewRegistry())
+	registry := prometheus.NewRegistry()
+	a, err := app.New(ctx, cfg, slog.New(slog.DiscardHandler), registry)
 	if err != nil {
 		t.Fatalf("app: %v", err)
 	}
@@ -107,7 +111,7 @@ func Start(t *testing.T, mutate ...func(*config.Config)) *Env {
 		a.GRPC.Shutdown(sctx, 0)
 		a.Close()
 	})
-	return &Env{App: a, Conn: conn, DSN: dsn}
+	return &Env{App: a, Conn: conn, DSN: dsn, Registry: registry}
 }
 
 // User returns ctx for a user call made by bank-bff on behalf of userID.

@@ -11,6 +11,7 @@ import (
 
 	tombstone "github.com/fin-assist/go-tombstone"
 
+	"github.com/fin-assist/user/internal/ratelimit"
 	"github.com/fin-assist/user/internal/signing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -34,6 +35,7 @@ type App struct {
 	Signing    *signing.Keys
 	Users      server.UserVerifier
 	Tombstones *tombstone.Store
+	Limits     *ratelimit.Limiter
 
 	closers []func()
 }
@@ -70,6 +72,9 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger, reg prometheu
 		return fail(err)
 	}
 	if a.Clients, err = client.NewMetrics(reg); err != nil {
+		return fail(err)
+	}
+	if a.Limits, err = ratelimit.New(cfg.Limits, postgres.NewLimits(db), time.Now, reg); err != nil {
 		return fail(err)
 	}
 	jobs, closeWired, err := wire(a)
