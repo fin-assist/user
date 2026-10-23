@@ -161,6 +161,23 @@ func TestStageSignedIdentityAPI(t *testing.T) {
 	if _, err := c.GetConsentDocument(metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+access), req); err != nil {
 		t.Fatal(err)
 	}
+	for _, tt := range []struct {
+		name, service, user, reason string
+	}{
+		{name: "service JWT cannot authorize a user", service: serviceToken, user: serviceToken, reason: "INVALID_TOKEN"},
+		{name: "user JWT cannot authorize a service", service: access, user: access},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := metadata.NewOutgoingContext(t.Context(), metadata.Pairs(
+				"x-service-authorization", "Bearer "+tt.service,
+				"authorization", "Bearer "+tt.user,
+			))
+			response, err := c.GetConsentDocument(ctx, req)
+			if status.Code(err) != codes.Unauthenticated || apitest.Reason(err) != tt.reason || response != nil {
+				t.Fatalf("crossed identity returned response=%v error=%v; want UNAUTHENTICATED reason=%q and no document", response, err, tt.reason)
+			}
+		})
+	}
 	parts := strings.Split(access, ".")
 	parts[2] = strings.Repeat("A", len(parts[2]))
 	if _, err := c.GetConsentDocument(metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+strings.Join(parts, ".")), req); apitest.Reason(err) != "INVALID_TOKEN" {
