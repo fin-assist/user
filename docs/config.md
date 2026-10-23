@@ -15,6 +15,11 @@
 
 ## `serve`
 
+Для каждого получателя OUTBOX_TIMEZONE_TARGETS задаётся PEER_<NAME>_ADDR; по умолчанию
+нужны PEER_BANK_STATEMENT_DATA_ADDR и PEER_ASSISTANT_ADDR. Worker использует отдельный
+primary-пул OUTBOX_DB_MAX_CONNS; его ёмкость не меньше числа получателей + 3. Подробности —
+[profile.md](profile.md). Адреса проверяются при сборке; доступность соседей — через retry outbox.
+
 <!-- generated:config-serve:start (go test ./internal/config -run TestDocIsCurrent -update) -->
 | Переменная | По умолчанию | Что |
 |---|---|---|
@@ -37,6 +42,9 @@
 | `DB_PRIMARY_DSN` / `_FILE` | — (обязательна) | DSN primary (`-rw`) |
 | `DB_REPLICA_DSN` / `_FILE` | — | DSN реплик (`-ro`); пусто — чтение тоже с primary. На стенде оба указывают на один PostgreSQL |
 | `DB_MAX_CONNS` | `10` | размер каждого пула |
+| `OUTBOX_TIMEZONE_TARGETS` | `bank-statement-data,assistant` | получатели user.timezone_changed через запятую без пробелов; каждому нужен PEER_<NAME>_ADDR; 1–64 уникальных имени |
+| `OUTBOX_DB_MAX_CONNS` | `8` | размер отдельного primary-пула доставщика, не меньше числа получателей + 3 |
+| `OUTBOX_POLL_INTERVAL` | `3s` | запасной опрос outbox при отсутствии уведомлений, положительный интервал |
 | `LIMIT_VERIFICATION_PHONE_SHORT` | `3` | StartPhoneVerification: предел короткого окна на телефон |
 | `WINDOW_VERIFICATION_PHONE_SHORT` | `1h` | StartPhoneVerification: короткое UTC-окно на телефон |
 | `LIMIT_VERIFICATION_PHONE_LONG` | `10` | StartPhoneVerification: предел длинного окна на телефон |

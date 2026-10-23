@@ -78,7 +78,8 @@ func Start(t *testing.T, mutate ...func(*config.Config)) *Env {
 		Auth:    config.AuthConfig{Mode: config.AuthInsecureDev},
 		DB:      config.DBConfig{PrimaryDSN: dsn, MaxConns: 4},
 		GRPC:    config.GRPCConfig{MaxRecvMsgSize: 4 << 20},
-		Peers:   map[string]string{},
+		Peers:   map[string]string{"assistant": "passthrough:///127.0.0.1:1", "bank-statement-data": "passthrough:///127.0.0.1:1"},
+		Outbox:  config.OutboxConfig{TimezoneTargets: []string{"bank-statement-data", "assistant"}, MaxConns: 5, PollInterval: 20 * time.Millisecond},
 		Limits:  ratelimit.Defaults(),
 	}
 	for _, m := range mutate {

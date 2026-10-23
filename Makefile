@@ -35,6 +35,8 @@ down:
 run: build dev-key ## the service on the host against the compose PostgreSQL
 	SERVICE_NAME=user ENV=dev AUTH_MODE=insecure-dev LOG_FORMAT=text \
 	JWT_SIGNING_KEY_FILE=.local/jwt-signing.pem JWT_KEY_ID=local JWT_ISSUER=local-user JWT_AUDIENCE=local-app \
+	PEER_BANK_STATEMENT_DATA_ADDR="$${PEER_BANK_STATEMENT_DATA_ADDR:-dns:///127.0.0.1:9092}" \
+	PEER_ASSISTANT_ADDR="$${PEER_ASSISTANT_ADDR:-dns:///127.0.0.1:9094}" \
 	DB_PRIMARY_DSN='postgres://user_service:user_service@localhost:5432/user?sslmode=disable' \
 	$(BIN) serve
 

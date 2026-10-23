@@ -77,7 +77,7 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger, reg prometheu
 	if a.Limits, err = ratelimit.New(cfg.Limits, postgres.NewLimits(db), time.Now, reg); err != nil {
 		return fail(err)
 	}
-	jobs, closeWired, err := wire(a)
+	jobs, closeWired, err := wire(ctx, a, reg)
 	if err != nil {
 		return fail(err)
 	}
