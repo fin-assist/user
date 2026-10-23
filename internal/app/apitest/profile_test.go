@@ -112,6 +112,9 @@ func TestProfileAPIConsentAndSystemCheck(t *testing.T) {
 		t.Fatalf("repeated grant: %d %v", count, err)
 	}
 	request := &userv1.GetAssistantConsentStatusRequest{UserId: stringPtr(profileUserA)}
+	if _, err := internal.GetAssistantConsentStatus(t.Context(), request); status.Code(err) != codes.Unauthenticated || apitest.Reason(err) != "" {
+		t.Fatalf("status without service identity: %v", err)
+	}
 	// The table permits only assistant's system model; a supplied user token cannot replace user_id.
 	system := metadata.AppendToOutgoingContext(apitest.Caller(t.Context(), "assistant"), "authorization", "Bearer dev:"+profileUserB, "x-read-primary", "0")
 	r, err := internal.GetAssistantConsentStatus(system, request)
