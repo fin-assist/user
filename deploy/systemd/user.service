@@ -21,6 +21,9 @@ LoadCredential=db-primary-dsn:/etc/finassist/user/db-primary-dsn
 Environment=DB_PRIMARY_DSN_FILE=%d/db-primary-dsn
 LoadCredential=jwt-signing:/etc/finassist/user/jwt-signing.pem
 Environment=JWT_SIGNING_KEY_FILE=%d/jwt-signing
+LoadCredential=phone-result:/etc/finassist/user/phone-result.key
+Environment=PHONE_RESULT_KEY_FILE=%d/phone-result
+# This AES-256 key must differ from the auth replay key; retain it for live results.
 # env must set JWT_KEY_ID, JWT_ISSUER, JWT_AUDIENCE, SERVICE_AUTH_MODE and SERVICE_TOKEN_ISSUER.
 # Set PEER_BANK_STATEMENT_DATA_ADDR, PEER_ANALYTICS_ADDR and PEER_ASSISTANT_ADDR for the default outbox routes.
 # With SERVICE_AUTH_MODE=stage:

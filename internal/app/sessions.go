@@ -39,7 +39,7 @@ func wireSessions(ctx context.Context, a *App, events auth.Events, reg prometheu
 	}
 	repo := postgres.NewAuth(a.DB)
 	sessions := auth.New(pool, repo, a.Tombstones, a.Signing, events, time.Now, token.New, a.Cfg.Sessions.RefreshTTL)
-	authgrpc.Register(a.GRPC.GRPC(), sessions, engine, pool, a.DB, a.Limits, a.Tombstones)
+	authgrpc.Register(a.GRPC.GRPC(), sessions, engine, pool, a.DB, a.Limits, a.Tombstones, a.Verifications)
 	cleanup := worker.Every("auth-cleanup", time.Minute, a.Log, func(ctx context.Context) error {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()

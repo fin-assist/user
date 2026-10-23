@@ -105,7 +105,7 @@ type fakeLimits struct {
 
 func (l *fakeLimits) Check(ctx context.Context, op ratelimit.Operation, phone, ip string) (ratelimit.Decision, ratelimit.Receipt, error) {
 	l.calls++
-	if ip != "203.0.113.7" || phone != "" || (op != ratelimit.Register && op != ratelimit.Refresh) {
+	if ip != "203.0.113.7" || phone != "" || (op != ratelimit.Register && op != ratelimit.Refresh && op != ratelimit.Watch) {
 		panic("untrusted limit input")
 	}
 	return ratelimit.Decision{Allowed: l.allowed, RetryAt: time.Now().Add(time.Minute)}, ratelimit.Receipt{}, l.err
@@ -164,7 +164,7 @@ func TestSessionHandlerMappingAndIndependentAttempts(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := grpc.NewServer()
-	Register(server, s, h.engine, h.state, h.attempts, l, h.guard)
+	Register(server, s, h.engine, h.state, h.attempts, l, h.guard, nil)
 	if _, ok := server.GetServiceInfo()["finassist.user.v1.AuthService"]; !ok {
 		t.Fatal("service absent")
 	}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/fin-assist/user/internal/ratelimit"
 	"github.com/fin-assist/user/internal/signing"
+	"github.com/fin-assist/user/internal/verification"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -36,6 +37,8 @@ type App struct {
 	Users      server.UserVerifier
 	Tombstones *tombstone.Store
 	Limits     *ratelimit.Limiter
+	// Verifications accepts only provider-verified proofs from trusted Go adapters.
+	Verifications *verification.Service
 
 	closers []func()
 }

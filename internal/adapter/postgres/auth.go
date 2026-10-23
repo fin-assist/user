@@ -213,3 +213,13 @@ func authError(err error) error {
 	}
 	return fmt.Errorf("auth repository: %w", err)
 }
+
+// FindUserByPhone reads the account's guard key without holding a row lock.
+func (r *Auth) FindUserByPhone(ctx context.Context, phone string) (string, error) {
+	var id string
+	err := r.db.Writer(ctx).QueryRow(ctx, `SELECT id::text FROM app_user WHERE phone=$1`, phone).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return id, authError(err)
+}

@@ -36,6 +36,7 @@ run: build dev-key ## the service on the host against the compose PostgreSQL
 	SERVICE_NAME=user ENV=dev AUTH_MODE=insecure-dev LOG_FORMAT=text \
 	JWT_SIGNING_KEY_FILE=.local/jwt-signing.pem JWT_KEY_ID=local JWT_ISSUER=local-user JWT_AUDIENCE=local-app \
 	AUTH_IDEMPOTENCY_KEY_FILE=.local/auth-idempotency.key \
+	PHONE_RESULT_KEY_FILE=.local/phone-result.key \
 	PEER_BANK_STATEMENT_DATA_ADDR="$${PEER_BANK_STATEMENT_DATA_ADDR:-dns:///127.0.0.1:9092}" \
 	PEER_ANALYTICS_ADDR="$${PEER_ANALYTICS_ADDR:-dns:///127.0.0.1:9093}" \
 	PEER_ASSISTANT_ADDR="$${PEER_ASSISTANT_ADDR:-dns:///127.0.0.1:9094}" \
@@ -50,3 +51,4 @@ dev-key:
 	@mkdir -p .local
 	@go run ./cmd/dev-key .local/jwt-signing.pem
 	@go run ./cmd/dev-key --aes .local/auth-idempotency.key
+	@go run ./cmd/dev-key --aes .local/phone-result.key

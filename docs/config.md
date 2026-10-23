@@ -15,6 +15,11 @@
 
 ## `serve`
 
+PHONE_RESULT_KEY_FILE обязателен: отдельный 32-байтный AES-256 ключ 0600, общий для
+реплик; совпадение с материалом AUTH_IDEMPOTENCY_KEY_FILE запрещает запуск. Сохраните
+ключ и PHONE_RESULT_KEY_ID до истечения всех 15-минутных результатов. Порядок замены
+и ограничения подписок — [verification.md](verification.md).
+
 Для каждого получателя OUTBOX_TIMEZONE_TARGETS и OUTBOX_DELETION_TARGETS задаётся
 PEER_<NAME>_ADDR; по умолчанию нужны PEER_BANK_STATEMENT_DATA_ADDR, PEER_ANALYTICS_ADDR
 и PEER_ASSISTANT_ADDR. Worker использует отдельный primary-пул OUTBOX_DB_MAX_CONNS;
@@ -33,6 +38,10 @@ PEER_<NAME>_ADDR; по умолчанию нужны PEER_BANK_STATEMENT_DATA_AD
 | `JWT_ISSUER` | — | iss access JWT, обязателен; одинаков у всех потребителей |
 | `JWT_AUDIENCE` | — | aud access JWT, обязателен; одинаков у всех потребителей |
 | `AUTH_IDEMPOTENCY_KEY_FILE` | — | файл 0600 с 32 raw-байтами AES-256 для шифрования ответов Register/Refresh; обязателен, общий для реплик; сохранять ключ не менее 24 ч после последней записи |
+| `PHONE_RESULT_KEY_FILE` | — | файл 0600 с 32 raw-байтами AES-256 для результата подтверждения; обязателен, общий для реплик, отличается от AUTH_IDEMPOTENCY_KEY_FILE; хранить до истечения всех 15-минутных результатов |
+| `PHONE_RESULT_KEY_ID` | `primary` | ID ключа результата: 1–64 символа A-Z/a-z/0-9/._-; сохраняется вместе с ciphertext |
+| `PHONE_WATCH_MAX_STREAMS` | `1024` | предел одновременно ожидающих Watch на экземпляр (1–100000); отдельный от 60 попыток/мин на IP; насыщение видно в метриках |
+| `PHONE_WATCH_RESYNC_INTERVAL` | `5s` | повторное чтение primary открытым Watch в дополнение к NOTIFY; положительный интервал не больше 30 с |
 | `AUTH_DB_MAX_CONNS` | `8` | отдельный primary pool транзакций авторизации; лимиты используют обычный pool, чтобы ошибки токена не откатывали учёт попыток |
 | `REFRESH_TOKEN_TTL` | `1440h` | скользящий срок refresh-токена; по умолчанию 60 суток, продлевается каждой ротацией |
 | `SERVICE_AUTH_MODE` | `kubernetes` | kubernetes — ServiceAccount; stage — подписанные JWT сервисов, только dev/stage |

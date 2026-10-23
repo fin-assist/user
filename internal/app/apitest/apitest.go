@@ -79,8 +79,17 @@ func Start(t *testing.T, mutate ...func(*config.Config)) *Env {
 	if err := os.WriteFile(secretPath, secret[:], 0o600); err != nil {
 		t.Fatal(err)
 	}
+	phoneKeyPath := filepath.Join(t.TempDir(), "phone-result.key")
+	phoneKey := make([]byte, 32)
+	if _, err := rand.Read(phoneKey); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(phoneKeyPath, phoneKey, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	cfg := config.Config{
 		Service:  "user",
+		Phone:    config.PhoneConfig{ResultKeyFile: phoneKeyPath, ResultKeyID: "test", MaxStreams: 1024, ResyncInterval: 5 * time.Second},
 		Signing:  config.SigningConfig{PrivateKeyFile: keyPath, KeyID: "apitest", Issuer: "apitest-user", Audience: "apitest-client"},
 		Env:      config.EnvDev,
 		Auth:     config.AuthConfig{Mode: config.AuthInsecureDev},

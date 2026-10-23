@@ -55,8 +55,14 @@ func wire(ctx context.Context, a *App, reg prometheus.Registerer) (jobs []worker
 	if err != nil {
 		return nil, nil, err
 	}
+	phoneJobs, closePhone, err := wirePhone(ctx, a, reg)
+	if err != nil {
+		closeOutbox()
+		return nil, nil, err
+	}
 	authCleanup, closeAuth, err := wireSessions(ctx, a, events, reg)
 	if err != nil {
+		closePhone()
 		closeOutbox()
 		return nil, nil, err
 	}
@@ -73,5 +79,5 @@ func wire(ctx context.Context, a *App, reg prometheus.Registerer) (jobs []worker
 		_, err := limits.Cleanup(ctx, time.Now().Add(-time.Hour), 1000)
 		return err
 	})
-	return []worker.Job{cleanup, dispatch, authCleanup}, func() { closeAuth(); closeOutbox() }, nil
+	return append([]worker.Job{cleanup, dispatch, authCleanup}, phoneJobs...), func() { closeAuth(); closePhone(); closeOutbox() }, nil
 }

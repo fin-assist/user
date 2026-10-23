@@ -29,18 +29,25 @@ func LoadSessionKey(c SessionsConfig) ([]byte, error) {
 	if c.RefreshTTL <= 0 || c.MaxConns < 1 || c.IdempotencyKeyFile == "" {
 		return nil, errors.New("auth: key file, positive refresh TTL and pool size required")
 	}
-	f, err := os.Open(c.IdempotencyKeyFile) //nolint:gosec // Operator-supplied secret path, never request input.
+	return loadAESKey(c.IdempotencyKeyFile, "auth")
+}
+
+func loadAESKey(path, purpose string) ([]byte, error) {
+	if path == "" {
+		return nil, errors.New(purpose + ": key file required")
+	}
+	f, err := os.Open(path) //nolint:gosec // Operator-supplied secret path, never request input.
 	if err != nil {
-		return nil, errors.New("auth: cannot open idempotency key file")
+		return nil, errors.New(purpose + ": cannot open key file")
 	}
 	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
-		return nil, errors.New("auth: key must be a regular owner-only file")
+		return nil, errors.New(purpose + ": key must be a regular owner-only file")
 	}
 	b, err := io.ReadAll(io.LimitReader(f, 33))
 	if err != nil || len(b) != 32 {
-		return nil, errors.New("auth: idempotency key must contain exactly 32 raw bytes")
+		return nil, errors.New(purpose + ": key must contain exactly 32 raw bytes")
 	}
 	return b, nil
 }

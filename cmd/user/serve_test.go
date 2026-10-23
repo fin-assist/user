@@ -34,6 +34,7 @@ func TestServeRunsAndStops(t *testing.T) {
 	t.Setenv("PEER_ANALYTICS_ADDR", "passthrough:///127.0.0.1:1")
 	t.Setenv("PEER_ASSISTANT_ADDR", "passthrough:///127.0.0.1:1")
 	setSigningKey(t)
+	setPhoneKey(t)
 	dsn := migratetest.DSN(t)
 	if err := migrate.Up(t.Context(), migrate.DefaultConfig(dsn), app.MigrationSources()); err != nil {
 		t.Fatal(err)
@@ -62,6 +63,7 @@ func TestServeRunsAndStops(t *testing.T) {
 
 func TestServeFailsOnBadInput(t *testing.T) {
 	setSigningKey(t)
+	setPhoneKey(t)
 	base := map[string]string{"SERVICE_NAME": "user", "ENV": "dev", "AUTH_MODE": "insecure-dev", "LOG_LEVEL": "error",
 		"PEER_BANK_STATEMENT_DATA_ADDR": "passthrough:///127.0.0.1:1", "PEER_ANALYTICS_ADDR": "passthrough:///127.0.0.1:1", "PEER_ASSISTANT_ADDR": "passthrough:///127.0.0.1:1"}
 	cases := map[string]map[string]string{
@@ -114,4 +116,17 @@ func setSigningKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("AUTH_IDEMPOTENCY_KEY_FILE", secretPath)
+}
+
+func setPhoneKey(t *testing.T) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "phone.key")
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, key, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PHONE_RESULT_KEY_FILE", path)
 }

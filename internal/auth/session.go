@@ -203,11 +203,17 @@ func missingToken(err error) error {
 }
 
 func (s *Service) pair(ctx context.Context, id string) (Pair, error) {
-	refresh, err := s.newToken()
+	return IssuePair(ctx, id, s.signer, s.newToken)
+}
+
+// IssuePair generates the same cryptographic token pair for registration, rotation
+// and a provider-confirmed existing account. The caller persists its refresh hash.
+func IssuePair(ctx context.Context, id string, signer Signer, newToken func() (string, error)) (Pair, error) {
+	refresh, err := newToken()
 	if err != nil {
 		return Pair{}, err
 	}
-	access, err := s.signer.Sign(ctx, id)
+	access, err := signer.Sign(ctx, id)
 	if err != nil {
 		return Pair{}, err
 	}
