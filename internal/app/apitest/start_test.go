@@ -249,6 +249,13 @@ func TestStartAPILostReplyRecoveryAndProcessRestart(t *testing.T) {
 	if out, err = startCall(t, env, key, otherPhone); status.Code(err) != codes.Internal || out != nil {
 		t.Fatal(out, err)
 	}
+	oldCall := p.call(otherPhone)
+	// Recovery of a terminal provider call must replace the durable dates, not
+	// merely manufacture a fresh expires_at in the RPC response.
+	aged := time.Now().UTC().Truncate(time.Microsecond).Add(-2 * time.Minute)
+	if _, err = env.App.DB.Primary().Exec(t.Context(), `UPDATE phone_verification SET created_at=$1,expires_at=$2 WHERE phone=$3 AND released_at IS NULL`, aged, aged.Add(verification.RequestTTL), otherPhone); err != nil {
+		t.Fatal(err)
+	}
 	before := startHits(t, env)
 	_ = env.Conn.Close()
 	shutdown, stop := context.WithTimeout(t.Context(), time.Second)
@@ -269,8 +276,22 @@ func TestStartAPILostReplyRecoveryAndProcessRestart(t *testing.T) {
 		t.Fatal("recovery consumed again", before, after)
 	}
 	var call string
-	if err = second.App.DB.Primary().QueryRow(t.Context(), `SELECT provider_call_id FROM phone_verification WHERE phone=$1 AND released_at IS NULL`, otherPhone).Scan(&call); err != nil || call != replacement.call(otherPhone).ID {
+	var created, expires time.Time
+	if err = second.App.DB.Primary().QueryRow(t.Context(), `SELECT provider_call_id,created_at,expires_at FROM phone_verification WHERE phone=$1 AND released_at IS NULL`, otherPhone).Scan(&call, &created, &expires); err != nil || call != replacement.call(otherPhone).ID {
 		t.Fatal(call, err)
+	}
+	recovered := replacement.call(otherPhone)
+	if !created.After(aged.Add(time.Minute)) || !created.Equal(recovered.StartedAt.Truncate(time.Microsecond)) || !expires.Equal(created.Add(verification.RequestTTL)) || !expires.Equal(out.GetExpiresAt().AsTime().Truncate(time.Microsecond)) {
+		t.Fatal("replacement lifetime was not persisted", created, expires, recovered.StartedAt, out.GetExpiresAt())
+	}
+	if changed, err := second.App.Verifications.Confirm(t.Context(), verification.Proof{Provider: replacement.Name(), CallID: oldCall.ID, Phone: otherPhone}); changed || !errors.Is(err, verification.ErrMissing) {
+		t.Fatal("old call confirmed replacement", changed, err)
+	}
+	confirmCreated(t, second, replacement, otherPhone)
+	stream := openPhoneWatch(t, second, phoneContext(t.Context()), out.GetVerificationToken())
+	verified, err := stream.Recv()
+	if err != nil || !verified.GetIsNewUser() || verified.GetRegistrationToken() == "" {
+		t.Fatal("replacement cannot complete sign-in", verified, err)
 	}
 }
 
