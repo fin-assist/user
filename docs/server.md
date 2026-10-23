@@ -101,6 +101,15 @@ key_unavailable/forbidden/user_id. ACL выполняет сервер, поэт
 
 ## Фоновые задания
 
+phone-notifications использует одно отдельное primary-соединение LISTEN на процесс.
+phone-cleanup раз в минуту стирает истёкшие результаты, освобождает номера и удаляет
+старые заявки, сохраняя живые refresh-сессии. Обрыв LISTEN закрывает ожидающие Watch;
+worker пересоздаёт соединение, клиент возобновляет поток с тем же секретом.
+Метрики finassist_phone_watch_active_streams, finassist_phone_watch_max_streams,
+finassist_phone_watch_listener_ready и finassist_phone_watch_rejected_total{reason}
+показывают заполнение, предел и недоступность. reason — только capacity/not_ready,
+других меток нет. Настройки и выражения алертов — [verification.md](verification.md).
+
 `outbox` доставляет `user.timezone_changed` и `user.deleted` через go-outbox v0.1.0, на отдельном primary-пуле.
 Метрики: `finassist_outbox_rows{target}`, `finassist_outbox_oldest_age_seconds{target}`,
 `finassist_outbox_delivery_errors_total{target}`; target ограничен настройкой получателей,

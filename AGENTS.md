@@ -41,8 +41,8 @@ updates them in the same PR. A service made from the template rewrites the first
 
 Functional RPCs: GetConsentDocument, GetSigningKeys, GetAssistantConsentStatus, GetProfile,
 UpdateProfile, GrantAssistantConsent, RevokeAssistantConsent, Register, RefreshTokens,
-Logout and DeleteAccount. StartPhoneVerification and WatchPhoneVerification
-are later FIN-219 stages (still UNIMPLEMENTED). Do not describe
+Logout, DeleteAccount and WatchPhoneVerification. StartPhoneVerification
+is a later FIN-219 stage (still UNIMPLEMENTED). Do not describe
 this as a complete sign-in service. go-identity v0.1.0 supplies only the verifiers
 and token sources: keep the existing server ACL and reqctx chain, without a second identity
 interceptor. The signing package supplies its local JWKS provider (no self-RPC). go-tombstone
@@ -75,6 +75,17 @@ jobs, then schedules user.deleted. Repeats add no jobs. Cached-key locks use NOW
 a busy replay rolls back the whole deletion before retrying, bounded by the caller and
 10 seconds. Never wait for an auth key while retaining the tombstone guard. See docs/deletion.md.
 
+Phone confirmation accepts provider-checked Proof through the trusted Go usecase only: no
+public confirmation hook. Watch commits an IP attempt before secret lookup. A shared
+primary LISTEN connection serves bounded pending subscriptions; subscribe then re-read closes
+the snapshot/notification gap. Ciphertext uses a separate AES-256 key and binds request ID
+plus verification-token hash. Existing-user confirmation takes Guard -> user -> request;
+result reads retry if ownership changes before the shared request lock. No stream retains
+its transaction. Results live 15 minutes from confirmation, independent of request expiry.
+Cleanup commits request-only wiping/release, session-only detachment and unreferenced old
+request deletion separately: never retain both session/request row locks in reverse order.
+See docs/verification.md, including capacity/availability metrics and key retention.
+
 ## Repository map
 
 | What | Where |
@@ -85,6 +96,7 @@ a busy replay rolls back the whole deletion before retrying, bounded by the call
 | Access JWT signing, rotation snapshot, local public JWKS | `internal/signing/` |
 | Opaque 256-bit secrets, shared IANA timezone validation | `internal/token/`, `internal/domain/` |
 | Registration, refresh rotation/reuse and logout | `internal/auth/`, `internal/adapter/grpc/auth/`, `internal/adapter/postgres/auth.go` |
+| Common confirmation, snapshots, Watch, result cipher and notification fanout | `internal/verification/`, `internal/adapter/verificationcrypto/`, `internal/adapter/postgres/verification*.go`, `internal/app/phone.go` |
 | Current consent-document usecase | `internal/consent/` |
 | Profile settings, consent lifecycle and system status | `internal/profile/`, `internal/adapter/grpc/profile/`, `internal/adapter/postgres/profile.go` |
 | Atomic deletion and local data purge | `internal/deletion/`, `internal/adapter/postgres/deletion.go` |

@@ -9,6 +9,7 @@
 - [docs/migrations.md](docs/migrations.md) — миграции и запросы на pgx ([FIN-115](https://finassist.youtrack.cloud/issue/FIN-115)).
 - [docs/schema.md](docs/schema.md) — схема БД `user`: сущности, инварианты, ожидаемые запросы и индексы ([FIN-112](https://finassist.youtrack.cloud/issue/FIN-112)).
 - [docs/deletion.md](docs/deletion.md) — атомарное удаление аккаунта и доставка PurgeUserData.
+- [docs/verification.md](docs/verification.md) — общее подтверждение, Watch, шифрование результата и очистка.
 - [AGENTS.md](AGENTS.md) — карта и правила для агентов, Code Review Rules.
 
 ## Автоматизация обновлений зависимостей
@@ -39,17 +40,22 @@ DeleteAccount синхронно удаляет локальные данные,
 вместе с заданием PurgeUserData для bank-statement-data, analytics и assistant. Повтор
 успешен без нового задания. Детали — [docs/deletion.md](docs/deletion.md).
 
-Реализованы 11 из 13 RPC. StartPhoneVerification и WatchPhoneVerification
-ещё возвращают UNIMPLEMENTED. Реальных и автоматически подтверждающих провайдеров
-нет (FIN-139/FIN-122); runtime не создаёт подтверждённых заявок и не имеет ручки
-обхода звонка. В API-тестах используются явно тестовые подтверждённые заявки.
+Реализованы 12 из 13 RPC. WatchPhoneVerification читает primary, слушает общий
+LISTEN/NOTIFY, отдаёт результат повторно 15 минут и применяет IP-лимит до секрета.
+Общее подтверждение атомарно сохраняет результат и сессию существующего пользователя;
+новый получает токен регистрации. Детали — [docs/verification.md](docs/verification.md).
+
+StartPhoneVerification ещё UNIMPLEMENTED. Реальных и автоматически подтверждающих
+провайдеров нет (FIN-139/FIN-122); runtime не создаёт заявки и не имеет публичной
+ручки обхода звонка. Автотесты создают явно тестовые pending-заявки и вызывают общий
+путь подтверждения. Создание заявок и подключение провайдеров — следующие этапы.
 
 Подготовлен общий механизм лимитов аутентификации (`internal/ratelimit`): фиксированные
 UTC-окна в primary PostgreSQL, атомарная проверка нескольких окон, настройки и метрики.
 При старте публикуются настройки семи политик; фоновая очистка удаляет старые окна.
-Register и RefreshTokens считают попытки до проверки токена, включая отказы 401/403/422;
-повтор сохранённого ответа и конфликт ключа лимит не расходуют. Start/Watch подключатся
-с соответствующими RPC. Правила интеграции и наблюдаемость — [docs/limits.md](docs/limits.md).
+Watch, Register и RefreshTokens считают попытки до проверки токена, включая отказы 401/403/422;
+повтор сохранённого ответа и конфликт ключа лимит не расходуют. Start подключится
+с созданием заявки. Правила интеграции и наблюдаемость — [docs/limits.md](docs/limits.md).
 
 Документы согласий публикуются миграциями данных в consent_document: новая строка с
 версией, утверждённым названием и URL; прежний is_current снимается перед включением
@@ -65,6 +71,8 @@ internal/app/                      assembly: identity, pools, server, wire() (ha
 internal/app/apitest/              the whole service in-process for API tests
 internal/signing/                  access JWT signing and public JWKS loaded from trusted files
 internal/consent/                  current consent-document usecase
+internal/verification/             common confirmation, primary snapshots, Watch and cleanup
+internal/adapter/verificationcrypto/ independent AES-GCM result encryption
 internal/profile/                  profile settings and assistant-consent usecases
 internal/deletion/                 atomic account deletion and remote purge scheduling
 internal/adapter/outbox/            timezone and deletion event encoding
@@ -106,6 +114,11 @@ make run
 Каталог .local исключён из git и Docker build context. make run использует тот же ключ.
 
 Настройки stage/prod и ротация ключей — [docs/config.md](docs/config.md).
+PHONE_RESULT_KEY_FILE — новый обязательный отдельный AES-256 ключ (32 raw-байта, 0600),
+общий для реплик и отличный от ключа идемпотентности. make dev-key создаёт его локально
+без перезаписи; пример systemd использует отдельный credential. При плановой замене
+нужно дождаться окончания всех 15-минутных результатов, сохранив прежние ключ/ID до
+этого момента. Ключи и ID одинаковы на всех репликах.
 Миграции go-tombstone и go-outbox применяются до запуска новой сборки.
 Для каждого получателя OUTBOX_TIMEZONE_TARGETS и OUTBOX_DELETION_TARGETS обязателен
 PEER_<NAME>_ADDR, в том числе новый обязательный PEER_ANALYTICS_ADDR. Удаление всегда

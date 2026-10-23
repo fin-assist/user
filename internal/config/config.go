@@ -51,6 +51,7 @@ type Config struct {
 	Limits   ratelimit.Rules
 	Outbox   OutboxConfig
 	Sessions SessionsConfig
+	Phone    PhoneConfig
 	Peers    map[string]string // other services: name -> gRPC target, from PEER_<NAME>_ADDR
 	// ShutdownDelay keeps serving after NOT_SERVING so balancers stop sending new calls.
 	ShutdownDelay time.Duration
@@ -168,6 +169,7 @@ func load(getenv func(string) string, readFile func(string) ([]byte, error), env
 		Limits:          r.limits(),
 		Outbox:          r.outbox(),
 		Sessions:        r.sessions(),
+		Phone:           r.phone(),
 		ShutdownDelay:   r.duration("SHUTDOWN_DELAY"),
 		ShutdownTimeout: r.duration("SHUTDOWN_TIMEOUT"),
 	}

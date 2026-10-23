@@ -15,6 +15,7 @@ import (
 	usecase "github.com/fin-assist/user/internal/auth"
 	"github.com/fin-assist/user/internal/ratelimit"
 	"github.com/fin-assist/user/internal/reqctx"
+	"github.com/fin-assist/user/internal/verification"
 )
 
 // Sessions is the consumer interface of the three implemented RPCs.
@@ -23,6 +24,11 @@ type Sessions interface {
 	Refresh(context.Context, string) (usecase.Rotation, error)
 	CompleteReuse(context.Context, string) error
 	Logout(context.Context, string) error
+}
+
+// Phone is the provider-independent streaming lifecycle.
+type Phone interface {
+	Watch(context.Context, string, func(verification.Outcome) error) error
 }
 
 // Engine is the library surface used by this transport adapter.
@@ -52,16 +58,16 @@ type Guard interface {
 type Handler struct {
 	userv1.UnimplementedAuthServiceServer
 	sessions        Sessions
+	phone           Phone
 	engine          Engine
 	state, attempts Transactions
 	limits          Limits
 	guard           Guard
 }
 
-// Register installs session RPCs; phone creation and Watch remain UNIMPLEMENTED
-// until the next stage supplies a provider-independent confirmation lifecycle.
-func Register(server grpc.ServiceRegistrar, sessions Sessions, engine Engine, state, attempts Transactions, limits Limits, guard Guard) {
-	userv1.RegisterAuthServiceServer(server, &Handler{sessions: sessions, engine: engine, state: state, attempts: attempts, limits: limits, guard: guard})
+// Register installs session and Watch RPCs. Phone creation arrives separately.
+func Register(server grpc.ServiceRegistrar, sessions Sessions, engine Engine, state, attempts Transactions, limits Limits, guard Guard, phone Phone) {
+	userv1.RegisterAuthServiceServer(server, &Handler{sessions: sessions, engine: engine, state: state, attempts: attempts, limits: limits, guard: guard, phone: phone})
 }
 
 func (h *Handler) Register(ctx context.Context, in *userv1.RegisterRequest) (*userv1.RegisterResponse, error) {
@@ -188,4 +194,29 @@ func (h *Handler) attempt(ctx context.Context, op ratelimit.Operation) error {
 
 func pair(p usecase.Pair) *userv1.TokenPair {
 	return &userv1.TokenPair{AccessToken: p.Access, RefreshToken: p.Refresh}
+}
+
+func (h *Handler) WatchPhoneVerification(in *userv1.WatchPhoneVerificationRequest, stream grpc.ServerStreamingServer[userv1.WatchPhoneVerificationResponse]) error {
+	if err := h.attempt(stream.Context(), ratelimit.Watch); err != nil {
+		return err
+	}
+	return h.phone.Watch(stream.Context(), in.GetVerificationToken(), func(o verification.Outcome) error { return stream.Send(verificationMessage(o)) })
+}
+func verificationMessage(o verification.Outcome) *userv1.WatchPhoneVerificationResponse {
+	out := &userv1.WatchPhoneVerificationResponse{}
+	switch o.State {
+	case verification.Pending:
+		out.Status = userv1.VerificationStatus_VERIFICATION_STATUS_PENDING
+	case verification.Expired:
+		out.Status = userv1.VerificationStatus_VERIFICATION_STATUS_EXPIRED
+	case verification.Verified:
+		out.Status = userv1.VerificationStatus_VERIFICATION_STATUS_VERIFIED
+		out.IsNewUser = &o.IsNewUser
+		if o.IsNewUser {
+			out.RegistrationToken = &o.RegistrationToken
+		} else {
+			out.Tokens = pair(o.Pair)
+		}
+	}
+	return out
 }
