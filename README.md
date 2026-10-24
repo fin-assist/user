@@ -11,6 +11,7 @@
 - [docs/deletion.md](docs/deletion.md) — атомарное удаление аккаунта и доставка PurgeUserData.
 - [docs/verification.md](docs/verification.md) — создание и восстановление заявки, общее подтверждение, Watch и очистка.
 - [docs/zvonok.md](docs/zvonok.md) — Zvonok V1, постбэк, fallback, выбор номера и границы активации.
+- [docs/fake-phone.md](docs/fake-phone.md) — вход без звонка в dev/stage, тестовые телефоны и защита prod.
 - [AGENTS.md](AGENTS.md) — карта и правила для агентов, Code Review Rules.
 
 ## Автоматизация обновлений зависимостей
@@ -56,7 +57,10 @@ StartPhoneVerification резервирует попытку до внешнег
 частичный UNIQUE создаётся CONCURRENTLY отдельным шагом.
 FIN-139/216 добавляют Zvonok V1 и случайный выбор/хранение пула (миграция 000004).
 По умолчанию создание выключено, без резервирования попытки. Для dev/stage
-конкретная сборка включается через PHONE_PROVIDER=zvonok; фейк остаётся FIN-122.
+конкретная сборка включается через PHONE_PROVIDER=zvonok или PHONE_PROVIDER=fake.
+Фейк принимает только служебный диапазон +7000000xxxx, сразу подтверждает через
+общий Confirm и запрещён в prod. Локально: `PHONE_PROVIDER=fake make up` или
+`PHONE_PROVIDER=fake make run`; подробности — [docs/fake-phone.md](docs/fake-phone.md).
 HTTP-постбэк требует IP провайдера и проверки call_by_id, обхода звонка по параметрам
 запроса нет. API-тесты проходят полный вход через HTTPS-сервер провайдера и gRPC user.
 

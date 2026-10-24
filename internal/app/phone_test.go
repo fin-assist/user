@@ -15,9 +15,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/fin-assist/user/internal/adapter/client"
+	"github.com/fin-assist/user/internal/adapter/fakephone"
 	"github.com/fin-assist/user/internal/adapter/postgres"
 	"github.com/fin-assist/user/internal/adapter/postgres/migrate/migratetest"
 	"github.com/fin-assist/user/internal/config"
+	"github.com/fin-assist/user/internal/verification"
 )
 
 func TestPhoneAssemblyKeySeparationAndFailureCleanup(t *testing.T) {
@@ -61,6 +63,34 @@ func TestPhoneAssemblyKeySeparationAndFailureCleanup(t *testing.T) {
 	if err = os.WriteFile(phonePath, bytes.Repeat([]byte{42}, 32), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	a.Cfg.Env = config.EnvProd
+	prodRegistry := prometheus.NewRegistry()
+	if _, closePhone, err := wirePhone(t.Context(), a, prodRegistry); err != nil {
+		t.Fatal(err)
+	} else {
+		if changed, err := a.Verifications.Confirm(t.Context(), verification.Proof{Provider: "zvonok", CallID: "prod-call", Phone: "+70000001234"}); changed || err != verification.ErrProof {
+			t.Fatal("prod assembly omitted protection", changed, err)
+		}
+		closePhone()
+	}
+	// Registration failure must also close the listener just opened by assembly.
+	badGuardRegistry := prometheus.NewRegistry()
+	badGuardRegistry.MustRegister(prometheus.NewCounter(prometheus.CounterOpts{Name: "finassist_phone_test_confirmation_rejected_total", Help: "Already registered"}))
+	if _, _, err := wirePhone(t.Context(), a, badGuardRegistry); err == nil {
+		t.Fatal("duplicate prod guard metric accepted")
+	}
+	a.Cfg.Env, a.Cfg.Zvonok.Provider = config.EnvDev, "fake"
+	a.phoneProvider = fakephone.New()
+	if _, _, err := wirePhone(t.Context(), a, prometheus.NewRegistry()); err == nil {
+		t.Fatal("two backends accepted")
+	}
+	a.phoneProvider = nil
+	fakeRegistry := prometheus.NewRegistry()
+	fakeRegistry.MustRegister(prometheus.NewGauge(prometheus.GaugeOpts{Name: "finassist_phone_callback_outcomes_24h", Help: "Already registered"}))
+	if _, _, err := wirePhone(t.Context(), a, fakeRegistry); err == nil {
+		t.Fatal("duplicate number collector accepted")
+	}
+	a.Cfg.Zvonok.Provider = ""
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(prometheus.NewGauge(prometheus.GaugeOpts{Name: "finassist_phone_watch_active_streams", Help: "Already registered"}))
 	if _, _, err = wirePhone(t.Context(), a, reg); err == nil {

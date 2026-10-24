@@ -15,6 +15,7 @@ x-env: &env
   JWT_AUDIENCE: local-app
   AUTH_IDEMPOTENCY_KEY_FILE: /run/secrets/auth-idempotency
   PHONE_RESULT_KEY_FILE: /run/secrets/phone-result
+  PHONE_PROVIDER: ${PHONE_PROVIDER:-disabled}
   LOG_FORMAT: text
   LOG_LEVEL: debug
   DB_PRIMARY_DSN: postgres://user_service:user_service@postgres:5432/user?sslmode=disable

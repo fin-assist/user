@@ -1,0 +1,10 @@
+groups:
+  - name: user-phone-security
+    rules:
+      - alert: UserSyntheticPhoneConfirmationInProd
+        expr: finassist_phone_test_confirmation_rejected_total > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Попытка подтверждения тестового телефона в prod"
+          description: "user отклонил подтверждение служебного тестового номера. Проверить окружение и сборку провайдера. Сигнал сохраняется до перезапуска процесса."

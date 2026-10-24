@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// ZvonokConfig selects the real provider and its separate ingress listener.
+// ZvonokConfig selects the phone backend and configures the real provider listener.
 // Prod activation is unavailable until the FIN-81 budget gate lands.
 type ZvonokConfig struct {
 	Provider, PublicKey, CampaignID, CallbackAddr string
@@ -34,6 +34,15 @@ func (r *reader) zvonok() ZvonokConfig {
 
 // Validate enforces credentials and the agreed prod activation boundary.
 func (c ZvonokConfig) Validate(env Env) error {
+	if c.Provider == "fake" {
+		if env != EnvDev && env != EnvStage {
+			return errors.New("phone: fake backend is allowed only in dev/stage")
+		}
+		if c.PublicKey != "" || c.CampaignID != "" {
+			return errors.New("phone: real credentials configured for fake backend")
+		}
+		return nil
+	}
 	if c.Provider == "" || c.Provider == "disabled" {
 		if c.PublicKey != "" || c.CampaignID != "" {
 			return errors.New("zvonok: credentials configured for a disabled provider")

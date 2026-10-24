@@ -46,6 +46,9 @@ func wireSessions(ctx context.Context, a *App, events auth.Events, reg prometheu
 		pool.Close()
 		return worker.Job{}, nil, err
 	}
+	if a.Cfg.Zvonok.Provider == "fake" {
+		starts.SetImmediateConfirmation(a.Verifications)
+	}
 	authgrpc.Register(a.GRPC.GRPC(), sessions, engine, pool, a.DB, a.Limits, a.Tombstones, a.Verifications, starts)
 	cleanup := worker.Every("auth-cleanup", time.Minute, a.Log, func(ctx context.Context) error {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)

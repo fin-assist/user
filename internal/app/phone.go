@@ -8,6 +8,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/fin-assist/user/internal/adapter/fakephone"
 	"github.com/fin-assist/user/internal/adapter/postgres"
 	"github.com/fin-assist/user/internal/adapter/verificationcrypto"
 	"github.com/fin-assist/user/internal/adapter/zvonok"
@@ -18,6 +19,12 @@ import (
 )
 
 func wirePhone(ctx context.Context, a *App, reg prometheus.Registerer) ([]worker.Job, func(), error) {
+	if err := a.Cfg.Zvonok.Validate(a.Cfg.Env); err != nil {
+		return nil, nil, err
+	}
+	if a.Cfg.Env == config.EnvProd && a.phoneProvider != nil && a.phoneProvider.Name() == "fake" {
+		return nil, nil, errors.New("phone: fake backend is forbidden in prod")
+	}
 	key, err := config.LoadPhoneKey(a.Cfg.Phone)
 	if err != nil {
 		return nil, nil, err
@@ -40,6 +47,14 @@ func wirePhone(ctx context.Context, a *App, reg prometheus.Registerer) ([]worker
 		return nil, nil, err
 	}
 	a.Verifications = verification.New(a.DB, postgres.NewVerifications(a.DB), postgres.NewAuth(a.DB), a.Tombstones, a.Signing, codec, notifications, time.Now, token.New, a.Cfg.Sessions.RefreshTTL, a.Cfg.Phone.ResyncInterval)
+	if a.Cfg.Env == config.EnvProd {
+		guard, err := verification.NewProductionProofGuard(a.Log, reg)
+		if err != nil {
+			notifications.Close()
+			return nil, nil, err
+		}
+		a.Verifications.SetProofGuard(guard)
+	}
 	cleanup := worker.Every("phone-cleanup", time.Minute, a.Log, func(ctx context.Context) error {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
@@ -55,6 +70,19 @@ func wirePhone(ctx context.Context, a *App, reg prometheus.Registerer) ([]worker
 	})
 	jobs := []worker.Job{{Name: "phone-notifications", Run: notifications.Run}, cleanup}
 	closeBackend := func() {}
+	if a.Cfg.Zvonok.Provider == "fake" {
+		if a.phoneProvider != nil || a.phoneSelector != nil {
+			notifications.Close()
+			return nil, nil, errors.New("phone: multiple configured backends")
+		}
+		numbers, err := verification.NewNumbers(postgres.NewVerifications(a.DB), a.Log, reg)
+		if err != nil {
+			notifications.Close()
+			return nil, nil, err
+		}
+		a.phoneProvider, a.phoneSelector = fakephone.New(), numbers
+		jobs = append(jobs, callbackOutcomesJob(a, numbers))
+	}
 	if a.Cfg.Zvonok.Provider == "zvonok" {
 		fail := func(err error) ([]worker.Job, func(), error) {
 			closeBackend()
@@ -88,11 +116,15 @@ func wirePhone(ctx context.Context, a *App, reg prometheus.Registerer) ([]worker
 		a.phoneProvider, a.phoneSelector = provider, numbers
 		a.PhoneCallback = handler
 		a.Verifications.SetStatusChecker(checker)
-		jobs = append(jobs, worker.Every("phone-callback-outcomes", time.Minute, a.Log, func(ctx context.Context) error {
-			ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			defer cancel()
-			return numbers.Report(ctx)
-		}))
+		jobs = append(jobs, callbackOutcomesJob(a, numbers))
 	}
 	return jobs, func() { closeBackend(); notifications.Close() }, nil
+}
+
+func callbackOutcomesJob(a *App, numbers *verification.Numbers) worker.Job {
+	return worker.Every("phone-callback-outcomes", time.Minute, a.Log, func(ctx context.Context) error {
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		return numbers.Report(ctx)
+	})
 }

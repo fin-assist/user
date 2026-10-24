@@ -51,6 +51,9 @@ type App struct {
 
 // New assembles the service from cfg. Close releases what it opened.
 func New(ctx context.Context, cfg config.Config, log *slog.Logger, reg prometheus.Registerer, options ...Option) (*App, error) {
+	if err := cfg.Zvonok.Validate(cfg.Env); err != nil {
+		return nil, err
+	}
 	keys, err := signing.Load(signing.Options{PrivateKeyFile: cfg.Signing.PrivateKeyFile, PublicKeysFile: cfg.Signing.PublicKeysFile, KeyID: cfg.Signing.KeyID, Issuer: cfg.Signing.Issuer, Audience: cfg.Signing.Audience, Clock: time.Now})
 	if err != nil {
 		return nil, err
@@ -102,8 +105,8 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger, reg prometheu
 type Option func(*App)
 
 // WithPhoneBackend installs the provider and transactional number selector. The
-// default executable keeps creation disabled; PHONE_PROVIDER=zvonok opts into the
-// concrete guarded assembly. This seam is used by controlled API-test providers.
+// default executable keeps creation disabled; PHONE_PROVIDER=fake or zvonok opts
+// into a concrete guarded assembly. This seam is used by controlled API-test providers.
 func WithPhoneBackend(provider verification.Provider, selector verification.NumberSelector) Option {
 	return func(a *App) { a.phoneProvider, a.phoneSelector = provider, selector }
 }

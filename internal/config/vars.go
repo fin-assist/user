@@ -20,7 +20,7 @@ type Var struct {
 
 // Vars lists every variable in the order of docs/config.md.
 var Vars = []Var{
-	{Name: "PHONE_PROVIDER", Command: "serve", Default: "disabled", Doc: "`disabled` или `zvonok`; Zvonok разрешён в dev/stage, в prod ждёт FIN-81"},
+	{Name: "PHONE_PROVIDER", Command: "serve", Default: "disabled", Doc: "`disabled`, `fake` или `zvonok`; fake/zvonok только dev/stage; prod Zvonok ждёт FIN-81"},
 	{Name: "ZVONOK_PUBLIC_KEY", Command: "serve", Secret: true, Doc: "ключ API V1; обязателен при PHONE_PROVIDER=zvonok, не выводится в лог"},
 	{Name: "ZVONOK_CAMPAIGN_ID", Command: "serve", Doc: "ID отдельной кампании pincode_incoming, управляемой только этим сервисом"},
 	{Name: "ZVONOK_CALLBACK_ADDR", Command: "serve", Default: ":9095", Doc: "отдельный HTTP-listener, только GET /callbacks/zvonok; ingress мимо bank-bff, без query в access-логах"},

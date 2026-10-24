@@ -112,7 +112,11 @@ type Service struct {
 	newToken           func() (string, error)
 	refreshTTL, resync time.Duration
 	checker            StatusChecker
+	proofGuard         ProofGuard
 }
+
+// SetProofGuard installs environment policy during assembly, before serving.
+func (s *Service) SetProofGuard(guard ProofGuard) { s.proofGuard = guard }
 
 // SetStatusChecker installs the provider fallback during assembly, before serving.
 func (s *Service) SetStatusChecker(checker StatusChecker) { s.checker = checker }
@@ -126,6 +130,24 @@ var providerName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 // Confirm atomically stores one immutable result, a session for an existing user,
 // and NOTIFY. Repeated/late proof issues no new secrets. No provider RPC runs here.
 func (s *Service) Confirm(ctx context.Context, p Proof) (changed bool, err error) {
+	return s.confirm(ctx, p, nil)
+}
+
+// ConfirmCreated joins Start's completion transaction and shares Confirm's
+// entire result/notification path. The trusted caller must resolve owner and
+// hold Guard -> user BEFORE completing/locking the request. Empty owner is the
+// pre-lock snapshot; a concurrent registration is handled by ordinary Register.
+// Re-discovering an account here could take Guard while holding the request.
+func (s *Service) ConfirmCreated(ctx context.Context, p Proof, owner string) (bool, error) {
+	return s.confirm(ctx, p, &owner)
+}
+
+func (s *Service) confirm(ctx context.Context, p Proof, owner *string) (changed bool, err error) {
+	if s.proofGuard != nil {
+		if err := s.proofGuard.Check(ctx, p); err != nil {
+			return false, err
+		}
+	}
 	if !providerName.MatchString(p.Provider) || len(p.CallID) < 1 || len(p.CallID) > 128 || !validPhone(p.Phone) {
 		return false, ErrProof
 	}
@@ -141,20 +163,25 @@ func (s *Service) Confirm(ctx context.Context, p Proof) (changed bool, err error
 		}
 		// Learn the user before taking a request lock: all existing-user writers use
 		// Guard -> app_user -> verification, including registration and deletion.
-		id, err := s.accounts.FindUserByPhone(ctx, p.Phone)
-		if err != nil {
-			return err
-		}
-		if id != "" {
-			alive, err := s.guard.Guard(ctx, id)
+		var id string
+		if owner != nil {
+			id = *owner
+		} else {
+			id, err = s.accounts.FindUserByPhone(ctx, p.Phone)
 			if err != nil {
 				return err
 			}
-			if !alive {
-				return nil
-			}
-			if err = s.accounts.LockUser(ctx, id); err != nil {
-				return err
+			if id != "" {
+				alive, err := s.guard.Guard(ctx, id)
+				if err != nil {
+					return err
+				}
+				if !alive {
+					return nil
+				}
+				if err = s.accounts.LockUser(ctx, id); err != nil {
+					return err
+				}
 			}
 		}
 		r, err := s.repo.Lock(ctx, before.ID, true)
