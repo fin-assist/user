@@ -198,9 +198,6 @@ func TestZvonokAPIStartRecoveryPoolAndIdempotentReplay(t *testing.T) {
 	if _, err = startCall(t, env, authKey(), phone); apitest.Reason(err) != "RATE_LIMITED" {
 		t.Fatal(err)
 	}
-	if value := zvonokMetric(t, env, "finassist_zvonok_balance_rubles", nil); value != 100.29 {
-		t.Fatal("balance observation", value)
-	}
 }
 
 func TestZvonokAPIUnknownOutcomeKeepsOwnAttemptAndRejectsForeignCall(t *testing.T) {

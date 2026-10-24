@@ -5,10 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"math"
 	"net/http"
 	"net/url"
-	"strconv"
 	"time"
 
 	"github.com/fin-assist/user/internal/verification"
@@ -180,10 +178,6 @@ func (c *Client) confirm(ctx context.Context, a verification.Attempt, previous s
 		if !phone.MatchString(n) {
 			return verification.Call{}, errUnavailable
 		}
-	}
-	if balance, err := strconv.ParseFloat(call.Balance, 64); err == nil && !math.IsNaN(balance) && !math.IsInf(balance, 0) && balance >= 0 && balance <= 1e12 {
-		c.balance.Set(balance)
-		c.balanceKnown.Set(float64(c.now().Unix()))
 	}
 	started := sent
 	if call.Created.Before(sent.Truncate(time.Millisecond)) {

@@ -145,8 +145,6 @@ Ingress также обязан отключить/маскировать query.
 | `finassist_zvonok_postbacks_total{result}` | accepted / foreign_ip / unknown_call / unconfirmed / unavailable / invalid; accepted может быть повтором или поздним событием без изменения |
 | `finassist_phone_provider_checks_total{source,result}` | source postback / fallback; result confirmed / unchanged / mismatch / unconfirmed / unavailable / capacity |
 | `finassist_phone_provider_poll_interval_seconds`, `finassist_phone_provider_poll_capacity`, `finassist_phone_provider_poll_active` | действующие настройки интервала/ёмкости и число заявок в coalescing-карте |
-| `finassist_zvonok_balance_rubles` | последний валидный balance из ответа confirm, не гарантированно актуальный остаток |
-| `finassist_zvonok_balance_last_success_timestamp_seconds` | время этого наблюдения; 0 — пока неизвестно; users/balance ждёт пример поддержки |
 | `finassist_phone_callback_outcomes_24h{callback_number,outcome}` | gauges заявок, созданных за последние 24 ч: pending / confirmed / expired; публичные номера ограничены 256 значениями на процесс, остальные other |
 | `finassist_phone_callback_overflow_requests_24h` | заявки в other, включая недетализированные группы; рост означает потерю детализации пула |
 
@@ -165,11 +163,8 @@ sum(increase(finassist_zvonok_requests_total{outcome=~"rate_limited|capacity_una
 sum(increase(finassist_zvonok_postbacks_total{result="foreign_ip"}[5m])) > 0
 sum(increase(finassist_phone_provider_checks_total{result="capacity"}[5m])) > 0
 max(finassist_phone_callback_overflow_requests_24h) > 0
-# Low last observed credit (< 10 rubles); missing/stale observations are separate.
-(finassist_zvonok_balance_rubles < 10) and (finassist_zvonok_balance_last_success_timestamp_seconds > 0)
-time() - finassist_zvonok_balance_last_success_timestamp_seconds > 600
 ```
 
-Последнее правило до периодического users/balance сигнализирует также об отсутствии
-созданий; не объявлять его доказательством сбоя провайдера. Платные запросы тестами
-не выполняются. FIN-81 остаётся условием включения prod.
+Собственный контроль баланса и соответствующие метрики/алерты отложены в
+[FIN-233](https://finassist.youtrack.cloud/issue/FIN-233); пока используются уведомления Zvonok.
+Платные запросы тестами не выполняются. FIN-81 остаётся условием включения prod.

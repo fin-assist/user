@@ -24,7 +24,7 @@ type Confirmation interface {
 
 // Checker validates authenticated provider state before entering Confirmation.
 // Its bounded per-process cache coalesces open Watches; the account-wide API gate
-// remains the cross-replica capacity boundary, including postbacks and balance.
+// remains the cross-replica capacity boundary, including postbacks.
 type Checker struct {
 	provider StatusProvider
 	name     string

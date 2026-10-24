@@ -39,8 +39,6 @@ type Client struct {
 	now           func() time.Time
 	requests      *prometheus.CounterVec
 	latency       *prometheus.HistogramVec
-	balance       prometheus.Gauge
-	balanceKnown  prometheus.Gauge
 }
 
 // New pins the API endpoint, bounds HTTP work and disables redirects. A supplied
@@ -53,13 +51,11 @@ func New(key, campaign string, gate Gate, transport http.RoundTripper, reg prome
 		transport = http.DefaultTransport.(*http.Transport).Clone()
 	}
 	c := &Client{key: key, campaign: campaign, gate: gate, now: time.Now,
-		http:         &http.Client{Transport: transport, Timeout: 3 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
-		requests:     prometheus.NewCounterVec(prometheus.CounterOpts{Name: "finassist_zvonok_requests_total", Help: "Zvonok V1 HTTP requests by fixed operation and sanitized outcome."}, []string{"operation", "outcome"}),
-		latency:      prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "finassist_zvonok_request_duration_seconds", Help: "Zvonok V1 request latency including the shared API gate.", Buckets: prometheus.DefBuckets}, []string{"operation"}),
-		balance:      prometheus.NewGauge(prometheus.GaugeOpts{Name: "finassist_zvonok_balance_rubles", Help: "Last authenticated Zvonok prepaid balance in rubles."}),
-		balanceKnown: prometheus.NewGauge(prometheus.GaugeOpts{Name: "finassist_zvonok_balance_last_success_timestamp_seconds", Help: "Time of the last balance observation in an authenticated confirm response; zero means unknown."}),
+		http:     &http.Client{Transport: transport, Timeout: 3 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+		requests: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "finassist_zvonok_requests_total", Help: "Zvonok V1 HTTP requests by fixed operation and sanitized outcome."}, []string{"operation", "outcome"}),
+		latency:  prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "finassist_zvonok_request_duration_seconds", Help: "Zvonok V1 request latency including the shared API gate.", Buckets: prometheus.DefBuckets}, []string{"operation"}),
 	}
-	for _, metric := range []prometheus.Collector{c.requests, c.latency, c.balance, c.balanceKnown} {
+	for _, metric := range []prometheus.Collector{c.requests, c.latency} {
 		if err := reg.Register(metric); err != nil {
 			return nil, err
 		}
@@ -163,7 +159,6 @@ type remoteCall struct {
 	Status       string     `json:"call_status"`
 	LegacyStatus string     `json:"status"`
 	Completed    *time.Time `json:"completed"`
-	Balance      string     `json:"balance"`
 	Numbers      []string   `json:"allowed_phones_for_call"`
 }
 

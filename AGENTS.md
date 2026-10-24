@@ -45,7 +45,8 @@ Logout, DeleteAccount, WatchPhoneVerification and StartPhoneVerification (all 13
 The default executable disables phone creation. FIN-139/216 adds opt-in Zvonok V1
 for dev/stage, a transactional uniform number selector, a separate checked postback
 listener and a Watch fallback. Prod remains blocked until FIN-81; FIN-122 owns the fake.
-The users/balance response and real campaign acceptance still await external evidence.
+Balance monitoring is deferred to FIN-233 and does not block FIN-139/216.
+Real campaign acceptance still awaits external evidence.
 Do not claim production phone sign-in is ready. go-identity v0.1.0 supplies only the verifiers
 and token sources: keep the existing server ACL and reqctx chain, without a second identity
 interceptor. The signing package supplies its local JWKS provider (no self-RPC). go-tombstone
