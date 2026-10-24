@@ -147,3 +147,27 @@ func TestWatchFallbackConfirmsAndFinalCheckPreservesExpiry(t *testing.T) {
 		})
 	}
 }
+
+// NOTIFY already follows a committed proof. An unavailable provider must not
+// delay delivery of that verified database result by another HTTP timeout.
+func TestWatchNotifyDeliversCommittedResultWithoutProviderLookup(t *testing.T) {
+	f := fixture(t)
+	f.s.SetStatusChecker(checkingFunc(func(context.Context, Request, bool) error {
+		t.Fatal("provider called for committed notification")
+		return nil
+	}))
+	var states []State
+	err := f.s.Watch(t.Context(), "secret", func(out Outcome) error {
+		states = append(states, out.State)
+		if out.State == Pending {
+			if _, err := f.s.Confirm(t.Context(), goodProof()); err != nil {
+				return err
+			}
+			f.n.changed <- struct{}{}
+		}
+		return nil
+	})
+	if err != nil || len(states) != 2 || states[1] != Verified {
+		t.Fatal(states, err)
+	}
+}

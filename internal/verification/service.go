@@ -343,6 +343,7 @@ func (s *Service) Watch(ctx context.Context, raw string, send func(Outcome) erro
 	defer poll.Stop()
 	for {
 		final := false
+		checkProvider := false
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -351,16 +352,30 @@ func (s *Service) Watch(ctx context.Context, raw string, send func(Outcome) erro
 		case <-sub.Changed:
 		case <-expiry.C:
 			final = true
+			checkProvider = true
 		case <-poll.C:
+			checkProvider = true
 		}
-		if s.checker != nil {
+		// Deliver already committed proof without another provider round trip,
+		// including when the resync timer wins the race with its NOTIFY.
+		r, out, err = s.snapshot(ctx, hash, true)
+		if err != nil {
+			return err
+		}
+		if out.State == Verified {
+			return send(out)
+		}
+		if out.State == Expired {
+			final, checkProvider = true, true
+		}
+		if s.checker != nil && checkProvider {
 			// Provider errors must not turn a healthy pending stream into a failed
 			// login. NOTIFY and the local expiry still determine client delivery.
 			_ = s.checker.Check(ctx, r, final)
-		}
-		_, out, err = s.snapshot(ctx, hash, true)
-		if err != nil {
-			return err
+			_, out, err = s.snapshot(ctx, hash, true)
+			if err != nil {
+				return err
+			}
 		}
 		if out.State != Pending {
 			return send(out)
