@@ -344,8 +344,9 @@ Forks need no PR-write permission. README documents the boundaries and outstandi
   - `@codex` — the Codex GitHub integration under the owner's ChatGPT subscription. Its model is chosen by OpenAI
     and cannot be pinned from here; a pinned model would need the OpenAI API with per-token billing, which was
     declined (FIN-103).
-  - A review is requested only once `.github/workflows/claude.yml` is on `main`: comment-triggered workflows run
-    from the default branch.
+  - Claude review is requested only once `.github/workflows/claude.yml` is on `main`: its comment-triggered
+    workflow runs from the default branch. Codex review is independent and is requested whenever its
+    GitHub integration is available.
   - Replies in threads and other comments never mention `@codex` or `@claude`: any mention with text starts them
     again.
 - Waiting for the review: react to the PR's GitHub events when the session receives them; otherwise check 3 minutes

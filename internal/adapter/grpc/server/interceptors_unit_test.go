@@ -137,3 +137,30 @@ func TestUnitStreamValidatesEveryMessageAndRefusesMissingIdentity(t *testing.T) 
 		t.Fatalf("unauthorized stream reached handler: %v %v", called, err)
 	}
 }
+
+func TestUnitIdentityModelsHaveStableLabelsAndRefuseBrokenVerifierContracts(t *testing.T) {
+	for model, want := range map[Model]string{ModelUser: "user", ModelSystem: "system", ModelMixed: "mixed", ModelNoUser: "no-user", Model(99): "Model(99)"} {
+		if model.String() != want {
+			t.Fatalf("model label: %v %s", model, want)
+		}
+	}
+	e := unitServer(t)
+	e.srv.deps.Users = subjectless{}
+	if _, err := e.srv.authorize(incoming("dev:bank-bff", "dev:u1"), emptyCall); Reason(err) != "INVALID_TOKEN" {
+		t.Fatal("subjectless verifier admitted user", err)
+	}
+	e.srv.deps.Policy = Policy{emptyCall: {Callers: []string{"bank-bff"}, Model: Model(99)}}
+	if _, err := e.srv.authorize(incoming("dev:bank-bff", "dev:u1"), emptyCall); status.Code(err) != codes.PermissionDenied {
+		t.Fatal("unknown model admitted caller", err)
+	}
+	e.srv.deps.Users = DevUserVerifier{}
+	e.srv.deps.Policy = Policy{emptyCall: {Callers: []string{"bank-bff"}, Model: ModelUser, AllowDeleted: true}}
+	if ctx, err := e.srv.authorize(incoming("dev:bank-bff", "dev:gone"), emptyCall); err != nil {
+		t.Fatal("deleted-account retry refused", err)
+	} else if id, _ := reqctx.UserID(ctx); id != "gone" {
+		t.Fatal("deleted identity lost")
+	}
+	if deleted, err := (NoTombstones{}).IsDeleted(t.Context(), "u1"); err != nil || deleted {
+		t.Fatal("stateless tombstone adapter", deleted, err)
+	}
+}

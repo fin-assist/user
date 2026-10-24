@@ -25,13 +25,13 @@ release-check: ## VERSION=vX.Y.Z: validate the CHANGELOG section before tagging
 	test "$$(python3 scripts/changelog.py latest)" = "$(VERSION)"
 
 test-names: ## reject tests accidentally omitted from the three selectors
-	go test -list '^Test' -timeout=8m ./... > test-names.txt
+	go test -race -list '^Test' -timeout=8m ./... > test-names.txt
 	@if grep -E '^Test' test-names.txt | grep -Ev '^Test(Unit|Integration|API).+'; then \
 	  echo 'Name every test TestUnit..., TestIntegration... or TestAPI...' >&2; exit 1; fi
 
 # All suites instrument the same whole module. No production files are excluded.
 # Ordinary packages without tests may be reported as skipped; skipped Test events fail.
-collect-unit collect-integration collect-api:
+collect-unit collect-integration collect-api: test-names
 	@set -euo pipefail; level='$(@:collect-%=%)'; case "$$level" in unit) prefix=Unit;; integration) prefix=Integration;; api) prefix=API;; esac; \
 	rm -f "$$level.out" "$$level.jsonl"; \
 	CI=true go test -json -race -count=1 -timeout=8m -coverpkg=./... \
