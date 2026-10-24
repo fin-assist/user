@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -68,7 +69,7 @@ func TestPhoneAssemblyKeySeparationAndFailureCleanup(t *testing.T) {
 	if _, closePhone, err := wirePhone(t.Context(), a, prodRegistry); err != nil {
 		t.Fatal(err)
 	} else {
-		if changed, err := a.Verifications.Confirm(t.Context(), verification.Proof{Provider: "zvonok", CallID: "prod-call", Phone: "+70000001234"}); changed || err != verification.ErrProof {
+		if changed, err := a.Verifications.Confirm(t.Context(), verification.Proof{Provider: "zvonok", CallID: "prod-call", Phone: "+70000001234"}); changed || !errors.Is(err, verification.ErrProof) {
 			t.Fatal("prod assembly omitted protection", changed, err)
 		}
 		closePhone()
