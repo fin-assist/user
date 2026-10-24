@@ -30,15 +30,24 @@ func (r *VerificationStarts) Find(ctx context.Context, key string) (verification
 	if err != nil {
 		return out, fmt.Errorf("verification start: read attempt: %w", err)
 	}
+	out, err = decodeStartRecord(out.Key, hash, windows)
+	if err != nil {
+		return out, err
+	}
+	out.Request, err = scanVerification(r.db.Writer(ctx).QueryRow(ctx, verificationSQL+` WHERE id=$1`, id))
+	return out, err
+}
+
+func decodeStartRecord(key string, hash, windows []byte) (verification.StartRecord, error) {
+	out := verification.StartRecord{Key: key}
 	if len(hash) != 32 {
 		return out, errors.New("verification start: invalid stored hash")
 	}
 	copy(out.Hash[:], hash)
-	if err = json.Unmarshal(windows, &out.Windows); err != nil || out.Windows == nil || (len(out.Windows) != 0 && len(out.Windows) != 4) {
+	if err := json.Unmarshal(windows, &out.Windows); err != nil || out.Windows == nil || (len(out.Windows) != 0 && len(out.Windows) != 4) {
 		return out, errors.New("verification start: invalid reserved windows")
 	}
-	out.Request, err = scanVerification(r.db.Writer(ctx).QueryRow(ctx, verificationSQL+` WHERE id=$1`, id))
-	return out, err
+	return out, nil
 }
 
 func (r *VerificationStarts) Forget(ctx context.Context, key string) error {
