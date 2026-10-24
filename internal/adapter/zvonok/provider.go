@@ -1,6 +1,7 @@
 package zvonok
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -28,7 +29,7 @@ func (c *Client) lookup(ctx context.Context, operation string, values url.Values
 		return nil, errUnavailable
 	}
 	var calls []remoteCall
-	if json.Unmarshal(r.body, &calls) != nil || len(calls) > 200 {
+	if bytes.Equal(bytes.TrimSpace(r.body), []byte("null")) || json.Unmarshal(r.body, &calls) != nil || len(calls) > 200 {
 		return nil, errUnavailable
 	}
 	for _, call := range calls {
@@ -148,7 +149,7 @@ func (c *Client) Recover(ctx context.Context, a verification.Attempt) (out verif
 }
 
 func (c *Client) confirm(ctx context.Context, a verification.Attempt, previous string, sent time.Time) (verification.Call, error) {
-	r, err := c.request(ctx, "phones/confirm", c.phoneHistory(a), true)
+	r, err := c.request(ctx, "phones/confirm", url.Values{"campaign_id": {c.campaign}, "phone": {a.Phone}}, true)
 	if err != nil {
 		return verification.Call{}, errUnavailable
 	}

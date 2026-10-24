@@ -369,3 +369,35 @@ func zvonokMetric(t *testing.T, env *apitest.Env, name string, labels map[string
 	}
 	return 0
 }
+
+func TestZvonokAPIDeletedRequestCannotBeRecreatedByPostback(t *testing.T) {
+	env, p := zvonokEnv(t, "")
+	phone := "+79991234567"
+	if _, err := startCall(t, env, authKey(), phone); err != nil {
+		t.Fatal(err)
+	}
+	c := mockCall(p, phone, "pincode_ok")
+	var id string
+	if err := env.App.DB.Primary().QueryRow(t.Context(), `INSERT INTO app_user(phone) VALUES($1) RETURNING id::text`, phone).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := userv1.NewProfileServiceClient(env.Conn).DeleteAccount(apitest.User(t.Context(), id), &userv1.DeleteAccountRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	p.mu.Lock()
+	before := p.lookups
+	p.mu.Unlock()
+	if code := callbackHTTP(t, env, c.ID, "193.232.64.150"); code != 404 {
+		t.Fatal(code)
+	}
+	p.mu.Lock()
+	after := p.lookups
+	p.mu.Unlock()
+	if after != before {
+		t.Fatal("deleted call queried again")
+	}
+	var count int
+	if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT count(*) FROM phone_verification WHERE phone=$1`, phone).Scan(&count); err != nil || count != 0 {
+		t.Fatal(count, err)
+	}
+}

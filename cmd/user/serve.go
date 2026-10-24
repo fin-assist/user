@@ -94,7 +94,9 @@ func runServe(ctx context.Context) error {
 	stopRun()
 	_ = httpSrv.Shutdown(shutdownCtx)
 	if callbackSrv != nil {
-		_ = callbackSrv.Shutdown(shutdownCtx)
+		if err := callbackSrv.Shutdown(shutdownCtx); err != nil {
+			_ = callbackSrv.Close()
+		}
 	}
 	wg.Wait()
 	return runErr

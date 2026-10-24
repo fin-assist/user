@@ -66,7 +66,7 @@ func TestCreateMultipartAndPrivateReads(t *testing.T) {
 		if err := r.ParseMultipartForm(8192); err != nil {
 			t.Fatal(err)
 		}
-		if r.PostFormValue("public_key") != "secret-key" || r.PostFormValue("phone") != attempt().Phone || r.PostFormValue("campaign_id") != "123" {
+		if len(r.PostForm) != 3 || r.PostFormValue("public_key") != "secret-key" || r.PostFormValue("phone") != attempt().Phone || r.PostFormValue("campaign_id") != "123" {
 			t.Fatal("multipart")
 		}
 		return reply(200, `{"status":"ok","data":`+remote("1", attempt().CreatedAt.Add(time.Millisecond), "in_process")+`}`), nil
@@ -234,5 +234,73 @@ func TestRecoveryRefusalCannotRefundPreviouslyAcceptedCall(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestHistoryErrorsNeverBecomeBlindWrites(t *testing.T) {
+	for _, body := range []string{`null`, `not-json`, `[{"call_id":1,"phone":"bad"}]`, `{"status":"error","data":"authentication failed"}`} {
+		writes := 0
+		c := client(t, func(r *http.Request) (*http.Response, error) {
+			if r.Method == http.MethodPost {
+				writes++
+			}
+			return reply(200, body), nil
+		})
+		if _, err := c.Create(t.Context(), attempt()); !errors.Is(err, verification.ErrProviderRejected) || writes != 0 {
+			t.Fatal(body, err, writes)
+		}
+		if _, err := c.Recover(t.Context(), attempt()); !errors.Is(err, errUnavailable) || writes != 0 {
+			t.Fatal(body, err, writes)
+		}
+	}
+	c := client(t, func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodGet {
+			return reply(400, `{"status":"error","data":"Phone by val=+79991234567 not found"}`), nil
+		}
+		return reply(200, `{"status":"ok","data":`+remote("1", testNow, "in_process")+`}`), nil
+	})
+	if _, err := c.Create(t.Context(), attempt()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRecoveryByKnownIDAndStaleHistoryPreservesCallLifetime(t *testing.T) {
+	for _, returned := range []string{"1", "2", "missing"} {
+		t.Run(returned, func(t *testing.T) {
+			writes := 0
+			c := client(t, func(r *http.Request) (*http.Response, error) {
+				if r.Method == http.MethodGet {
+					if !strings.HasSuffix(r.URL.Path, "call_by_id/") || r.URL.Query().Get("call_id") != "1" {
+						t.Fatal("wrong lookup")
+					}
+					if returned == "missing" {
+						return reply(200, `[]`), nil
+					}
+					return reply(200, "["+remote(returned, attempt().CreatedAt, "in_process")+"]"), nil
+				}
+				writes++
+				return reply(200, `{"status":"ok","data":`+remote("1", attempt().CreatedAt, "in_process")+`}`), nil
+			})
+			a := attempt()
+			a.CallID = "1"
+			out, err := c.Recover(t.Context(), a)
+			if returned == "1" {
+				if err != nil || writes != 1 || out.StartedAt != a.CreatedAt {
+					t.Fatal(out, err, writes)
+				}
+			} else if err == nil || writes != 0 {
+				t.Fatal(out, err, writes)
+			}
+		})
+	}
+	// A temporarily empty history can still return the original call from confirm.
+	c := client(t, func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodGet {
+			return reply(200, `[]`), nil
+		}
+		return reply(200, `{"status":"ok","data":`+remote("1", attempt().CreatedAt, "in_process")+`}`), nil
+	})
+	if out, err := c.Recover(t.Context(), attempt()); err != nil || out.StartedAt != attempt().CreatedAt {
+		t.Fatal(out, err)
 	}
 }
