@@ -6,7 +6,7 @@ require (
 	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.12-20260825204119-511051f7f437.2
 	buf.build/go/protovalidate v1.4.0
 	github.com/fin-assist/contracts/gen/go v0.4.0
-	github.com/fin-assist/go-idempotency v0.3.0
+	github.com/fin-assist/go-idempotency v0.4.0
 	github.com/fin-assist/go-identity v0.1.0
 	github.com/fin-assist/go-outbox v0.1.0
 	github.com/fin-assist/go-tombstone v0.1.0
