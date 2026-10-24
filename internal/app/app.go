@@ -27,6 +27,8 @@ import (
 
 // App is the assembled service. Wire reads its fields to build adapters and usecases.
 type App struct {
+	authConfirmation verification.CreationConfirmation
+
 	Cfg        config.Config
 	Log        *slog.Logger
 	DB         *postgres.DB

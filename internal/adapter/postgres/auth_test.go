@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/fin-assist/user/internal/auth"
@@ -49,10 +50,10 @@ func TestAuthRepositoryPrimaryLocksAndConstraintTranslation(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Run(ctx, func(ctx context.Context) error { return repo.GrantPD(ctx, otherProfileID, "missing", now) }); profileReason(err) != "CONSENT_OUTDATED" {
+	if err := db.RunMapped(ctx, pgx.TxOptions{}, registrationViolation, func(ctx context.Context) error { return repo.GrantPD(ctx, otherProfileID, "missing", now) }); profileReason(auth.ContractError(err)) != "CONSENT_OUTDATED" {
 		t.Fatal(err)
 	}
-	if err := db.Run(ctx, func(ctx context.Context) error {
+	if err := db.RunMapped(ctx, pgx.TxOptions{}, registrationViolation, func(ctx context.Context) error {
 		return repo.CreateSession(ctx, profileID, 999, token.Sum("secret"), now, now.Add(time.Hour))
 	}); !errors.Is(err, auth.ErrMissing) {
 		t.Fatal(err)
@@ -73,7 +74,7 @@ func TestAuthRepositoryPrimaryLocksAndConstraintTranslation(t *testing.T) {
 		}
 	}
 	for _, constraint := range []string{"auth_session_user_fkey", "auth_session_phone_verification_fkey", "phone_verification_user_fkey", "user_consent_user_fkey"} {
-		if !errors.Is(authError(&pgconn.PgError{ConstraintName: constraint}), auth.ErrMissing) {
+		if !errors.Is(registrationViolation(&pgconn.PgError{Code: "23503", ConstraintName: constraint}), auth.ErrMissing) {
 			t.Fatal(constraint)
 		}
 	}
@@ -131,7 +132,7 @@ func TestAuthRepositoryCleanupKeepsLiveLinks(t *testing.T) {
 	}
 	old := token.Sum("old")
 	next := token.Sum("new")
-	if err := db.Run(ctx, func(ctx context.Context) error {
+	if err := db.RunMapped(ctx, pgx.TxOptions{}, registrationViolation, func(ctx context.Context) error {
 		return repo.CreateSession(ctx, profileID, verification, old, now.Add(-time.Hour), now.Add(time.Minute))
 	}); err != nil {
 		t.Fatal(err)

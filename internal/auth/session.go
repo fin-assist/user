@@ -16,6 +16,9 @@ import (
 // ErrMissing means the secret or its still-live owner no longer exists.
 var ErrMissing = errors.New("auth: missing")
 
+// ErrConsentOutdated means the accepted document is no longer available.
+var ErrConsentOutdated = errors.New("auth: consent outdated")
+
 // Link is a primary snapshot of a refresh link and its session.
 type Link struct {
 	SessionID, Generation int32
@@ -193,6 +196,15 @@ func (s *Service) lockLink(ctx context.Context, hash token.Hash, now time.Time) 
 	}
 	l, err = s.repo.LockLink(ctx, hash, now)
 	return l, err
+}
+
+// ContractError translates authentication refusals after the complete transaction,
+// including a deferred constraint failure at the handler's outer COMMIT.
+func ContractError(err error) error {
+	if errors.Is(err, ErrConsentOutdated) {
+		return finerr.ConsentOutdated()
+	}
+	return missingToken(err)
 }
 
 func missingToken(err error) error {

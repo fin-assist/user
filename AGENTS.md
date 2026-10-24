@@ -25,7 +25,7 @@ updates them in the same PR. A service made from the template rewrites the first
   never defines its own `.proto`, error codes or REST fields: a change goes to `contracts` first (its own FIN issue
   and PR), then the service bumps the module.
 - Shared code: Go libraries made from `fin-assist/go-library-template` (FIN-118) — `go-identity`, `go-idempotency`,
-  `go-outbox`, `go-tombstone`. The service imports them at tagged versions and wires them in `internal/app` by the
+  `go-outbox`, `go-tombstone`, `go-postgres` (v0.1.1, FIN-240). The service imports them at tagged versions and wires them in `internal/app` by the
   «Внедрение» section of their README; versions and compatibility — `docs/releasing.md` of the library template.
   Code that more than one service needs goes into a library (its own FIN issue), not into a copy here.
 - Architecture, MVP scope, product decisions: Confluence PF (https://finassist.atlassian.net/wiki/spaces/PF),
@@ -225,6 +225,13 @@ Priorities when they pull apart, in this order:
   first". Parameterize values; keep identifiers and structural fragments constant or from an explicit allowlist.
   Use `PlaceholderFormat(sq.Dollar)` for PostgreSQL builders. If a dynamic query cannot be expressed by the
   builder, explain the limitation beside its manual construction and preserve parameterization.
+- Transactions (FIN-240): `postgres.DB` delegates to go-postgres; each pool owns its Manager.
+  Auth idempotency, auth/Start repositories, guard, publisher, limiter store and immediate fake
+  confirmation use the dedicated auth DB. Never reuse an ordinary-pool repository inside that
+  transaction: foreign contexts fail closed. Callback reports and independent IP attempts retain
+  the ordinary pool. SessionTransactions selects the verified endpoint's outer mapper; inner
+  usecase Run joins without installing a mapper. Profile RunGrant alone maps consent constraints.
+  Match SQLSTATE and constraint together; preserve unknown causes and never expose PgError.Detail.
 - Database: SQL with parameters only (`$1`), table and column names are constants. A usecase opens the transaction
   with `db.Run`; repositories take `db.Writer(ctx)` / `db.Reader(ctx)`; no calls to other services inside `Run`.
   Migrations follow `docs/migrations.md` (two releases for an incompatible change, `CONCURRENTLY` alone in a file).

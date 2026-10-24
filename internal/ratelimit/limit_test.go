@@ -239,3 +239,24 @@ func TestRulesAndRegistration(t *testing.T) {
 	}
 	late.MustRegister(prometheus.NewCounterVec(prometheus.CounterOpts{Name: "finassist_rate_limit_checks_total", Help: "Rate-limit checks before transaction completion, by fixed scope and result."}, []string{"scope", "result"}))
 }
+
+func TestUnitWithStoreBindsTransactionOwnerAndSharesCommitMetrics(t *testing.T) {
+	originalCalls, boundCalls := 0, 0
+	original := counterFunc(func(context.Context, []Window) ([]int, error) { originalCalls++; return []int{0}, nil })
+	replacement := counterFunc(func(context.Context, []Window) ([]int, error) { boundCalls++; return []int{0}, nil })
+	l, err := New(Defaults(), original, time.Now, prometheus.NewRegistry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound := l.WithStore(replacement)
+	for _, limiter := range []*Limiter{l, bound} {
+		_, receipt, err := limiter.Check(t.Context(), Watch, "", "203.0.113.8")
+		if err != nil {
+			t.Fatal(err)
+		}
+		receipt.Committed()
+	}
+	if originalCalls != 1 || boundCalls != 1 || testutil.ToFloat64(l.consumed.WithLabelValues(string(WatchIP))) != 2 {
+		t.Fatal("transaction/metric binding lost", originalCalls, boundCalls)
+	}
+}

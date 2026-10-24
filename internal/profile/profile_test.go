@@ -275,3 +275,7 @@ func TestProfileDependencyErrorsAndDeletedUser(t *testing.T) {
 		}
 	}
 }
+
+func (f *fixture) RunGrant(ctx context.Context, fn func(context.Context) error) error {
+	return f.Run(ctx, fn)
+}

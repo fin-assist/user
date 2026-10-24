@@ -40,7 +40,7 @@ func TestSessionsAssemblyFailuresCloseDedicatedPools(t *testing.T) {
 	}
 	a.Cfg.Sessions.IdempotencyKeyFile = keyFile
 	a.Cfg.DB.PrimaryDSN = ":invalid"
-	if _, _, err := wireSessions(t.Context(), a, nil, reg); err == nil {
+	if _, _, err := wireSessions(t.Context(), a, reg); err == nil {
 		t.Fatal("invalid auth database accepted")
 	}
 	a.Cfg.DB.PrimaryDSN = dsn
@@ -51,7 +51,7 @@ func TestSessionsAssemblyFailuresCloseDedicatedPools(t *testing.T) {
 	if _, err := idempotency.New(db, idempotency.Options{Clock: time.Now, Cipher: cipher, Registerer: reg, Methods: map[string]idempotency.Policy{userv1.AuthService_Register_FullMethodName: {Encrypt: true}}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := wireSessions(t.Context(), a, nil, reg); err == nil {
+	if _, _, err := wireSessions(t.Context(), a, reg); err == nil {
 		t.Fatal("duplicate metric collector accepted")
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)

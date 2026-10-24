@@ -55,18 +55,12 @@ func wire(ctx context.Context, a *App, reg prometheus.Registerer) (jobs []worker
 	if err != nil {
 		return nil, nil, err
 	}
-	phoneJobs, closePhone, err := wirePhone(ctx, a, reg)
+	authJobs, closeAuth, err := wireSessions(ctx, a, reg)
 	if err != nil {
 		closeOutbox()
 		return nil, nil, err
 	}
-	authCleanup, closeAuth, err := wireSessions(ctx, a, events, reg)
-	if err != nil {
-		closePhone()
-		closeOutbox()
-		return nil, nil, err
-	}
-	profiles := profile.New(a.DB, postgres.NewProfiles(a.DB), a.Tombstones, events, time.Now)
+	profiles := profile.New(postgres.NewProfileTransactions(a.DB), postgres.NewProfiles(a.DB), a.Tombstones, events, time.Now)
 	deletions := deletion.New(a.DB, a.Tombstones, postgres.NewAccounts(a.DB), events)
 	profilegrpc.Register(a.GRPC.GRPC(), profiles, deletions)
 	documents := consent.New(postgres.NewConsentDocuments(a.DB))
@@ -79,5 +73,5 @@ func wire(ctx context.Context, a *App, reg prometheus.Registerer) (jobs []worker
 		_, err := limits.Cleanup(ctx, time.Now().Add(-time.Hour), 1000)
 		return err
 	})
-	return append([]worker.Job{cleanup, dispatch, authCleanup}, phoneJobs...), func() { closeAuth(); closePhone(); closeOutbox() }, nil
+	return append([]worker.Job{cleanup, dispatch}, authJobs...), func() { closeAuth(); closeOutbox() }, nil
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	tombstone "github.com/fin-assist/go-tombstone"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/fin-assist/user/internal/adapter/fakephone"
@@ -18,7 +19,7 @@ import (
 	"github.com/fin-assist/user/internal/worker"
 )
 
-func wirePhone(ctx context.Context, a *App, reg prometheus.Registerer) ([]worker.Job, func(), error) {
+func wirePhone(ctx context.Context, a *App, authDB *postgres.DB, authGuard *tombstone.Store, reg prometheus.Registerer) ([]worker.Job, func(), error) {
 	if err := a.Cfg.Zvonok.Validate(a.Cfg.Env); err != nil {
 		return nil, nil, err
 	}
@@ -47,6 +48,7 @@ func wirePhone(ctx context.Context, a *App, reg prometheus.Registerer) ([]worker
 		return nil, nil, err
 	}
 	a.Verifications = verification.New(a.DB, postgres.NewVerifications(a.DB), postgres.NewAuth(a.DB), a.Tombstones, a.Signing, codec, notifications, time.Now, token.New, a.Cfg.Sessions.RefreshTTL, a.Cfg.Phone.ResyncInterval)
+	a.authConfirmation = verification.New(authDB, postgres.NewVerifications(authDB), postgres.NewAuth(authDB), authGuard, a.Signing, codec, notifications, time.Now, token.New, a.Cfg.Sessions.RefreshTTL, a.Cfg.Phone.ResyncInterval)
 	if a.Cfg.Env == config.EnvProd {
 		guard, err := verification.NewProductionProofGuard(a.Log, reg)
 		if err != nil {
@@ -75,7 +77,7 @@ func wirePhone(ctx context.Context, a *App, reg prometheus.Registerer) ([]worker
 			notifications.Close()
 			return nil, nil, errors.New("phone: multiple configured backends")
 		}
-		numbers, err := verification.NewNumbers(postgres.NewVerifications(a.DB), a.Log, reg)
+		numbers, err := verification.NewNumbers(callbackNumberRepository{postgres.NewVerifications(authDB), postgres.NewVerifications(a.DB)}, a.Log, reg)
 		if err != nil {
 			notifications.Close()
 			return nil, nil, err
@@ -101,7 +103,7 @@ func wirePhone(ctx context.Context, a *App, reg prometheus.Registerer) ([]worker
 		}
 		closeBackend = provider.Close
 		repo := postgres.NewVerifications(a.DB)
-		numbers, err := verification.NewNumbers(repo, a.Log, reg)
+		numbers, err := verification.NewNumbers(callbackNumberRepository{postgres.NewVerifications(authDB), repo}, a.Log, reg)
 		if err != nil {
 			return fail(err)
 		}
@@ -127,4 +129,14 @@ func callbackOutcomesJob(a *App, numbers *verification.Numbers) worker.Job {
 		defer cancel()
 		return numbers.Report(ctx)
 	})
+}
+
+// Selection writes in Start's dedicated transaction; reports keep using the ordinary pool.
+type callbackNumberRepository struct{ write, read *postgres.Verifications }
+
+func (r callbackNumberRepository) SavePool(ctx context.Context, id int32, pool []string, selected string) error {
+	return r.write.SavePool(ctx, id, pool, selected)
+}
+func (r callbackNumberRepository) PoolOutcomes(ctx context.Context, since time.Time) ([]verification.PoolOutcome, map[string]int64, error) {
+	return r.read.PoolOutcomes(ctx, since)
 }

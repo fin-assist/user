@@ -16,6 +16,8 @@
 - [docs/fake-phone.md](docs/fake-phone.md) — вход без звонка в dev/stage, тестовые телефоны и защита prod.
 - [AGENTS.md](AGENTS.md) — карта и правила для агентов, Code Review Rules.
 
+Транзакции выполняет `go-postgres v0.1.1` ([FIN-240](https://finassist.youtrack.cloud/issue/FIN-240)). Сервис сохраняет настройку пулов и primary/replica; каждый участник auth-транзакции явно привязан к выделенному auth-пулу. Нарушения ограничений переводятся в доменные ошибки адаптерами конкретной операции, включая фактический COMMIT; usecase/transport не разбирают PostgreSQL-ошибки. См. [docs/migrations.md](docs/migrations.md).
+
 ## Автоматизация обновлений зависимостей
 
 [Политика Renovate](docs/renovate-policy.md) (FIN-211): одна актуальная release/main, автомерж полностью ботских PR после обязательного CI, один повтор красного CI и закрытие с явным повтором через Dependency Dashboard. AndroidX/Compose остаются на ручной проверке. Исходные группировки, ограничения версий и расписания — `renovate-base.json`; generated target и quarantine — ветка `renovate-policy`. Активация требует отдельного токена и строгой защиты веток; по умолчанию выключена.

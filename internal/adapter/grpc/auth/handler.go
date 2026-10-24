@@ -156,6 +156,7 @@ func (h *Handler) execute(ctx context.Context, in, out proto.Message, op ratelim
 	defer cancel()
 	var result idempotency.Result
 	var reused bool
+	var effectFailure error
 	err = h.state.Run(completion, func(ctx context.Context) error {
 		var doErr error
 		result, doErr = h.engine.Do(ctx, request, func(effect context.Context) (idempotency.Response, error) {
@@ -167,12 +168,20 @@ func (h *Handler) execute(ctx context.Context, in, out proto.Message, op ratelim
 			msg, id, reuse, err := perform(effect)
 			reused = reuse
 			if err != nil {
+				// The idempotency library accepts only contract errors. Keep an
+				// unexpected effect cause for the outer operation mapper/diagnostics.
+				if _, contract := finerr.ToREST(err); !contract {
+					effectFailure = err
+				}
 				return idempotency.Response{}, err
 			}
 			body, err := proto.Marshal(msg)
 			return idempotency.Response{Body: body, OwnerID: id}, err
 		})
 		if doErr != nil {
+			if effectFailure != nil {
+				return effectFailure
+			}
 			return doErr
 		}
 		if result.Err == nil && result.Replayed {
@@ -201,7 +210,7 @@ func (h *Handler) execute(ctx context.Context, in, out proto.Message, op ratelim
 		return result.Err
 	}
 	if err != nil {
-		return err
+		return usecase.ContractError(err)
 	}
 	if result.Err != nil {
 		return result.Err
