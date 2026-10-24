@@ -111,7 +111,11 @@ type Service struct {
 	now                func() time.Time
 	newToken           func() (string, error)
 	refreshTTL, resync time.Duration
+	checker            StatusChecker
 }
+
+// SetStatusChecker installs the provider fallback during assembly, before serving.
+func (s *Service) SetStatusChecker(checker StatusChecker) { s.checker = checker }
 
 func New(tx Transactions, repo Repository, accounts Accounts, guard Guard, signer auth.Signer, codec Codec, notifications Notifications, now func() time.Time, newToken func() (string, error), refreshTTL, resync time.Duration) *Service {
 	return &Service{tx: tx, repo: repo, accounts: accounts, guard: guard, signer: signer, codec: codec, notifications: notifications, now: now, newToken: newToken, refreshTTL: refreshTTL, resync: resync}
@@ -338,6 +342,7 @@ func (s *Service) Watch(ctx context.Context, raw string, send func(Outcome) erro
 	poll := time.NewTicker(s.resync)
 	defer poll.Stop()
 	for {
+		final := false
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -345,7 +350,13 @@ func (s *Service) Watch(ctx context.Context, raw string, send func(Outcome) erro
 			return errors.New("verification: notification listener unavailable")
 		case <-sub.Changed:
 		case <-expiry.C:
+			final = true
 		case <-poll.C:
+		}
+		if s.checker != nil {
+			// Provider errors must not turn a healthy pending stream into a failed
+			// login. NOTIFY and the local expiry still determine client delivery.
+			_ = s.checker.Check(ctx, r, final)
 		}
 		_, out, err = s.snapshot(ctx, hash, true)
 		if err != nil {

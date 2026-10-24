@@ -42,9 +42,11 @@ updates them in the same PR. A service made from the template rewrites the first
 Functional RPCs: GetConsentDocument, GetSigningKeys, GetAssistantConsentStatus, GetProfile,
 UpdateProfile, GrantAssistantConsent, RevokeAssistantConsent, Register, RefreshTokens,
 Logout, DeleteAccount, WatchPhoneVerification and StartPhoneVerification (all 13 RPCs).
-The default executable has no provider/selector and refuses creation with INTERNAL;
-concrete Zvonok/fake adapters and number selection remain FIN-139/122/216. Do not claim
-production phone sign-in is ready. go-identity v0.1.0 supplies only the verifiers
+The default executable disables phone creation. FIN-139/216 adds opt-in Zvonok V1
+for dev/stage, a transactional uniform number selector, a separate checked postback
+listener and a Watch fallback. Prod remains blocked until FIN-81; FIN-122 owns the fake.
+The users/balance response and real campaign acceptance still await external evidence.
+Do not claim production phone sign-in is ready. go-identity v0.1.0 supplies only the verifiers
 and token sources: keep the existing server ACL and reqctx chain, without a second identity
 interceptor. The signing package supplies its local JWKS provider (no self-RPC). go-tombstone
 v0.1.0 reads primary and its migration source precedes the service. Assistant documents check
@@ -88,10 +90,13 @@ rejection, in the same transaction as release; uncertain outcomes keep their cla
 Deletion also purges successful and busy Start caches through phone links, including
 keys created before the account existed. Cleanup retains requests while a Resource cache is live. Purge locks request parents
 before its NOWAIT key snapshot; busy claims take KEY SHARE to close the uncommitted-link race.
-Runtime backend injection is app.WithPhoneBackend; controlled adapters live in API tests only.
+Runtime backend selection is PHONE_PROVIDER; app.WithPhoneBackend and WithZvonokTransport
+are trusted assembly seams for API tests. The endpoint stays pinned to HTTPS Zvonok V1.
 
-Phone confirmation accepts provider-checked Proof through the trusted Go usecase only: no
-public confirmation hook. Watch commits an IP attempt before secret lookup. A shared
+Phone confirmation accepts provider-checked Proof through the trusted Go usecase only.
+The Zvonok ingress handler accepts only the fixed provider IP (forwarding headers only
+from configured trusted proxies), resolves a local call ID, then checks its status/phone
+with the provider API. Postback phone/status hints never constitute proof. Watch commits an IP attempt before secret lookup. A shared
 primary LISTEN connection serves bounded pending subscriptions; subscribe then re-read closes
 the snapshot/notification gap. Ciphertext uses a separate AES-256 key and binds request ID
 plus verification-token hash. Existing-user confirmation takes Guard -> user -> request;
@@ -124,6 +129,8 @@ See docs/verification.md, including capacity/availability metrics and key retent
 | Migration runner and the PostgreSQL for tests | `internal/adapter/postgres/migrate/`, `migratetest/` |
 | SQL migrations (embedded) and the tests of their keys, cascades and expected queries | `migrations/`; rules — `docs/migrations.md`; the schema, its keys, expected queries and the invariants kept by code — `docs/schema.md` |
 | Clients of other services, service token source | `internal/adapter/client/` |
+| Zvonok V1 client and checked HTTP postback | `internal/adapter/zvonok/`, `internal/verification/check.go`, `docs/zvonok.md` |
+| Public callback pool, transactional selection and rolling outcomes | `internal/verification/numbers.go`, `internal/adapter/postgres/verification_numbers.go` |
 | Background jobs | `internal/worker/` |
 | Configuration: every variable with its default and description | `internal/config/vars.go` (`Vars`); generated tables — `docs/config.md` |
 | Request-scoped values (request ID, caller, user, bank-bff hints) | `internal/reqctx/` |
@@ -366,7 +373,9 @@ it. Check:
 - Errors: client-facing errors only through `finerr`; `status.message`, `error` details and logs contain no SQL,
   stack traces, tokens, DSNs or other users' data; an internal refusal is a bare code.
 - Secrets: tokens and DSNs only in headers, files or `*_FILE` variables, never in logs, metric labels, URLs or error
-  texts; the masking list in `docs/server.md` covers new secret metadata or fields.
+  texts. Owner-approved FIN-139 exception: authenticated Zvonok V1 GET reads put public_key
+  in query as documented; the pinned HTTPS client refuses redirects and never exposes URLs
+  or remote error text. Creation keeps the key in the multipart body; the masking list in `docs/server.md` covers new secret metadata or fields.
 - SQL: parameters only; nothing from a request selects a table, column, `ORDER BY` fragment or file path.
 - Untrusted input: bounds come from protovalidate annotations in `contracts`; a handler that reads a size, count or
   page relies on them or checks itself; long-running or costly work (file parsing, LLM, calls, SMS) has a limit
@@ -433,3 +442,9 @@ security-relevant behaviour has negative tests.
 ## Renovate automation
 
 FIN-211: dependency-only Renovate PRs may be merged/closed by the reviewed `renovate-policy.yml` controller, after exact-head required CI and bot-only commit checks. Ordinary PRs and release-to-main PRs still require the owner. Do not enable native automerge or bypass protections. Preserve base policy in `renovate-base.json` (schedules, groups, allowed versions and manual Go upgrades); generated target/version approvals live on the separate `renovate-policy` branch. Failed exact values are isolated for explicit Dashboard approval; new values keep their original groups. AndroidX/Compose and mixed groups never auto-merge. See `docs/renovate-policy.md` for credentials, safeguards, bootstrap and verification.
+
+FIN-216 public-number metrics are the explicit exception to fixed-only label values:
+only provider-owned callback numbers, capped at 256 per process, then `other` plus an
+observable overflow gauge. Caller phone numbers and call IDs remain forbidden labels.
+Rolling 24h gauges come from primary, do not sum replicas. Exact public numbers in the
+bounded outcome report are aggregate logs, not a per-request event audit. See docs/zvonok.md.

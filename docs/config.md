@@ -29,6 +29,12 @@ PEER_<NAME>_ADDR; по умолчанию нужны PEER_BANK_STATEMENT_DATA_AD
 <!-- generated:config-serve:start (go test ./internal/config -run TestDocIsCurrent -update) -->
 | Переменная | По умолчанию | Что |
 |---|---|---|
+| `PHONE_PROVIDER` | `disabled` | `disabled` или `zvonok`; Zvonok разрешён в dev/stage, в prod ждёт FIN-81 |
+| `ZVONOK_PUBLIC_KEY` / `_FILE` | — | ключ API V1; обязателен при PHONE_PROVIDER=zvonok, не выводится в лог |
+| `ZVONOK_CAMPAIGN_ID` | — | ID отдельной кампании pincode_incoming, управляемой только этим сервисом |
+| `ZVONOK_CALLBACK_ADDR` | `:9095` | отдельный HTTP-listener, только GET /callbacks/zvonok; ingress мимо bank-bff, без query в access-логах |
+| `ZVONOK_TRUSTED_PROXY_CIDRS` | — | CIDR доверенных ingress-прокси через запятую; только от них читается X-Forwarded-For, по умолчанию только RemoteAddr |
+| `ZVONOK_POLL_INTERVAL` | `30s` | минимальный интервал запасной проверки одной pending-заявки в Watch (1s–1m); общий API-бюджет 20 запросов/с на ключ в PostgreSQL |
 | `SERVICE_NAME` | — (обязательна) | имя сервиса: логи, `application_name`, токен в dev |
 | `ENV` | `prod` | `dev`, `stage` или `prod`. Reflection включён только при `dev` |
 | `AUTH_MODE` | `verify` | `verify` — проверка JWT и сервисных токенов через go-identity; `insecure-dev` — токены `dev:<имя>` без проверки, только при `ENV=dev` |

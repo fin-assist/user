@@ -19,6 +19,6 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/user /user
 USER nonroot:nonroot
-EXPOSE 9090 9091
+EXPOSE 9090 9091 9095
 ENTRYPOINT ["/user"]
 CMD ["serve"]

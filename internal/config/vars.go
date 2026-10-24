@@ -20,6 +20,12 @@ type Var struct {
 
 // Vars lists every variable in the order of docs/config.md.
 var Vars = []Var{
+	{Name: "PHONE_PROVIDER", Command: "serve", Default: "disabled", Doc: "`disabled` или `zvonok`; Zvonok разрешён в dev/stage, в prod ждёт FIN-81"},
+	{Name: "ZVONOK_PUBLIC_KEY", Command: "serve", Secret: true, Doc: "ключ API V1; обязателен при PHONE_PROVIDER=zvonok, не выводится в лог"},
+	{Name: "ZVONOK_CAMPAIGN_ID", Command: "serve", Doc: "ID отдельной кампании pincode_incoming, управляемой только этим сервисом"},
+	{Name: "ZVONOK_CALLBACK_ADDR", Command: "serve", Default: ":9095", Doc: "отдельный HTTP-listener, только GET /callbacks/zvonok; ingress мимо bank-bff, без query в access-логах"},
+	{Name: "ZVONOK_TRUSTED_PROXY_CIDRS", Command: "serve", Doc: "CIDR доверенных ingress-прокси через запятую; только от них читается X-Forwarded-For, по умолчанию только RemoteAddr"},
+	{Name: "ZVONOK_POLL_INTERVAL", Command: "serve", Default: "30s", Doc: "минимальный интервал запасной проверки одной pending-заявки в Watch (1s–1m); общий API-бюджет 20 запросов/с на ключ в PostgreSQL"},
 	{Name: "SERVICE_NAME", Command: "serve", Required: true,
 		Doc: "имя сервиса: логи, `application_name`, токен в dev"},
 	{Name: "ENV", Command: "serve", Default: string(EnvProd),

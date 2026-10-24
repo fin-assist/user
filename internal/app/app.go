@@ -7,6 +7,7 @@ package app
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"time"
 
 	tombstone "github.com/fin-assist/go-tombstone"
@@ -41,6 +42,9 @@ type App struct {
 	Verifications *verification.Service
 	phoneProvider verification.Provider
 	phoneSelector verification.NumberSelector
+	// PhoneCallback is served on a separate ingress listener, never on ops or gRPC.
+	PhoneCallback   http.Handler
+	zvonokTransport http.RoundTripper
 
 	closers []func()
 }
@@ -98,10 +102,16 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger, reg prometheu
 type Option func(*App)
 
 // WithPhoneBackend installs the provider and transactional number selector. The
-// default executable supplies neither and safely refuses creation. FIN-122/139/216
-// own the concrete adapters and their environment guards; no public hook exists.
+// default executable keeps creation disabled; PHONE_PROVIDER=zvonok opts into the
+// concrete guarded assembly. This seam is used by controlled API-test providers.
 func WithPhoneBackend(provider verification.Provider, selector verification.NumberSelector) Option {
 	return func(a *App) { a.phoneProvider, a.phoneSelector = provider, selector }
+}
+
+// WithZvonokTransport supplies a trusted transport for HTTP integration tests;
+// production configuration cannot override the pinned HTTPS endpoint.
+func WithZvonokTransport(transport http.RoundTripper) Option {
+	return func(a *App) { a.zvonokTransport = transport }
 }
 
 // Close releases what New opened, in reverse order.
