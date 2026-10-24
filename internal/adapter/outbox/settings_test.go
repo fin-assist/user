@@ -15,7 +15,7 @@ type publishFunc func(context.Context, string, string, []byte) error
 func (f publishFunc) Publish(ctx context.Context, topic, key string, b []byte) error {
 	return f(ctx, topic, key, b)
 }
-func TestTimezoneEventEncodingAndErrors(t *testing.T) {
+func TestUnitTimezoneEventEncodingAndErrors(t *testing.T) {
 	want := errors.New("publisher failed")
 	fail := false
 	calls := 0
@@ -45,7 +45,7 @@ func TestTimezoneEventEncodingAndErrors(t *testing.T) {
 	}
 }
 
-func TestDeletionEventEncodingAndErrors(t *testing.T) {
+func TestUnitDeletionEventEncodingAndErrors(t *testing.T) {
 	want := errors.New("publisher unavailable")
 	calls := 0
 	events := NewEvents(publishFunc(func(_ context.Context, topic, key string, b []byte) error {

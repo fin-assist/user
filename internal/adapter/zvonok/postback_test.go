@@ -16,7 +16,7 @@ type callbackFunc func(context.Context, string) error
 
 func (f callbackFunc) CheckCall(ctx context.Context, id string) error { return f(ctx, id) }
 
-func TestPostbackTrustBoundaryAndAcknowledgment(t *testing.T) {
+func TestUnitPostbackTrustBoundaryAndAcknowledgment(t *testing.T) {
 	for _, tt := range []struct {
 		name, peer, forwarded, path, method string
 		err                                 error

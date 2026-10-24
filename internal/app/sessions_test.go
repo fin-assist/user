@@ -18,7 +18,7 @@ import (
 	"github.com/fin-assist/user/internal/config"
 )
 
-func TestSessionsAssemblyFailuresCloseDedicatedPools(t *testing.T) {
+func TestIntegrationSessionsAssemblyFailuresCloseDedicatedPools(t *testing.T) {
 	dsn := migratetest.DSN(t)
 	db, err := postgres.Open(t.Context(), postgres.Options{PrimaryDSN: dsn, MaxConns: 2})
 	if err != nil {

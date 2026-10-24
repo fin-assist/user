@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestFakePhoneConfigurationIsOptInAndNeverProd(t *testing.T) {
+func TestUnitFakePhoneConfigurationIsOptInAndNeverProd(t *testing.T) {
 	for _, environment := range []string{"dev", "stage", "prod"} {
 		vars := base()
 		vars["ENV"], vars["PHONE_PROVIDER"] = environment, "fake"

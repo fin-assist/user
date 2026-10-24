@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestTokenErrors(t *testing.T) {
+func TestUnitTokenErrors(t *testing.T) {
 	f := &FileToken{Path: filepath.Join(t.TempDir(), "missing")}
 	if _, err := f.Token(t.Context()); err == nil {
 		t.Fatal("a missing token file must be an error")
@@ -18,7 +18,7 @@ func TestTokenErrors(t *testing.T) {
 	}
 }
 
-func TestDialRequiresPeerAndTokens(t *testing.T) {
+func TestUnitDialRequiresPeerAndTokens(t *testing.T) {
 	if _, err := Dial("dns:///x:9090", Options{Peer: "x"}); err == nil {
 		t.Fatal("Dial without Tokens must fail")
 	}

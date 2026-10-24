@@ -7,7 +7,7 @@ import (
 	appmigrate "github.com/fin-assist/user/internal/adapter/postgres/migrate"
 )
 
-func TestIrreversibleSupportsLibraryAndServiceNumbering(t *testing.T) {
+func TestUnitIrreversibleSupportsLibraryAndServiceNumbering(t *testing.T) {
 	for _, prefix := range []string{"001", "000001"} {
 		for _, body := range []string{"DROP TABLE example;", "-- irreversible\nSELECT 1;"} {
 			source := appmigrate.Source{Name: "test", FS: fstest.MapFS{prefix + "_step.down.sql": {Data: []byte(body)}, "002_other.down.sql": {Data: []byte("-- irreversible")}}}

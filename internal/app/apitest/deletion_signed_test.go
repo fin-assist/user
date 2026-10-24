@@ -17,7 +17,7 @@ import (
 	"github.com/fin-assist/user/internal/signing"
 )
 
-func TestDeleteAccountSignedJWTStillVerifiesRetries(t *testing.T) {
+func TestAPIDeleteAccountSignedJWTStillVerifiesRetries(t *testing.T) {
 	userKey, userPublic := stageKey(t, "user")
 	bffKey, bffPublic := stageKey(t, "bank-bff")
 	encoded, err := json.Marshal(map[string]any{"keys": []any{userPublic, bffPublic}})

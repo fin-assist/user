@@ -82,7 +82,7 @@ func noPhoneNotification(t *testing.T, c *pgx.Conn) {
 		t.Fatal("notification before commit", n, err)
 	}
 }
-func TestPhoneConfirmationAtomicReplayAndPrimaryReads(t *testing.T) {
+func TestIntegrationPhoneConfirmationAtomicReplayAndPrimaryReads(t *testing.T) {
 	db, s, repo, now := phoneState(t)
 	id := seedPendingPhone(t, db, "existing-secret", "+79001234567", now)
 	listener := phoneListen(t, db)
@@ -167,7 +167,7 @@ func TestPhoneConfirmationAtomicReplayAndPrimaryReads(t *testing.T) {
 		t.Fatal(o, err)
 	}
 }
-func TestPhoneConcurrentConfirmationAndStorageFailures(t *testing.T) {
+func TestIntegrationPhoneConcurrentConfirmationAndStorageFailures(t *testing.T) {
 	db, s, repo, now := phoneState(t)
 	id := seedPendingPhone(t, db, "concurrent", "+79001234567", now)
 	var wg sync.WaitGroup
@@ -217,7 +217,7 @@ func TestPhoneConcurrentConfirmationAndStorageFailures(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-func TestPhoneCleanupSkipsBusySessionsAndPreservesRefresh(t *testing.T) {
+func TestIntegrationPhoneCleanupSkipsBusySessionsAndPreservesRefresh(t *testing.T) {
 	db, s, _, now := phoneState(t)
 	id := seedPendingPhone(t, db, "old-existing", "+79001234567", now)
 	if _, err := s.Confirm(t.Context(), proofFor("old-existing", "+79001234567")); err != nil {
@@ -295,7 +295,7 @@ func TestPhoneCleanupSkipsBusySessionsAndPreservesRefresh(t *testing.T) {
 	}
 }
 
-func TestPhoneCleanupDoesNotDeadlockRefreshClosingOldRequest(t *testing.T) {
+func TestIntegrationPhoneCleanupDoesNotDeadlockRefreshClosingOldRequest(t *testing.T) {
 	db, s, _, now := phoneState(t)
 	id := seedPendingPhone(t, db, "refresh-cleanup", "+79001234567", now)
 	if _, err := s.Confirm(t.Context(), proofFor("refresh-cleanup", "+79001234567")); err != nil {

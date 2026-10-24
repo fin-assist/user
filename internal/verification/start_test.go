@@ -249,7 +249,7 @@ func (f createdConfirmFunc) ConfirmCreated(ctx context.Context, p Proof, owner s
 	return f(ctx, p, owner)
 }
 
-func TestStartImmediateConfirmationJoinsCompletionAndSkipsReplay(t *testing.T) {
+func TestUnitStartImmediateConfirmationJoinsCompletionAndSkipsReplay(t *testing.T) {
 	for _, mode := range []string{"confirmed", "unchanged", "error"} {
 		t.Run(mode, func(t *testing.T) {
 			f := startFixture(t)
@@ -279,7 +279,7 @@ func TestStartImmediateConfirmationJoinsCompletionAndSkipsReplay(t *testing.T) {
 	}
 }
 
-func TestStartCommitReplayAndRecoveredOwnAttempt(t *testing.T) {
+func TestUnitStartCommitReplayAndRecoveredOwnAttempt(t *testing.T) {
 	f := startFixture(t)
 	out, err := f.run(t.Context())
 	if err != nil || out.Token == "" || out.CallbackNumber != f.provider.call.Numbers[0] || !out.ExpiresAt.Equal(f.now.Add(RequestTTL)) {
@@ -302,7 +302,7 @@ func TestStartCommitReplayAndRecoveredOwnAttempt(t *testing.T) {
 		t.Fatal(out, err)
 	}
 }
-func TestStartRejectDuplicateAndBusy(t *testing.T) {
+func TestUnitStartRejectDuplicateAndBusy(t *testing.T) {
 	f := startFixture(t)
 	f.provider.createErr = ErrProviderRejected
 	if _, err := f.run(t.Context()); !errors.Is(err, ErrProviderUnavailable) || f.repo.rejected != 1 || f.counters.refunds != 1 {
@@ -320,7 +320,7 @@ func TestStartRejectDuplicateAndBusy(t *testing.T) {
 	}
 }
 
-func TestStartLostRejectionCannotCompensateAnotherReservation(t *testing.T) {
+func TestUnitStartLostRejectionCannotCompensateAnotherReservation(t *testing.T) {
 	f := startFixture(t)
 	var before StartRecord
 	f.provider.create = func(context.Context, Attempt) (Call, error) {
@@ -346,7 +346,7 @@ func TestStartLostRejectionCannotCompensateAnotherReservation(t *testing.T) {
 	}
 }
 
-func TestStartErrorBranches(t *testing.T) {
+func TestUnitStartErrorBranches(t *testing.T) {
 	for name, mutate := range map[string]func(*startFixtureData){
 		"reserve":       func(f *startFixtureData) { f.engine.reserveErr = errDependency },
 		"bind resource": func(f *startFixtureData) { f.engine.bindErr = errDependency },
@@ -402,7 +402,7 @@ func TestStartErrorBranches(t *testing.T) {
 		})
 	}
 }
-func TestStartCancelledAndExpiredKeyLink(t *testing.T) {
+func TestUnitStartCancelledAndExpiredKeyLink(t *testing.T) {
 	f := startFixture(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
@@ -423,7 +423,7 @@ func TestStartCancelledAndExpiredKeyLink(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-func TestStartReplayBindingAndConstructor(t *testing.T) {
+func TestUnitStartReplayBindingAndConstructor(t *testing.T) {
 	for name, mutate := range map[string]func(*startFixtureData){
 		"missing link":   func(f *startFixtureData) { f.repo.record = nil },
 		"wrong hash":     func(f *startFixtureData) { f.repo.record.Hash = token.Sum("other") },

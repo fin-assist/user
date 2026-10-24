@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func TestCheckedProviderResponse(t *testing.T) {
+func TestUnitCheckedProviderResponse(t *testing.T) {
 	now := time.Date(2026, 10, 23, 22, 0, 0, 0, time.UTC)
 	a := Attempt{ID: 1, Phone: "+79001234567", CreatedAt: now.Add(-time.Minute), ExpiresAt: now.Add(4 * time.Minute)}
 	good := func() Call {
@@ -49,7 +49,7 @@ func TestCheckedProviderResponse(t *testing.T) {
 	}
 }
 
-func TestCallbackNumberFormat(t *testing.T) {
+func TestUnitCallbackNumberFormat(t *testing.T) {
 	for _, s := range []string{"", "+1", "123", "+01", "+7a", "+1234567890123456", "+7\n"} {
 		if callbackNumber(s) {
 			t.Fatalf("accepted %q", s)

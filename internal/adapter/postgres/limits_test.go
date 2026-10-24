@@ -45,7 +45,7 @@ func takeLimit(ctx context.Context, db *DB, l *ratelimit.Limiter, op ratelimit.O
 	return d, err
 }
 
-func TestLimitsMultipleWindowsAndReset(t *testing.T) {
+func TestIntegrationLimitsMultipleWindowsAndReset(t *testing.T) {
 	db := limitsDB(t)
 	now := time.Date(2026, 12, 31, 23, 59, 30, 0, time.UTC)
 	l, err := ratelimit.New(ratelimit.Defaults(), NewLimits(db), func() time.Time { return now }, prometheus.NewRegistry())
@@ -98,7 +98,7 @@ func TestLimitsMultipleWindowsAndReset(t *testing.T) {
 	}
 }
 
-func TestLimitsConcurrentAttemptsCanonicalIPAndScopes(t *testing.T) {
+func TestIntegrationLimitsConcurrentAttemptsCanonicalIPAndScopes(t *testing.T) {
 	db := limitsDB(t)
 	reg := prometheus.NewRegistry()
 	rules := ratelimit.Defaults()
@@ -159,7 +159,7 @@ func TestLimitsConcurrentAttemptsCanonicalIPAndScopes(t *testing.T) {
 	}
 }
 
-func TestLimitsConcurrentStartOverlappingWindows(t *testing.T) {
+func TestIntegrationLimitsConcurrentStartOverlappingWindows(t *testing.T) {
 	for _, tt := range []struct {
 		name        string
 		phone, ip   func(int) string
@@ -254,7 +254,7 @@ func TestLimitsConcurrentStartOverlappingWindows(t *testing.T) {
 	}
 }
 
-func TestLimitsRollbackDurationChangeAndFailures(t *testing.T) {
+func TestIntegrationLimitsRollbackDurationChangeAndFailures(t *testing.T) {
 	db := limitsDB(t)
 	repo := NewLimits(db)
 	rules := ratelimit.Defaults()
@@ -335,7 +335,7 @@ func TestLimitsRollbackDurationChangeAndFailures(t *testing.T) {
 	}
 }
 
-func TestLimitsCleanupRetainsLiveWindowsAndSkipsLocked(t *testing.T) {
+func TestIntegrationLimitsCleanupRetainsLiveWindowsAndSkipsLocked(t *testing.T) {
 	db := limitsDB(t)
 	repo := NewLimits(db)
 	now := time.Date(2026, 10, 23, 0, 0, 0, 0, time.UTC)

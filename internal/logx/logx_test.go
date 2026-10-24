@@ -11,7 +11,7 @@ import (
 	"github.com/fin-assist/user/internal/reqctx"
 )
 
-func TestContextValuesInEveryLine(t *testing.T) {
+func TestUnitContextValuesInEveryLine(t *testing.T) {
 	var buf bytes.Buffer
 	log := New(&buf, "json", slog.LevelInfo, "user").With("component", "test").WithGroup("g")
 	ctx := reqctx.WithUserID(reqctx.WithCaller(reqctx.WithRequestID(context.Background(), "req-1"), "bank-bff"), "u1")
@@ -31,7 +31,7 @@ func TestContextValuesInEveryLine(t *testing.T) {
 	}
 }
 
-func TestTextFormatAndLevel(t *testing.T) {
+func TestUnitTextFormatAndLevel(t *testing.T) {
 	var buf bytes.Buffer
 	log := New(&buf, "text", slog.LevelWarn, "user")
 	log.InfoContext(context.Background(), "dropped")

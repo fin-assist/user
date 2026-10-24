@@ -67,7 +67,7 @@ func (p *timezonePeer) SetUserTimezone(ctx context.Context, in *usersettingsv1.S
 	return &usersettingsv1.SetUserTimezoneResponse{}, nil
 }
 
-func TestTimezoneOutboxRetriesUnavailableRecipient(t *testing.T) {
+func TestAPITimezoneOutboxRetriesUnavailableRecipient(t *testing.T) {
 	fast := &timezonePeer{t: t, started: make(chan *usersettingsv1.SetUserTimezoneRequest, 16), applied: make(chan *usersettingsv1.SetUserTimezoneRequest, 16)}
 	flaky := &timezonePeer{t: t, started: make(chan *usersettingsv1.SetUserTimezoneRequest, 16), applied: make(chan *usersettingsv1.SetUserTimezoneRequest, 16)}
 	flaky.unavailable.Store(true)
@@ -177,7 +177,7 @@ func receiveTimezone(t *testing.T, ch <-chan *usersettingsv1.SetUserTimezoneRequ
 	}
 }
 
-func TestTimezoneOutboxIndependentRecipientsRestartAndMetadata(t *testing.T) {
+func TestAPITimezoneOutboxIndependentRecipientsRestartAndMetadata(t *testing.T) {
 	blocked := make(chan struct{})
 	fast := &timezonePeer{t: t, started: make(chan *usersettingsv1.SetUserTimezoneRequest, 16), applied: make(chan *usersettingsv1.SetUserTimezoneRequest, 16)}
 	slow := &timezonePeer{t: t, block: blocked, started: make(chan *usersettingsv1.SetUserTimezoneRequest, 16), applied: make(chan *usersettingsv1.SetUserTimezoneRequest, 16)}

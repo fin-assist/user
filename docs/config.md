@@ -9,7 +9,7 @@
 Таблицы ниже **генерируются** из списка `Vars` в `internal/config/vars.go` — там у каждой переменной имя, значение по умолчанию, признак секрета и описание; код берёт значения по умолчанию оттуда же. Новая переменная или новое значение по умолчанию:
 
 1. строка в `Vars`, чтение в `load` / `loadMigrate`;
-2. `go test ./internal/config -run TestDocIsCurrent -update` — переписывает таблицы между маркерами.
+2. `go test ./internal/config -run TestUnitDocIsCurrent -update` — переписывает таблицы между маркерами.
 
 Руками блоки между маркерами не правятся. CI (`go test`) падает, если таблица устарела (`TestDocIsCurrent`), если код читает необъявленную переменную или объявленная нигде не читается (`TestVarsMatchWhatLoadReads`).
 
@@ -26,7 +26,7 @@ PEER_<NAME>_ADDR; по умолчанию нужны PEER_BANK_STATEMENT_DATA_AD
 его ёмкость не меньше числа уникальных соседей обоих маршрутов + 3 (минимум 6).
 Подробности — [profile.md](profile.md), [deletion.md](deletion.md). Адреса проверяются при сборке; доступность соседей — через retry outbox.
 
-<!-- generated:config-serve:start (go test ./internal/config -run TestDocIsCurrent -update) -->
+<!-- generated:config-serve:start (go test ./internal/config -run TestUnitDocIsCurrent -update) -->
 | Переменная | По умолчанию | Что |
 |---|---|---|
 | `PHONE_PROVIDER` | `disabled` | `disabled`, `fake` или `zvonok`; fake/zvonok только dev/stage; prod Zvonok ждёт FIN-81 |
@@ -91,7 +91,7 @@ PEER_<NAME>_ADDR; по умолчанию нужны PEER_BANK_STATEMENT_DATA_AD
 
 ## `migrate`
 
-<!-- generated:config-migrate:start (go test ./internal/config -run TestDocIsCurrent -update) -->
+<!-- generated:config-migrate:start (go test ./internal/config -run TestUnitDocIsCurrent -update) -->
 | Переменная | По умолчанию | Что |
 |---|---|---|
 | `DB_PRIMARY_DSN` / `_FILE` | — (обязательна) | DSN primary, роль сервиса. Миграции никогда не идут на реплику |

@@ -98,7 +98,7 @@ func reason(err error) string {
 	return rest.Code
 }
 
-func TestProfileUpdateAndRetry(t *testing.T) {
+func TestUnitProfileUpdateAndRetry(t *testing.T) {
 	for _, tt := range []struct {
 		name        string
 		patch       Patch
@@ -133,7 +133,7 @@ func TestProfileUpdateAndRetry(t *testing.T) {
 	}
 }
 
-func TestProfileValidationAndVersionBoundary(t *testing.T) {
+func TestUnitProfileValidationAndVersionBoundary(t *testing.T) {
 	for _, patch := range []Patch{{Theme: ptr("")}, {Theme: ptr("unknown")}, {Timezone: ptr("")}, {Timezone: ptr("Local")}, {Timezone: ptr("Etc/Unknown")}, {Timezone: ptr(strings.Repeat("A", 65))}, {Timezone: ptr("../UTC")}, {Timezone: ptr("/etc/passwd")}} {
 		f := newFixture()
 		if _, err := f.service().Update(t.Context(), userID, patch); reason(err) != "VALIDATION_ERROR" || len(f.calls) != 0 {
@@ -158,7 +158,7 @@ func TestProfileValidationAndVersionBoundary(t *testing.T) {
 	}
 }
 
-func TestConsentLifecycleAndPrimaryStatus(t *testing.T) {
+func TestUnitConsentLifecycleAndPrimaryStatus(t *testing.T) {
 	f := newFixture()
 	s := f.service()
 	p, err := s.Grant(t.Context(), userID, "v2")
@@ -203,7 +203,7 @@ func TestConsentLifecycleAndPrimaryStatus(t *testing.T) {
 	}
 }
 
-func TestConsentOldVersionAndBackwardsClock(t *testing.T) {
+func TestUnitConsentOldVersionAndBackwardsClock(t *testing.T) {
 	f := newFixture()
 	old := "v1"
 	future := f.now.Add(time.Hour)
@@ -220,7 +220,7 @@ func TestConsentOldVersionAndBackwardsClock(t *testing.T) {
 	}
 }
 
-func TestProfileDependencyErrorsAndDeletedUser(t *testing.T) {
+func TestUnitProfileDependencyErrorsAndDeletedUser(t *testing.T) {
 	for _, point := range []string{"begin", "guard", "lock", "current1", "update", "event", "current2", "commit"} {
 		f := newFixture()
 		f.fail = point

@@ -47,7 +47,7 @@ func client(t *testing.T, f transportFunc) *Client {
 	return c
 }
 
-func TestCreateMultipartAndPrivateReads(t *testing.T) {
+func TestUnitCreateMultipartAndPrivateReads(t *testing.T) {
 	var paths []string
 	c := client(t, func(r *http.Request) (*http.Response, error) {
 		paths = append(paths, r.URL.Path)
@@ -77,7 +77,7 @@ func TestCreateMultipartAndPrivateReads(t *testing.T) {
 	}
 }
 
-func TestCreateAndRecoverIgnoreBalance(t *testing.T) {
+func TestUnitCreateAndRecoverIgnoreBalance(t *testing.T) {
 	for _, tt := range []struct {
 		name, field string
 	}{
@@ -110,7 +110,7 @@ func TestCreateAndRecoverIgnoreBalance(t *testing.T) {
 	}
 }
 
-func TestRecoveryChecksIdentityAndTerminalRace(t *testing.T) {
+func TestUnitRecoveryChecksIdentityAndTerminalRace(t *testing.T) {
 	for _, tt := range []struct {
 		name, lookup, returned string
 		want                   error
@@ -154,7 +154,7 @@ func TestRecoveryChecksIdentityAndTerminalRace(t *testing.T) {
 	}
 }
 
-func TestHTTPFailuresCannotLeakSecretsOrAuthorizeRefunds(t *testing.T) {
+func TestUnitHTTPFailuresCannotLeakSecretsOrAuthorizeRefunds(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
 		status  int
@@ -189,7 +189,7 @@ func TestHTTPFailuresCannotLeakSecretsOrAuthorizeRefunds(t *testing.T) {
 	}
 }
 
-func TestStatusUsesAuthenticatedIdentityAndCurrentStatus(t *testing.T) {
+func TestUnitStatusUsesAuthenticatedIdentityAndCurrentStatus(t *testing.T) {
 	for _, tt := range []struct {
 		data  string
 		state verification.State
@@ -216,7 +216,7 @@ func TestStatusUsesAuthenticatedIdentityAndCurrentStatus(t *testing.T) {
 	}
 }
 
-func TestRealHTTPDoesNotFollowRedirect(t *testing.T) {
+func TestIntegrationRealHTTPDoesNotFollowRedirect(t *testing.T) {
 	var redirected int
 	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { redirected++; w.WriteHeader(200) }))
 	defer target.Close()
@@ -239,7 +239,7 @@ func TestRealHTTPDoesNotFollowRedirect(t *testing.T) {
 	}
 }
 
-func TestMalformedCallIDsAndGateCancellation(t *testing.T) {
+func TestUnitMalformedCallIDsAndGateCancellation(t *testing.T) {
 	for _, raw := range []string{`null`, `0`, `-1`, `1.5`, `1e10`, `"x"`} {
 		var id callID
 		if json.Unmarshal([]byte(raw), &id) == nil {
@@ -253,7 +253,7 @@ func TestMalformedCallIDsAndGateCancellation(t *testing.T) {
 	}
 }
 
-func TestRecoveryRefusalCannotRefundPreviouslyAcceptedCall(t *testing.T) {
+func TestUnitRecoveryRefusalCannotRefundPreviouslyAcceptedCall(t *testing.T) {
 	for _, status := range []int{400, 429} {
 		t.Run(fmt.Sprint(status), func(t *testing.T) {
 			c := client(t, func(r *http.Request) (*http.Response, error) {
@@ -270,7 +270,7 @@ func TestRecoveryRefusalCannotRefundPreviouslyAcceptedCall(t *testing.T) {
 	}
 }
 
-func TestHistoryErrorsNeverBecomeBlindWrites(t *testing.T) {
+func TestUnitHistoryErrorsNeverBecomeBlindWrites(t *testing.T) {
 	for _, body := range []string{`null`, `not-json`, `[{"call_id":1,"phone":"bad"}]`, `{"status":"error","data":"authentication failed"}`} {
 		writes := 0
 		c := client(t, func(r *http.Request) (*http.Response, error) {
@@ -297,7 +297,7 @@ func TestHistoryErrorsNeverBecomeBlindWrites(t *testing.T) {
 	}
 }
 
-func TestRecoveryByKnownIDAndStaleHistoryPreservesCallLifetime(t *testing.T) {
+func TestUnitRecoveryByKnownIDAndStaleHistoryPreservesCallLifetime(t *testing.T) {
 	for _, returned := range []string{"1", "2", "missing"} {
 		t.Run(returned, func(t *testing.T) {
 			writes := 0

@@ -36,7 +36,7 @@ func (b *blocking) StreamingOutputCall(_ *testgrpc.StreamingOutputCallRequest, s
 	return ss.Context().Err()
 }
 
-func TestShutdownReportsNotServing(t *testing.T) {
+func TestIntegrationShutdownReportsNotServing(t *testing.T) {
 	e := start(t, policy())
 	e.srv.SetServing(true)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -49,14 +49,14 @@ func TestShutdownReportsNotServing(t *testing.T) {
 	}
 }
 
-func TestOneServerPerRegistry(t *testing.T) {
+func TestIntegrationOneServerPerRegistry(t *testing.T) {
 	e := start(t, policy())
 	if _, err := New(Options{}, e.srv.deps); err == nil {
 		t.Fatal("a second server on the same registry must fail instead of sharing its metrics silently")
 	}
 }
 
-func TestShutdownWaitsForStreamUntilDeadline(t *testing.T) {
+func TestIntegrationShutdownWaitsForStreamUntilDeadline(t *testing.T) {
 	lis := bufconn.Listen(1 << 20)
 	srv, err := New(Options{Reflection: true}, testDeps(t))
 	if err != nil {
@@ -101,7 +101,7 @@ func testDeps(t *testing.T) Deps {
 	}
 }
 
-func TestMaskMetadata(t *testing.T) {
+func TestUnitMaskMetadata(t *testing.T) {
 	got := maskMetadata(metadata.MD{
 		"authorization":        {"Bearer a"},
 		"x-verification-token": {"v"},
@@ -191,7 +191,7 @@ func tokenMessage(t *testing.T) (*dynamicpb.Message, protoreflect.MessageDescrip
 	return m, outer
 }
 
-func TestMaskMessageAtAnyDepth(t *testing.T) {
+func TestUnitMaskMessageAtAnyDepth(t *testing.T) {
 	m, _ := tokenMessage(t)
 	masked := maskMessage(m)
 	if containsSecret(masked) {

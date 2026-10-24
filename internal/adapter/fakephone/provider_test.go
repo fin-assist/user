@@ -10,7 +10,7 @@ import (
 	"github.com/fin-assist/user/internal/verification"
 )
 
-func TestDurableAttemptRecoveryAndPoolIsolation(t *testing.T) {
+func TestUnitDurableAttemptRecoveryAndPoolIsolation(t *testing.T) {
 	p := New()
 	now := time.Now().UTC()
 	p.now = func() time.Time { return now }
@@ -37,7 +37,7 @@ func TestDurableAttemptRecoveryAndPoolIsolation(t *testing.T) {
 	}
 }
 
-func TestRejectsNonSyntheticAndInvalidAttemptsWithoutNetwork(t *testing.T) {
+func TestUnitRejectsNonSyntheticAndInvalidAttemptsWithoutNetwork(t *testing.T) {
 	now := time.Now().UTC()
 	p := New()
 	p.now = func() time.Time { return now }

@@ -101,7 +101,7 @@ func receiveDeletion(t *testing.T, ch <-chan string) string {
 		return ""
 	}
 }
-func TestDeletionOutboxIndependentTargetsAndProcessRestart(t *testing.T) {
+func TestAPIDeletionOutboxIndependentTargetsAndProcessRestart(t *testing.T) {
 	blocked := make(chan struct{})
 	fast, flaky, slow := &deletionPeer{}, &deletionPeer{}, &deletionPeer{block: blocked}
 	flaky.unavailable.Store(true)
@@ -181,7 +181,7 @@ func TestDeletionOutboxIndependentTargetsAndProcessRestart(t *testing.T) {
 	}
 }
 
-func TestDeleteAccountDuringInflightTimezoneDelivery(t *testing.T) {
+func TestAPIDeleteAccountDuringInflightTimezoneDelivery(t *testing.T) {
 	blocked := make(chan struct{})
 	var release sync.Once
 	unblock := func() { release.Do(func() { close(blocked) }) }

@@ -147,7 +147,7 @@ func confirmCreated(t *testing.T, env *apitest.Env, p *creationProvider, phone s
 	}
 }
 
-func TestStartAPIFullNewAndExistingSignInAndDeletion(t *testing.T) {
+func TestAPIStartAPIFullNewAndExistingSignInAndDeletion(t *testing.T) {
 	p := &creationProvider{}
 	env := startEnv(t, p)
 	seedDocuments(t, env)
@@ -231,7 +231,7 @@ func TestStartAPIFullNewAndExistingSignInAndDeletion(t *testing.T) {
 	}
 }
 
-func TestStartAPILostReplyRecoveryAndProcessRestart(t *testing.T) {
+func TestAPIStartAPILostReplyRecoveryAndProcessRestart(t *testing.T) {
 	p := &creationProvider{mode: "lost"}
 	env := startEnv(t, p)
 	key := authKey()
@@ -295,7 +295,7 @@ func TestStartAPILostReplyRecoveryAndProcessRestart(t *testing.T) {
 	}
 }
 
-func TestStartAPIRejectionCompensationAndProviderDuplicate(t *testing.T) {
+func TestAPIStartAPIRejectionCompensationAndProviderDuplicate(t *testing.T) {
 	p := &creationProvider{mode: "reject"}
 	env := startEnv(t, p)
 	key := authKey()
@@ -354,7 +354,7 @@ func startMetric(t *testing.T, env *apitest.Env, name, scope string) float64 {
 	return 0
 }
 
-func TestStartAPIConcurrentKeysAndCommittedReservation(t *testing.T) {
+func TestAPIStartAPIConcurrentKeysAndCommittedReservation(t *testing.T) {
 	started, proceed := make(chan struct{}), make(chan struct{})
 	p := &creationProvider{started: started, proceed: proceed}
 	env := startEnv(t, p)
@@ -399,7 +399,7 @@ func TestStartAPIConcurrentKeysAndCommittedReservation(t *testing.T) {
 	}
 }
 
-func TestStartAPIValidationDisabledAndLimitPriority(t *testing.T) {
+func TestAPIStartAPIValidationDisabledAndLimitPriority(t *testing.T) {
 	disabled := apitest.Start(t)
 	if _, err := startCall(t, disabled, authKey(), "+79001234567"); status.Code(err) != codes.Internal || startHits(t, disabled) != 0 {
 		t.Fatal(err)
@@ -482,7 +482,7 @@ func awaitStart(t *testing.T, done <-chan error) error {
 	}
 }
 
-func TestStartAPIDeletionDuringProviderCannotResurrect(t *testing.T) {
+func TestAPIStartAPIDeletionDuringProviderCannotResurrect(t *testing.T) {
 	p := &creationProvider{started: make(chan struct{}), proceed: make(chan struct{})}
 	env := startEnv(t, p)
 	seedProfiles(t, env)
@@ -505,7 +505,7 @@ func TestStartAPIDeletionDuringProviderCannotResurrect(t *testing.T) {
 	}
 }
 
-func TestStartAPICallerCancellationPreservesCommittedCreation(t *testing.T) {
+func TestAPIStartAPICallerCancellationPreservesCommittedCreation(t *testing.T) {
 	p := &creationProvider{started: make(chan struct{}), proceed: make(chan struct{})}
 	env := startEnv(t, p)
 	key, phone := authKey(), "+79001234567"
@@ -543,7 +543,7 @@ func TestStartAPICallerCancellationPreservesCommittedCreation(t *testing.T) {
 	}
 }
 
-func TestStartAPIRejectionKeepsBusyKeyForPhoneScopedDeletion(t *testing.T) {
+func TestAPIStartAPIRejectionKeepsBusyKeyForPhoneScopedDeletion(t *testing.T) {
 	p := &creationProvider{mode: "reject", started: make(chan struct{}), proceed: make(chan struct{})}
 	env := startEnv(t, p)
 	seedProfiles(t, env)
@@ -592,7 +592,7 @@ func TestStartAPIRejectionKeepsBusyKeyForPhoneScopedDeletion(t *testing.T) {
 	}
 }
 
-func TestStartAPIDeletionRetriesBusyPreAccountCacheKey(t *testing.T) {
+func TestAPIStartAPIDeletionRetriesBusyPreAccountCacheKey(t *testing.T) {
 	p := &creationProvider{}
 	env := startEnv(t, p)
 	key, phone := authKey(), "+79001234567"
@@ -648,7 +648,7 @@ func TestStartAPIDeletionRetriesBusyPreAccountCacheKey(t *testing.T) {
 	}
 }
 
-func TestStartAPIResourceBindingFailureRollsBackClaimAndLimits(t *testing.T) {
+func TestAPIStartAPIResourceBindingFailureRollsBackClaimAndLimits(t *testing.T) {
 	p := &creationProvider{}
 	env := startEnv(t, p)
 	if _, err := env.App.DB.Primary().Exec(t.Context(), `ALTER TABLE idempotency_keys RENAME COLUMN resource_id TO unavailable`); err != nil {
@@ -673,7 +673,7 @@ func TestStartAPIResourceBindingFailureRollsBackClaimAndLimits(t *testing.T) {
 	}
 }
 
-func TestStartAPIPurgeParentStorageFailureRollsBack(t *testing.T) {
+func TestAPIStartAPIPurgeParentStorageFailureRollsBack(t *testing.T) {
 	env := startEnv(t, &creationProvider{})
 	seedProfiles(t, env)
 	if _, err := startCall(t, env, authKey(), "+79001234567"); err != nil {

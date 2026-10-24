@@ -18,7 +18,7 @@ type startFunc func(context.Context, idempotency.Request, string, string) (verif
 func (f startFunc) Start(ctx context.Context, r idempotency.Request, phone, ip string) (verification.Started, error) {
 	return f(ctx, r, phone, ip)
 }
-func TestStartMappingRecalculatesRemainingTime(t *testing.T) {
+func TestUnitStartMappingRecalculatesRemainingTime(t *testing.T) {
 	now := time.Date(2026, 10, 23, 20, 0, 0, 0, time.UTC)
 	for _, tt := range []struct {
 		delta time.Duration
@@ -39,7 +39,7 @@ func TestStartMappingRecalculatesRemainingTime(t *testing.T) {
 		}
 	}
 }
-func TestStartExtractionAndFailure(t *testing.T) {
+func TestUnitStartExtractionAndFailure(t *testing.T) {
 	h, _, _, _, _ := handlerFixture(t)
 	h.now = time.Now
 	calls := 0

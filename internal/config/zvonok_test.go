@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func TestZvonokConfigurationAndProdBoundary(t *testing.T) {
+func TestUnitZvonokConfigurationAndProdBoundary(t *testing.T) {
 	vars := base()
 	vars["PHONE_PROVIDER"] = "zvonok"
 	vars["ZVONOK_PUBLIC_KEY"] = "private-test-key"

@@ -32,7 +32,7 @@ func seedDocuments(t *testing.T, env *apitest.Env) {
 	}
 }
 
-func TestDocumentAPI(t *testing.T) {
+func TestAPIDocumentAPI(t *testing.T) {
 	env := apitest.Start(t)
 	seedDocuments(t, env)
 	c := userv1.NewConsentDocumentServiceClient(env.Conn)
@@ -84,7 +84,7 @@ func TestDocumentAPI(t *testing.T) {
 	}
 }
 
-func TestSigningKeysAPI(t *testing.T) {
+func TestAPISigningKeysAPI(t *testing.T) {
 	env := apitest.Start(t)
 	c := userv1.NewUserInternalServiceClient(env.Conn)
 	for _, caller := range []string{"bank-bff", "user", "assistant", "analytics", "bank-statement-data"} {
@@ -124,7 +124,7 @@ func stageKey(t *testing.T, name string) (string, map[string]string) {
 	return p, map[string]string{"kty": "OKP", "crv": "Ed25519", "kid": name, "x": base64.RawURLEncoding.EncodeToString(public)}
 }
 
-func TestStageSignedIdentityAPI(t *testing.T) {
+func TestAPIStageSignedIdentityAPI(t *testing.T) {
 	userKey, userPublic := stageKey(t, "user")
 	bffKey, bffPublic := stageKey(t, "bank-bff")
 	b, err := json.Marshal(map[string]any{"keys": []any{userPublic, bffPublic}})

@@ -14,7 +14,7 @@ import (
 type deletionFunc func(context.Context, string) error
 
 func (f deletionFunc) Delete(ctx context.Context, id string) error { return f(ctx, id) }
-func TestDeletionIdentityAndErrors(t *testing.T) {
+func TestUnitDeletionIdentityAndErrors(t *testing.T) {
 	calls := 0
 	want := errors.New("database failure")
 	h := &handler{deletions: deletionFunc(func(_ context.Context, id string) error {

@@ -150,7 +150,7 @@ func watchReason(t *testing.T, env *apitest.Env, ctx context.Context, raw, want 
 		t.Fatal("unexpected initial refusal", m, err)
 	}
 }
-func TestPhoneWatchNewUserRegisterAndReplay(t *testing.T) {
+func TestAPIPhoneWatchNewUserRegisterAndReplay(t *testing.T) {
 	env := apitest.Start(t)
 	seedDocuments(t, env)
 	phoneJob(t, env)
@@ -208,7 +208,7 @@ func TestPhoneWatchNewUserRegisterAndReplay(t *testing.T) {
 	}
 	eventually(t, func() bool { return phoneMetric(t, env, "finassist_phone_watch_active_streams", nil) == 0 })
 }
-func TestPhoneWatchExistingUserAcrossInstancesAndRefresh(t *testing.T) {
+func TestAPIPhoneWatchExistingUserAcrossInstancesAndRefresh(t *testing.T) {
 	first := apitest.Start(t)
 	seedDocuments(t, first)
 	user, _ := registerAPI(t, first, "existing-account", "+79001234567")
@@ -249,7 +249,7 @@ func TestPhoneWatchExistingUserAcrossInstancesAndRefresh(t *testing.T) {
 	}
 	watchReason(t, second, phoneContext(ctx), "existing-phone", "INVALID_TOKEN")
 }
-func TestPhoneWatchExpiryAndNoLateConfirmation(t *testing.T) {
+func TestAPIPhoneWatchExpiryAndNoLateConfirmation(t *testing.T) {
 	env := apitest.Start(t)
 	phoneJob(t, env)
 	pendingPhoneAPI(t, env, "expired-before", "+79001234567", time.Now().Add(-time.Second))
@@ -294,7 +294,7 @@ func TestPhoneWatchExpiryAndNoLateConfirmation(t *testing.T) {
 		t.Fatal("expired secret not wiped", err)
 	}
 }
-func TestPhoneWatchAccessLimitsAndCapacity(t *testing.T) {
+func TestAPIPhoneWatchAccessLimitsAndCapacity(t *testing.T) {
 	t.Run("access and attempt order", func(t *testing.T) {
 		env := apitest.Start(t, func(c *config.Config) { c.Limits[ratelimit.WatchIP] = ratelimit.Rule{Limit: 1, Window: time.Hour} })
 		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
@@ -343,7 +343,7 @@ func TestPhoneWatchAccessLimitsAndCapacity(t *testing.T) {
 		}
 	})
 }
-func TestPhoneConfirmationConcurrentAccountDeletion(t *testing.T) {
+func TestAPIPhoneConfirmationConcurrentAccountDeletion(t *testing.T) {
 	env := apitest.Start(t)
 	seedDocuments(t, env)
 	user, _ := registerAPI(t, env, "delete-owner", "+79001234567")
@@ -391,7 +391,7 @@ func TestPhoneConfirmationConcurrentAccountDeletion(t *testing.T) {
 	watchReason(t, env, phoneContext(ctx), "delete-pending", "INVALID_TOKEN")
 }
 
-func TestPhoneWatchListenerFailureReconnectAndSafeReplay(t *testing.T) {
+func TestAPIPhoneWatchListenerFailureReconnectAndSafeReplay(t *testing.T) {
 	env := apitest.Start(t)
 	_, done := phoneJob(t, env)
 	pendingPhoneAPI(t, env, "reconnect", "+79001234567", time.Now().Add(time.Minute))
@@ -441,7 +441,7 @@ func TestPhoneWatchListenerFailureReconnectAndSafeReplay(t *testing.T) {
 		t.Fatal("same secret did not resume", m, err)
 	}
 }
-func TestPhoneConfirmationRollbackAndCorruptResultFailClosed(t *testing.T) {
+func TestAPIPhoneConfirmationRollbackAndCorruptResultFailClosed(t *testing.T) {
 	t.Run("failed session insert rolls confirmation back", func(t *testing.T) {
 		env := apitest.Start(t)
 		seedDocuments(t, env)
@@ -484,7 +484,7 @@ func TestPhoneConfirmationRollbackAndCorruptResultFailClosed(t *testing.T) {
 		})
 	}
 }
-func TestPhoneWatchResyncSeesDeletionWithoutNotification(t *testing.T) {
+func TestAPIPhoneWatchResyncSeesDeletionWithoutNotification(t *testing.T) {
 	env := apitest.Start(t, func(c *config.Config) { c.Phone.ResyncInterval = 20 * time.Millisecond })
 	seedDocuments(t, env)
 	user, _ := registerAPI(t, env, "resync-owner", "+79001234567")
@@ -505,7 +505,7 @@ func TestPhoneWatchResyncSeesDeletionWithoutNotification(t *testing.T) {
 	eventually(t, func() bool { return phoneMetric(t, env, "finassist_phone_watch_active_streams", nil) == 0 })
 }
 
-func TestPhoneCleanupWorkerBatchesAndStops(t *testing.T) {
+func TestIntegrationPhoneCleanupWorkerBatchesAndStops(t *testing.T) {
 	env := apitest.Start(t)
 	_, err := env.App.DB.Primary().Exec(t.Context(), `INSERT INTO phone_verification(phone,token_hash,provider,created_at,expires_at) SELECT '+79'||lpad(g::text,9,'0'),sha256(int4send(g)),'test',$1,$2 FROM generate_series(1,2100) g`, time.Now().Add(-25*time.Hour), time.Now().Add(-25*time.Hour+5*time.Minute))
 	if err != nil {

@@ -14,7 +14,7 @@ type keys struct{ err error }
 
 func (k keys) JWKS(context.Context) ([]byte, error) { return []byte(`{"keys":[]}`), k.err }
 
-func TestSigningKeys(t *testing.T) {
+func TestUnitSigningKeys(t *testing.T) {
 	h := &handler{keys: keys{}}
 	got, err := h.GetSigningKeys(t.Context(), &userv1.GetSigningKeysRequest{})
 	if err != nil || got.GetJwksJson() != `{"keys":[]}` {
@@ -36,7 +36,7 @@ func (c *consents) Status(_ context.Context, id string) (profile.Consent, error)
 	c.id = id
 	return profile.Consent{Granted: true, CurrentVersion: "v2"}, c.err
 }
-func TestAssistantConsentStatus(t *testing.T) {
+func TestUnitAssistantConsentStatus(t *testing.T) {
 	c := &consents{}
 	h := &handler{consents: c}
 	id := "system-user"

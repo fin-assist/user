@@ -21,7 +21,7 @@ func fakePhoneEnv(t *testing.T) *apitest.Env {
 	return apitest.Start(t, func(c *config.Config) { c.Zvonok.Provider = "fake" })
 }
 
-func TestFakePhoneAPINewExistingReplayDeletionAndNotify(t *testing.T) {
+func TestAPIFakePhoneAPINewExistingReplayDeletionAndNotify(t *testing.T) {
 	env := fakePhoneEnv(t)
 	seedDocuments(t, env)
 	if env.App.PhoneCallback != nil {
@@ -98,7 +98,7 @@ func TestFakePhoneAPINewExistingReplayDeletionAndNotify(t *testing.T) {
 	watchReason(t, env, phoneContext(ctx), second.GetVerificationToken(), "INVALID_TOKEN")
 }
 
-func TestFakePhoneAPIConfirmationRollbackRecoversOwnAttempt(t *testing.T) {
+func TestAPIFakePhoneAPIConfirmationRollbackRecoversOwnAttempt(t *testing.T) {
 	env := fakePhoneEnv(t)
 	// Force common Confirm to fail after creation and pool selection, without mocks.
 	if _, err := env.App.DB.Primary().Exec(t.Context(), `ALTER TABLE phone_verification RENAME COLUMN registration_token_hash TO temporarily_unavailable`); err != nil {
@@ -136,7 +136,7 @@ func TestFakePhoneAPIConfirmationRollbackRecoversOwnAttempt(t *testing.T) {
 	}
 }
 
-func TestFakePhoneAPINamespaceRefusalAndSharedLimits(t *testing.T) {
+func TestAPIFakePhoneAPINamespaceRefusalAndSharedLimits(t *testing.T) {
 	env := apitest.Start(t, func(c *config.Config) {
 		c.Zvonok.Provider = "fake"
 		c.Limits[ratelimit.WatchIP] = ratelimit.Rule{Limit: 1, Window: time.Hour}
@@ -176,7 +176,7 @@ func TestFakePhoneAPINamespaceRefusalAndSharedLimits(t *testing.T) {
 	}
 }
 
-func TestFakePhoneAPIAccountAppearsWhileStartWaitsForRequest(t *testing.T) {
+func TestAPIFakePhoneAPIAccountAppearsWhileStartWaitsForRequest(t *testing.T) {
 	env := fakePhoneEnv(t)
 	seedDocuments(t, env)
 	phone, key := "+70000008765", authKey()

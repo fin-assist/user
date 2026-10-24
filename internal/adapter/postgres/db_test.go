@@ -39,7 +39,7 @@ func insert(ctx context.Context, db *postgres.DB, id int) error {
 	return err
 }
 
-func TestRunCommitsAndRollsBack(t *testing.T) {
+func TestIntegrationRunCommitsAndRollsBack(t *testing.T) {
 	db := open(t)
 	ctx := context.Background()
 
@@ -61,7 +61,7 @@ func TestRunCommitsAndRollsBack(t *testing.T) {
 	}
 }
 
-func TestRunRollsBackOnPanic(t *testing.T) {
+func TestIntegrationRunRollsBackOnPanic(t *testing.T) {
 	db := open(t)
 	func() {
 		defer func() {
@@ -79,7 +79,7 @@ func TestRunRollsBackOnPanic(t *testing.T) {
 	}
 }
 
-func TestNestedRunJoinsOuter(t *testing.T) {
+func TestIntegrationNestedRunJoinsOuter(t *testing.T) {
 	db := open(t)
 	err := db.Run(context.Background(), func(ctx context.Context) error {
 		if err := db.Run(ctx, func(ctx context.Context) error { return insert(ctx, db, 1) }); err != nil {
@@ -95,7 +95,7 @@ func TestNestedRunJoinsOuter(t *testing.T) {
 	}
 }
 
-func TestTxIsVisibleOnlyInsideRun(t *testing.T) {
+func TestIntegrationTxIsVisibleOnlyInsideRun(t *testing.T) {
 	db := open(t)
 	if _, ok := db.Tx(context.Background()); ok {
 		t.Fatal("no transaction outside Run")
@@ -114,7 +114,7 @@ func TestTxIsVisibleOnlyInsideRun(t *testing.T) {
 	}
 }
 
-func TestReaderUsesTransactionAndPrimaryHint(t *testing.T) {
+func TestIntegrationReaderUsesTransactionAndPrimaryHint(t *testing.T) {
 	db := open(t)
 	// Reader inside Run sees the uncommitted write of the same transaction.
 	_ = db.Run(context.Background(), func(ctx context.Context) error {
@@ -132,7 +132,7 @@ func TestReaderUsesTransactionAndPrimaryHint(t *testing.T) {
 	}
 }
 
-func TestOpenDoesNotLeakDSN(t *testing.T) {
+func TestIntegrationOpenDoesNotLeakDSN(t *testing.T) {
 	_, err := postgres.Open(context.Background(), postgres.Options{PrimaryDSN: "postgres://u:secret@%zz/db"})
 	if err == nil || strings.Contains(err.Error(), "secret") {
 		t.Fatalf("error %v must not contain the password", err)
