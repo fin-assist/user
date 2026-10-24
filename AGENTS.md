@@ -60,7 +60,7 @@ a dedicated primary pool and operator-configured recipients, with system credent
 Timezone defaults to bank-statement-data and assistant; deletion requires bank-statement-data,
 analytics and assistant. Pool capacity is at least the union of recipients + 3. Missing configured peer addresses fail startup. See docs/profile.md.
 
-Start, Register and RefreshTokens use go-idempotency v0.4.0 with encrypted no-user replies
+Start, Register and RefreshTokens use go-idempotency v0.4.1 with encrypted no-user replies
 and result ownership (FIN-226). Start also binds reservations and cached replies,
 including busy refusals, to the verification request through Resource (FIN-230).
 Their key/effect transactions use a dedicated primary pool; IP attempts commit in
@@ -203,6 +203,11 @@ Priorities when they pull apart, in this order:
 - Identity: the user of a user call is `reqctx.UserID(ctx)` (the verified `sub`), never a request field; a system
   call takes `user_id` from the request. Every new method gets its row in `AccessPolicy()`, copied from
   grpc-api.md 3.3; the server does not start without it.
+- **SQL construction:** use [Squirrel](https://github.com/Masterminds/squirrel)
+  (`github.com/Masterminds/squirrel`) instead of assembling SQL by concatenating Go strings wherever the builder
+  supports the query. This is an approved exception to "standard library first". Pass values as query arguments,
+  use `PlaceholderFormat(sq.Dollar)` for PostgreSQL, and keep table and column names constant. If the builder
+  cannot express the query, explain the limitation next to the manual SQL construction and keep it parameterized.
 - Database: SQL with parameters only (`$1`), table and column names are constants. A usecase opens the transaction
   with `db.Run`; repositories take `db.Writer(ctx)` / `db.Reader(ctx)`; no calls to other services inside `Run`.
   Migrations follow `docs/migrations.md` (two releases for an incompatible change, `CONCURRENTLY` alone in a file).
