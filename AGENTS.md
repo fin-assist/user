@@ -145,6 +145,7 @@ See docs/verification.md, including capacity/availability metrics and key retent
 | Logger, metrics endpoint, readiness | `internal/logx/`, `internal/ops/` |
 | Image, local run, stand | `Dockerfile`, `compose.yaml`, `Makefile`, `deploy/systemd/` |
 | CI, lint | `.github/workflows/ci.yml`, `.golangci.yml`, `.squawk.toml` |
+| Service versions, release notes and repeatable GitHub Release | `CHANGELOG.md`, `docs/releasing.md`, `.github/workflows/release.yml`, `scripts/changelog.py` |
 | Dependency updates | `renovate.json` |
 | PR review by Claude | `.github/workflows/claude.yml` |
 
@@ -295,6 +296,11 @@ Also:
 CI (table in `README.md`): `go mod tidy` clean, `go vet`, `go test -race` with PostgreSQL 18 in Docker and coverage of changed lines,
 golangci-lint, image build, and on PRs the migration checks (existing files unchanged, squawk on new ones). Run
 `make test` (or `make cover`) and `make lint` before pushing.
+
+`make test` and CI also run the Python script tests and check CHANGELOG format. Service releases follow
+`docs/releasing.md`: prepare a dated version section in a reviewed PR, wait for post-merge CI, then the owner
+pushes the tag. Agents never create, move or delete version tags. Release publishes GitHub metadata only;
+image publication and deployment remain separate. Existing releases are preserved after validating the tag.
 
 ### Coverage reports (FIN-210)
 
