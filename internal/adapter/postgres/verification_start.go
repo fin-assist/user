@@ -13,6 +13,8 @@ import (
 	"github.com/fin-assist/user/internal/verification"
 )
 
+const startPhoneVerificationEndpoint = "/finassist.user.v1.AuthService/StartPhoneVerification"
+
 // VerificationStarts persists creation ownership in the request on primary.
 type VerificationStarts struct{ db *DB }
 

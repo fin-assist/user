@@ -129,7 +129,7 @@ func (r *Verifications) DeleteOldRequests(ctx context.Context, now time.Time, ba
 	if batch < 1 || batch > 1000 {
 		return 0, errors.New("verification: invalid cleanup batch")
 	}
-	tag, err := r.db.Writer(ctx).Exec(ctx, `DELETE FROM phone_verification WHERE id IN (SELECT v.id FROM phone_verification v WHERE v.created_at<=$1 AND v.expires_at<=$2 AND (v.verified_at IS NULL OR v.closed_at IS NOT NULL OR v.verified_at<=$3) AND NOT EXISTS (SELECT 1 FROM auth_session s WHERE s.phone_verification_id=v.id) AND NOT EXISTS (SELECT 1 FROM idempotency_keys k WHERE k.resource_type='phone_verification' AND k.resource_id=v.id::text AND k.scope='00000000-0000-0000-0000-000000000000'::uuid AND k.endpoint='/finassist.user.v1.AuthService/StartPhoneVerification' AND k.expires_at>$2) LIMIT $4 FOR UPDATE OF v SKIP LOCKED)`, now.Add(-24*time.Hour), now, now.Add(-verification.ResultTTL), batch)
+	tag, err := r.db.Writer(ctx).Exec(ctx, `DELETE FROM phone_verification WHERE id IN (SELECT v.id FROM phone_verification v WHERE v.created_at<=$1 AND v.expires_at<=$2 AND (v.verified_at IS NULL OR v.closed_at IS NOT NULL OR v.verified_at<=$3) AND NOT EXISTS (SELECT 1 FROM auth_session s WHERE s.phone_verification_id=v.id) AND NOT EXISTS (SELECT 1 FROM idempotency_keys k WHERE k.resource_type='phone_verification' AND k.resource_id=v.id::text AND k.scope='00000000-0000-0000-0000-000000000000'::uuid AND k.endpoint=$5 AND k.expires_at>$2) LIMIT $4 FOR UPDATE OF v SKIP LOCKED)`, now.Add(-24*time.Hour), now, now.Add(-verification.ResultTTL), batch, startPhoneVerificationEndpoint)
 	if err != nil {
 		return 0, fmt.Errorf("verification: remove old requests: %w", err)
 	}
