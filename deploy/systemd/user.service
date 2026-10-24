@@ -35,6 +35,15 @@ Environment=PHONE_RESULT_KEY_FILE=%d/phone-result
 #LoadCredential=service-token:/etc/finassist/user/service-token
 #Environment=SERVICE_TOKEN_FILE=%d/service-token
 
+# Real Zvonok is opt-in for the stand; keep disabled until campaign acceptance.
+#LoadCredential=zvonok-public-key:/etc/finassist/user/zvonok-public-key
+#Environment=PHONE_PROVIDER=zvonok
+#Environment=ZVONOK_PUBLIC_KEY_FILE=%d/zvonok-public-key
+#Environment=ZVONOK_CAMPAIGN_ID=<campaign ID>
+#Environment=ZVONOK_CALLBACK_ADDR=127.0.0.1:9095
+#Environment=ZVONOK_TRUSTED_PROXY_CIDRS=127.0.0.1/32
+# Ingress: /callbacks/zvonok only, source 193.232.64.150, no query access logs.
+
 DynamicUser=yes
 Restart=on-failure
 RestartSec=2s

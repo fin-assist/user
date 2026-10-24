@@ -6,6 +6,8 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,6 +32,12 @@ func TestServeFailsBeforeConnectingWithoutSigningKey(t *testing.T) {
 // The whole serve path against a real database: config, pools, server, ops listener,
 // readiness and an orderly stop on cancel.
 func TestServeRunsAndStops(t *testing.T) {
+	for _, provider := range []string{"disabled", "zvonok"} {
+		t.Run(provider, func(t *testing.T) { serveAndStop(t, provider) })
+	}
+}
+func serveAndStop(t *testing.T, provider string) {
+	t.Helper()
 	t.Setenv("PEER_BANK_STATEMENT_DATA_ADDR", "passthrough:///127.0.0.1:1")
 	t.Setenv("PEER_ANALYTICS_ADDR", "passthrough:///127.0.0.1:1")
 	t.Setenv("PEER_ASSISTANT_ADDR", "passthrough:///127.0.0.1:1")
@@ -39,25 +47,62 @@ func TestServeRunsAndStops(t *testing.T) {
 	if err := migrate.Up(t.Context(), migrate.DefaultConfig(dsn), app.MigrationSources()); err != nil {
 		t.Fatal(err)
 	}
-	for k, v := range map[string]string{
-		"SERVICE_NAME": "user", "ENV": "dev", "AUTH_MODE": "insecure-dev", "LOG_LEVEL": "error",
-		"DB_PRIMARY_DSN": dsn, "GRPC_ADDR": "127.0.0.1:0", "HTTP_ADDR": "127.0.0.1:0",
-		"SHUTDOWN_DELAY": "0s", "SHUTDOWN_TIMEOUT": "5s",
-	} {
+	for k, v := range map[string]string{"SERVICE_NAME": "user", "ENV": "dev", "AUTH_MODE": "insecure-dev", "LOG_LEVEL": "error", "DB_PRIMARY_DSN": dsn, "GRPC_ADDR": "127.0.0.1:0", "HTTP_ADDR": "127.0.0.1:0", "SHUTDOWN_DELAY": "0s", "SHUTDOWN_TIMEOUT": "5s", "PHONE_PROVIDER": provider} {
 		t.Setenv(k, v)
 	}
+	addr := ""
+	if provider == "zvonok" {
+		lis, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		addr = lis.Addr().String()
+		_ = lis.Close()
+		t.Setenv("ZVONOK_CALLBACK_ADDR", addr)
+		t.Setenv("ZVONOK_PUBLIC_KEY", "fake-test-key")
+		t.Setenv("ZVONOK_CAMPAIGN_ID", "123")
+	}
 	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
 	errc := make(chan error, 1)
 	go func() { errc <- runServe(ctx) }()
-	// No port to probe (":0"), so give the readiness check its first round, then stop.
-	time.AfterFunc(500*time.Millisecond, cancel)
+	if provider == "zvonok" {
+		deadline := time.Now().Add(5 * time.Second)
+		ready := false
+		for time.Now().Before(deadline) {
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr+"/callbacks/zvonok?ct_call_id=123", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r, err := http.DefaultClient.Do(req)
+			if err == nil {
+				_ = r.Body.Close()
+				if r.StatusCode != 403 {
+					t.Fatal(r.StatusCode)
+				}
+				ready = true
+				break
+			}
+			select {
+			case err := <-errc:
+				t.Fatal("serve stopped", err)
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+		if !ready {
+			t.Fatal("callback listener did not start")
+		}
+		cancel()
+	} else {
+		time.AfterFunc(500*time.Millisecond, cancel)
+	}
 	select {
 	case err := <-errc:
 		if err != nil {
-			t.Fatalf("serve: %v", err)
+			t.Fatal("serve", err)
 		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("serve did not stop after cancel")
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve did not stop")
 	}
 }
 

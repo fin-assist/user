@@ -52,6 +52,7 @@ type Config struct {
 	Outbox   OutboxConfig
 	Sessions SessionsConfig
 	Phone    PhoneConfig
+	Zvonok   ZvonokConfig
 	Peers    map[string]string // other services: name -> gRPC target, from PEER_<NAME>_ADDR
 	// ShutdownDelay keeps serving after NOT_SERVING so balancers stop sending new calls.
 	ShutdownDelay time.Duration
@@ -170,6 +171,7 @@ func load(getenv func(string) string, readFile func(string) ([]byte, error), env
 		Outbox:          r.outbox(),
 		Sessions:        r.sessions(),
 		Phone:           r.phone(),
+		Zvonok:          r.zvonok(),
 		ShutdownDelay:   r.duration("SHUTDOWN_DELAY"),
 		ShutdownTimeout: r.duration("SHUTDOWN_TIMEOUT"),
 	}
@@ -191,6 +193,9 @@ func load(getenv func(string) string, readFile func(string) ([]byte, error), env
 
 func (c Config) validate() []error {
 	var errs []error
+	if err := c.Zvonok.Validate(c.Env); err != nil {
+		errs = append(errs, err)
+	}
 	if c.Service == "" {
 		errs = append(errs, errors.New("SERVICE_NAME is required"))
 	}

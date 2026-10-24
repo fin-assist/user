@@ -129,3 +129,42 @@ endpoint — два полных имени RPC, outcome — new/replay/conflict
 правилами мониторинга; параметры порога задаются в infra. Детали — [auth.md](auth.md).
 
 `internal/worker`: `worker.Run(ctx, log, jobs...)` — задание с ошибкой или паникой перезапускается через 5 с; `worker.Every(name, interval, log, fn)` — периодическое. Задания работают в каждом поде; единственность — блокировкой или `FOR UPDATE SKIP LOCKED`, как в outbox. Задания возвращает `wire()`.
+
+## Zvonok и номера пула (FIN-139/216)
+
+Секрет public_key уходит в multipart POST confirm, а при документированных GET —
+в query по отдельному решению владельца. Клиент фиксирует HTTPS endpoint, запрещает
+редиректы и удаляет URL/текст ответа из ошибок. Никаких debug-логов HTTP-тел.
+Постбэк вынесен на отдельный listener; query с ct_phone не попадает в логи сервиса.
+Ingress также обязан отключить/маскировать query. Схема и границы — [zvonok.md](zvonok.md).
+
+| Метрика | Значение и ограниченные метки |
+|---|---|
+| `finassist_zvonok_requests_total{operation,outcome}` | phones/calls_by_phone / phones/confirm / phones/call_by_id; ok / rejected / rate_limited / unavailable / capacity_unavailable. ok здесь означает HTTP 200, не подтверждение номера |
+| `finassist_zvonok_request_duration_seconds{operation}` | время операции вместе с ожиданием общего API gate |
+| `finassist_zvonok_postbacks_total{result}` | accepted / foreign_ip / unknown_call / unconfirmed / unavailable / invalid; accepted может быть повтором или поздним событием без изменения |
+| `finassist_phone_provider_checks_total{source,result}` | source postback / fallback; result confirmed / unchanged / mismatch / unconfirmed / unavailable / capacity |
+| `finassist_phone_provider_poll_interval_seconds`, `finassist_phone_provider_poll_capacity`, `finassist_phone_provider_poll_active` | действующие настройки интервала/ёмкости и число заявок в coalescing-карте |
+| `finassist_phone_callback_outcomes_24h{callback_number,outcome}` | gauges заявок, созданных за последние 24 ч: pending / confirmed / expired; публичные номера ограничены 256 значениями на процесс, остальные other |
+| `finassist_phone_callback_overflow_requests_24h` | заявки в other, включая недетализированные группы; рост означает потерю детализации пула |
+
+Личные телефоны, call_id, токены, IP и ключи в метках запрещены. callback_number —
+исключение только для публичных номеров из authenticated allowed_phones_for_call.
+Глобальные rolling gauges читают одну primary: **не суммировать реплики**. Сравнение
+конверсии отдельного номера — confirmed / (confirmed + expired), pending из знаменателя
+исключается. При небольшом числе заявок отношение ещё не показатель качества номера.
+
+Примеры правил для внешнего мониторинга (подключение в infra отдельно):
+
+```promql
+# Provider API quota/rejection: investigate errors and capacity rather than paid retries.
+sum(increase(finassist_zvonok_requests_total{outcome=~"rate_limited|capacity_unavailable"}[5m])) > 0
+# Source-IP refusals and overflow of the fallback coalescing map.
+sum(increase(finassist_zvonok_postbacks_total{result="foreign_ip"}[5m])) > 0
+sum(increase(finassist_phone_provider_checks_total{result="capacity"}[5m])) > 0
+max(finassist_phone_callback_overflow_requests_24h) > 0
+```
+
+Собственный контроль баланса и соответствующие метрики/алерты отложены в
+[FIN-233](https://finassist.youtrack.cloud/issue/FIN-233); пока используются уведомления Zvonok.
+Платные запросы тестами не выполняются. FIN-81 остаётся условием включения prod.

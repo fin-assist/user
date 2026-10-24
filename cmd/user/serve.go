@@ -45,11 +45,28 @@ func runServe(ctx context.Context) error {
 	}
 	readiness := &ops.Readiness{}
 	httpSrv := ops.Server(cfg.HTTP.Addr, ops.Handler(reg, readiness))
+	var callbackSrv *http.Server
+	var callbackLis net.Listener
+	if a.PhoneCallback != nil {
+		callbackLis, err = (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.Zvonok.CallbackAddr)
+		if err != nil {
+			_ = grpcLis.Close()
+			return err
+		}
+		callbackSrv = &http.Server{Handler: a.PhoneCallback, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192}
+	}
 
 	runCtx, stopRun := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopRun()
 	var wg sync.WaitGroup
-	errc := make(chan error, 2)
+	errc := make(chan error, 3)
+	if callbackSrv != nil {
+		wg.Go(func() {
+			if err := callbackSrv.Serve(callbackLis); !errors.Is(err, http.ErrServerClosed) {
+				errc <- fmt.Errorf("callback listener: %w", err)
+			}
+		})
+	}
 	wg.Go(func() {
 		if err := srv.Serve(grpcLis); err != nil {
 			errc <- fmt.Errorf("grpc: %w", err)
@@ -76,6 +93,11 @@ func runServe(ctx context.Context) error {
 	srv.Shutdown(shutdownCtx, cfg.ShutdownDelay)
 	stopRun()
 	_ = httpSrv.Shutdown(shutdownCtx)
+	if callbackSrv != nil {
+		if err := callbackSrv.Shutdown(shutdownCtx); err != nil {
+			_ = callbackSrv.Close()
+		}
+	}
 	wg.Wait()
 	return runErr
 }

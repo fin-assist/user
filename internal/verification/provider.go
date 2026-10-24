@@ -68,8 +68,8 @@ type StatusProvider interface {
 }
 
 // NumberSelector runs inside the completion transaction. FIN-216 selects from
-// exactly this response and persists the pool and selection for requestID. No
-// selector or provider is installed in production by FIN-219.
+// exactly this response and persists the pool and selection for requestID. Concrete
+// Zvonok assembly remains guarded from prod until FIN-81.
 type NumberSelector interface {
 	Select(context.Context, int32, []string) (string, error)
 }

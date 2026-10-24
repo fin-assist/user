@@ -10,6 +10,7 @@ import (
 
 	"github.com/fin-assist/user/internal/adapter/postgres"
 	"github.com/fin-assist/user/internal/adapter/verificationcrypto"
+	"github.com/fin-assist/user/internal/adapter/zvonok"
 	"github.com/fin-assist/user/internal/config"
 	"github.com/fin-assist/user/internal/token"
 	"github.com/fin-assist/user/internal/verification"
@@ -52,5 +53,46 @@ func wirePhone(ctx context.Context, a *App, reg prometheus.Registerer) ([]worker
 			}
 		}
 	})
-	return []worker.Job{{Name: "phone-notifications", Run: notifications.Run}, cleanup}, notifications.Close, nil
+	jobs := []worker.Job{{Name: "phone-notifications", Run: notifications.Run}, cleanup}
+	closeBackend := func() {}
+	if a.Cfg.Zvonok.Provider == "zvonok" {
+		fail := func(err error) ([]worker.Job, func(), error) {
+			closeBackend()
+			notifications.Close()
+			return nil, nil, err
+		}
+		if err := a.Cfg.Zvonok.Validate(a.Cfg.Env); err != nil {
+			return fail(err)
+		}
+		if a.phoneProvider != nil || a.phoneSelector != nil {
+			return fail(errors.New("phone: multiple configured backends"))
+		}
+		provider, err := zvonok.New(a.Cfg.Zvonok.PublicKey, a.Cfg.Zvonok.CampaignID, postgres.NewZvonokGate(a.DB, a.Cfg.Zvonok.PublicKey), a.zvonokTransport, reg)
+		if err != nil {
+			return fail(err)
+		}
+		closeBackend = provider.Close
+		repo := postgres.NewVerifications(a.DB)
+		numbers, err := verification.NewNumbers(repo, a.Log, reg)
+		if err != nil {
+			return fail(err)
+		}
+		checker, err := verification.NewChecker(provider.Name(), provider, repo, a.Verifications, a.Cfg.Zvonok.PollInterval, a.Cfg.Phone.MaxStreams, reg)
+		if err != nil {
+			return fail(err)
+		}
+		handler, err := zvonok.NewPostback(checker, a.Cfg.Zvonok.TrustedProxies, reg)
+		if err != nil {
+			return fail(err)
+		}
+		a.phoneProvider, a.phoneSelector = provider, numbers
+		a.PhoneCallback = handler
+		a.Verifications.SetStatusChecker(checker)
+		jobs = append(jobs, worker.Every("phone-callback-outcomes", time.Minute, a.Log, func(ctx context.Context) error {
+			ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			return numbers.Report(ctx)
+		}))
+	}
+	return jobs, func() { closeBackend(); notifications.Close() }, nil
 }
