@@ -109,7 +109,8 @@ class ReleasePublicationTests(unittest.TestCase):
 
 
 class ReleaseValidationTests(unittest.TestCase):
-    def validate_and_publish(self, *, off_main=False, changelog_tag='v0.1.1', tag='v0.1.1', with_module=True):
+    def validate_and_publish(self, *, off_main=False, changelog_tag='v0.1.1', tag='v0.1.1', with_module=True,
+                             bad_format=None):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
 
@@ -130,9 +131,16 @@ class ReleaseValidationTests(unittest.TestCase):
             git('commit', '-m', 'Initial main')
             if off_main:
                 git('checkout', '-b', 'unmerged')
-            (root / 'CHANGELOG.md').write_text(
+            changelog = (
                 '# Changelog\n\n## [Unreleased]\n\n'
                 f'## [{changelog_tag}] — 2026-10-24\n\n### Исправлено\n\n- Tagged notes.\n')
+            if bad_format == 'date':
+                changelog = changelog.replace('2026-10-24', 'unknown')
+            elif bad_format == 'empty':
+                changelog = changelog.replace('### Исправлено\n\n- Tagged notes.\n', '')
+            elif bad_format == 'duplicate':
+                changelog += f'\n## [{changelog_tag}] — 2026-10-24\n\n- Duplicate.\n'
+            (root / 'CHANGELOG.md').write_text(changelog)
             git('add', '.')
             git('commit', '-m', 'Prepare tagged release')
             git('tag', tag)
@@ -175,6 +183,14 @@ class ReleaseValidationTests(unittest.TestCase):
                 self.assertIn(expected, result.stdout)
                 self.assertFalse(published, 'Invalid tags must never reach the GitHub release step')
 
+    def test_matching_version_with_invalid_changelog_never_reaches_publication(self):
+        for malformed in ('date', 'empty', 'duplicate'):
+            with self.subTest(malformed=malformed):
+                result, published, _ = self.validate_and_publish(bad_format=malformed)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('CHANGELOG.md:', result.stderr)
+                self.assertFalse(published)
+
     def test_service_major_does_not_require_a_go_module_suffix(self):
         result, published, _ = self.validate_and_publish(tag='v2.1.1', changelog_tag='v2.1.1')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -190,3 +206,20 @@ class ReleaseValidationTests(unittest.TestCase):
         self.assertIn('  workflow_dispatch:\n', workflow)
         self.assertIn("if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'", workflow)
         self.assertIn('ref: refs/tags/${{ inputs.tag || github.ref_name }}', workflow)
+
+
+class ReleaseCheckTests(unittest.TestCase):
+    def test_pre_tag_check_accepts_only_the_prepared_version(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'scripts').mkdir()
+            (root / 'scripts/changelog.py').write_text((ROOT / 'scripts/changelog.py').read_text())
+            (root / 'CHANGELOG.md').write_text(
+                '# Changelog\n\n## [Unreleased]\n\n## [v2.1.1] — 2026-10-24\n\n- Prepared.\n')
+            env = dict(os.environ, PATH=str(Path(sys.executable).parent) + os.pathsep + os.environ['PATH'])
+            for version, expected_success in (('v2.1.1', True), ('v2.1.2', False), ('', False)):
+                with self.subTest(version=version):
+                    result = subprocess.run(['make', '-f', str(ROOT / 'Makefile'), 'release-check',
+                                             'VERSION=' + version], cwd=root, env=env,
+                                            capture_output=True, text=True, timeout=10)
+                    self.assertEqual(result.returncode == 0, expected_success, result.stdout + result.stderr)
