@@ -92,7 +92,7 @@ func (p *zvonokHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.adds++
-	if p.mode == "reject" {
+	if p.mode == "reject" || (p.mode == "lost-reject" && p.adds > 1) {
 		w.WriteHeader(429)
 		return
 	}
@@ -103,7 +103,7 @@ func (p *zvonokHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		c = zvonokCall{ID: p.next, Phone: phone, Created: time.Now().UTC(), State: "in_process", Numbers: []string{"+74951234567", "+74957654321"}, Balance: "100.29"}
 		p.calls[phone] = c
 	}
-	if (p.mode == "lost" || p.mode == "lost-unavailable") && p.adds == 1 {
+	if (p.mode == "lost" || p.mode == "lost-unavailable" || p.mode == "lost-reject") && p.adds == 1 {
 		conn, _, err := w.(http.Hijacker).Hijack()
 		if err == nil {
 			_ = conn.Close()
@@ -204,7 +204,13 @@ func TestZvonokAPIStartRecoveryPoolAndIdempotentReplay(t *testing.T) {
 }
 
 func TestZvonokAPIUnknownOutcomeKeepsOwnAttemptAndRejectsForeignCall(t *testing.T) {
-	env, p := zvonokEnv(t, "lost-unavailable")
+	for _, mode := range []string{"lost-unavailable", "lost-reject"} {
+		t.Run(mode, func(t *testing.T) { unknownZvonokOutcome(t, mode) })
+	}
+}
+func unknownZvonokOutcome(t *testing.T, mode string) {
+	t.Helper()
+	env, p := zvonokEnv(t, mode)
 	key, phone := authKey(), "+79991234567"
 	if out, err := startCall(t, env, key, phone); err == nil || out != nil {
 		t.Fatal(out, err)

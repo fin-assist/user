@@ -219,3 +219,20 @@ func TestMalformedCallIDsAndGateCancellation(t *testing.T) {
 		t.Fatal("gate ignored")
 	}
 }
+
+func TestRecoveryRefusalCannotRefundPreviouslyAcceptedCall(t *testing.T) {
+	for _, status := range []int{400, 429} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			c := client(t, func(r *http.Request) (*http.Response, error) {
+				if r.Method == "GET" {
+					return reply(200, "["+remote("1", attempt().CreatedAt, "in_process")+"]"), nil
+				}
+				return reply(status, `{"status":"error","data":"recovery refused"}`), nil
+			})
+			_, err := c.Recover(t.Context(), attempt())
+			if !errors.Is(err, errUnavailable) || errors.Is(err, verification.ErrProviderRejected) {
+				t.Fatal(err)
+			}
+		})
+	}
+}

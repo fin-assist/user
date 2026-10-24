@@ -3,6 +3,7 @@ package zvonok
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"net/url"
@@ -73,7 +74,16 @@ func (c *Client) Create(ctx context.Context, a verification.Attempt) (verificati
 
 // Recover first establishes ownership from the durable attempt's call ID or its
 // creation interval. Unknown statuses and foreign calls never permit a write.
-func (c *Client) Recover(ctx context.Context, a verification.Attempt) (verification.Call, error) {
+func (c *Client) Recover(ctx context.Context, a verification.Attempt) (out verification.Call, err error) {
+	// A refusal of a recovery POST says nothing about the original uncertain
+	// write. The original call may still exist: only a fresh Create can authorize
+	// refunding its reservation after a definitive rejection.
+	defer func() {
+		if errors.Is(err, verification.ErrProviderRejected) {
+			err = errUnavailable
+		}
+	}()
+
 	operation := "phones/calls_by_phone"
 	values := c.phoneHistory(a)
 	if a.CallID != "" {
