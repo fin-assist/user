@@ -2,6 +2,7 @@ package apitest_test
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -9,8 +10,10 @@ import (
 	userv1 "github.com/fin-assist/contracts/gen/go/finassist/user/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/fin-assist/user/internal/app/apitest"
+	"github.com/fin-assist/user/internal/token"
 )
 
 func TestAPIRegistrationConstraintRefusalsRollBackEveryEffect(t *testing.T) {
@@ -144,5 +147,152 @@ func TestAPIDedicatedAuthTransactionKeepsConfirmationEventsAndMetrics(t *testing
 	}
 	if _, err = userv1.NewProfileServiceClient(env.Conn).DeleteAccount(apitest.User(t.Context(), registered.GetUserId()), &userv1.DeleteAccountRequest{}); err != nil {
 		t.Fatal("tombstone/delete after auth effects", err)
+	}
+}
+
+func TestAPIGrantConsentDeferredCommitPreservesProfileAndHistory(t *testing.T) {
+	for _, constraint := range []string{"user_consent_document_fkey", "unexpected_grant_document_fkey"} {
+		t.Run(constraint, func(t *testing.T) {
+			env := apitest.Start(t)
+			seedProfiles(t, env)
+			client := userv1.NewProfileServiceClient(env.Conn)
+			ctx := apitest.User(t.Context(), profileUserA)
+			_, err := env.App.DB.Primary().Exec(t.Context(), `INSERT INTO consent_document(type,version,title,url,is_current) VALUES('assistant','v1','Old consent','https://example.test/old',false)`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = env.App.DB.Primary().Exec(t.Context(), `INSERT INTO user_consent(user_id,type,version,granted_at) VALUES($1,'assistant','v1',now()-interval '1 day')`, profileUserA)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, err := client.GetProfile(ctx, &userv1.GetProfileRequest{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			counts := apiTransactionCounts(t, env)
+			// The visible current document remains v2. Only the test FK catalog omits it.
+			_, err = env.App.DB.Primary().Exec(t.Context(), `CREATE TABLE test_document(type text,version text,PRIMARY KEY(type,version));
+ INSERT INTO test_document VALUES('assistant','v1');
+ ALTER TABLE user_consent DROP CONSTRAINT user_consent_document_fkey`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = env.App.DB.Primary().Exec(t.Context(), `ALTER TABLE user_consent ADD CONSTRAINT `+constraint+` FOREIGN KEY(type,version) REFERENCES test_document(type,version) DEFERRABLE INITIALLY DEFERRED`); err != nil {
+				t.Fatal(err)
+			}
+			_, err = client.GrantAssistantConsent(ctx, &userv1.GrantAssistantConsentRequest{Version: "v2"})
+			wantCode, wantReason := codes.FailedPrecondition, "CONSENT_OUTDATED"
+			if constraint != "user_consent_document_fkey" {
+				wantCode, wantReason = codes.Internal, ""
+			}
+			requireAPIConstraintRefusal(t, err, wantCode, wantReason, profileUserA, "test_document")
+			after, err := client.GetProfile(ctx, &userv1.GetProfileRequest{})
+			if err != nil || !proto.Equal(before, after) {
+				t.Fatal("failed grant changed profile", before, after, err)
+			}
+			if got := apiTransactionCounts(t, env); !reflect.DeepEqual(got, counts) {
+				t.Fatal("failed grant left effects", counts, got)
+			}
+			var version string
+			var revoked bool
+			if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT version,revoked_at IS NOT NULL FROM user_consent WHERE user_id=$1`, profileUserA).Scan(&version, &revoked); err != nil || version != "v1" || revoked {
+				t.Fatal("old consent revocation was not rolled back", version, revoked, err)
+			}
+			if _, err := env.App.DB.Primary().Exec(t.Context(), `INSERT INTO test_document VALUES('assistant','v2')`); err != nil {
+				t.Fatal(err)
+			}
+			granted, err := client.GrantAssistantConsent(ctx, &userv1.GrantAssistantConsentRequest{Version: "v2"})
+			if err != nil || !granted.GetProfile().GetAssistantConsent().GetGranted() || granted.GetProfile().GetAssistantConsent().GetVersion() != "v2" {
+				t.Fatal("grant retry after repair", granted, err)
+			}
+		})
+	}
+}
+
+func TestAPIRefreshDeferredCommitPreservesChainAndIdempotency(t *testing.T) {
+	for _, constraint := range []string{"phone_verification_user_fkey", "unexpected_refresh_user_fkey"} {
+		t.Run(constraint, func(t *testing.T) {
+			env := apitest.Start(t)
+			seedDocuments(t, env)
+			registered, _ := registerAPI(t, env, "refresh-commit-registration", "+79008887777")
+			var verification int32
+			if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT phone_verification_id FROM auth_session WHERE user_id=$1`, registered.GetUserId()).Scan(&verification); err != nil {
+				t.Fatal(err)
+			}
+			// Restore a verification result that has not yet been consumed.
+			// Refresh's actual CloseVerification statement assigns user_id and queues the FK.
+			_, err := env.App.DB.Primary().Exec(t.Context(), `UPDATE phone_verification SET user_id=NULL,closed_at=NULL WHERE id=$1`, verification)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = env.App.DB.Primary().Exec(t.Context(), `CREATE TABLE test_verification_user(id uuid PRIMARY KEY);
+ ALTER TABLE phone_verification DROP CONSTRAINT phone_verification_user_fkey`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = env.App.DB.Primary().Exec(t.Context(), `ALTER TABLE phone_verification ADD CONSTRAINT `+constraint+` FOREIGN KEY(user_id) REFERENCES test_verification_user(id) DEFERRABLE INITIALLY DEFERRED`); err != nil {
+				t.Fatal(err)
+			}
+			before := apiTransactionCounts(t, env)
+			client := userv1.NewAuthServiceClient(env.Conn)
+			original := registered.GetTokens().GetRefreshToken()
+			key := authKey()
+			request := &userv1.RefreshTokensRequest{RefreshToken: original}
+			_, err = client.RefreshTokens(authContext(t.Context(), key), request)
+			wantCode, wantReason := codes.Unauthenticated, "INVALID_TOKEN"
+			if constraint != "phone_verification_user_fkey" {
+				wantCode, wantReason = codes.Internal, ""
+			}
+			requireAPIConstraintRefusal(t, err, wantCode, wantReason, original, registered.GetUserId(), "test_verification_user")
+			if got := apiTransactionCounts(t, env); !reflect.DeepEqual(got, before) {
+				t.Fatal("failed refresh left effects", before, got)
+			}
+			hash := token.Sum(original)
+			var generation int32
+			var rotated bool
+			if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT generation,rotated_at IS NOT NULL FROM refresh_token WHERE token_hash=$1`, hash[:]).Scan(&generation, &rotated); err != nil || generation != 1 || rotated {
+				t.Fatal("old refresh link consumed", generation, rotated, err)
+			}
+			var owner *string
+			var closed bool
+			if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT user_id::text,closed_at IS NOT NULL FROM phone_verification WHERE id=$1`, verification).Scan(&owner, &closed); err != nil || owner != nil || closed {
+				t.Fatal("verification consumption was not rolled back", owner, closed, err)
+			}
+			if _, err := env.App.DB.Primary().Exec(t.Context(), `INSERT INTO test_verification_user VALUES($1)`, registered.GetUserId()); err != nil {
+				t.Fatal(err)
+			}
+			refreshed, err := client.RefreshTokens(authContext(t.Context(), key), request)
+			if err != nil || refreshed.GetTokens().GetRefreshToken() == "" || refreshed.GetTokens().GetRefreshToken() == original {
+				t.Fatal("refresh retry after repair", refreshed, err)
+			}
+		})
+	}
+}
+
+func apiTransactionCounts(t *testing.T, env *apitest.Env) map[string]int {
+	t.Helper()
+	counts := map[string]int{}
+	for _, table := range []string{"app_user", "auth_session", "refresh_token", "user_consent", "outbox_events", "idempotency_keys"} {
+		var n int
+		if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT count(*) FROM `+table).Scan(&n); err != nil {
+			t.Fatal(table, err)
+		}
+		counts[table] = n
+	}
+	return counts
+}
+
+func requireAPIConstraintRefusal(t *testing.T, err error, code codes.Code, reason string, private ...string) {
+	t.Helper()
+	if err == nil || status.Code(err) != code || apitest.Reason(err) != reason {
+		t.Fatal("wrong constraint refusal", code, reason, err)
+	}
+	if code == codes.Internal && (status.Convert(err).Message() != codes.Internal.String() || len(status.Convert(err).Details()) != 0) {
+		t.Fatal("internal refusal is not bare", err)
+	}
+	for _, value := range private {
+		if strings.Contains(err.Error(), value) {
+			t.Fatal("constraint refusal leaked private state", err)
+		}
 	}
 }
