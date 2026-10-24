@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -282,6 +283,33 @@ func TestStartRejectDuplicateAndBusy(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestStartLostRejectionCannotCompensateAnotherReservation(t *testing.T) {
+	f := startFixture(t)
+	var before StartRecord
+	f.provider.create = func(context.Context, Attempt) (Call, error) {
+		// The initial claim is committed; another caller now owns the library
+		// reservation. A stale provider refusal must leave this attempt intact.
+		before = *f.repo.record
+		before.Windows = slices.Clone(before.Windows)
+		f.engine.current = false
+		return Call{}, ErrProviderRejected
+	}
+	out, err := f.run(t.Context())
+	if f.counters.refunds != 0 || f.repo.rejected != 0 {
+		t.Fatal("stale rejection compensated another reservation", f.counters.refunds, f.repo.rejected)
+	}
+	if f.repo.record == nil || !reflect.DeepEqual(*f.repo.record, before) || before.Key != f.key.Key {
+		t.Fatal("stale rejection changed the durable attempt")
+	}
+	if !slices.Equal(f.counters.hits, []int{1, 1, 1, 1}) || f.repo.completed != 0 {
+		t.Fatal("stale rejection changed committed limits or completed the request")
+	}
+	if reason(err) != "REQUEST_IN_PROGRESS" || out != (Started{}) {
+		t.Fatal(out, err)
+	}
+}
+
 func TestStartErrorBranches(t *testing.T) {
 	for name, mutate := range map[string]func(*startFixtureData){
 		"reserve":       func(f *startFixtureData) { f.engine.reserveErr = errDependency },

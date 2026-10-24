@@ -4,7 +4,8 @@
 
 Исходная схема принята владельцем по ревью PR #2. Дополнение FIN-219 —
 [`000002_phone_start.up.sql`](../migrations/000002_phone_start.up.sql): данные попытки
-в существующей заявке; решение владельца 24.10.2026, FIN-230.
+в существующей заявке; [`000003_phone_start_key_index.up.sql`](../migrations/000003_phone_start_key_index.up.sql)
+создаёт частичный UNIQUE CONCURRENTLY. Решение владельца 24.10.2026, FIN-230.
 Ниже аргументы и инварианты; исходные вопросы в конце закрыты 19.10.2026.
 
 **Решение владельца 19.10.2026 (ревью PR #2):** в БД нет правил валидации и логики. В схеме — только `PRIMARY KEY`, `UNIQUE` (в том числе частичные уникальные индексы), `FOREIGN KEY` с каскадами, `NOT NULL` и `DEFAULT` (в том числе `uuidv7()`, `now()`). Нет `CHECK`, `EXCLUDE`, триггеров и функций; форматы, диапазоны, согласованность состояний и уведомления — код сервиса (раздел «Инварианты в коде сервиса»). `TestSchemaHasNoRulesOrLogic` не даёт новой миграции вернуть их незаметно.
@@ -107,7 +108,8 @@
 
 ### Данные создания в `phone_verification` (FIN-219 / FIN-230)
 
-Отдельная таблица создания не нужна. Миграция 000002 расширяет заявку:
+Отдельная таблица создания не нужна. Миграция 000002 расширяет заявку,
+000003 отдельно создаёт частичный уникальный индекс CONCURRENTLY:
 
 | Столбец | Назначение |
 | --- | --- |
@@ -254,7 +256,7 @@ TestProfilesConsentHistoryAndVersionSwitch, TestProfilesRollbackConcurrencyAndDe
 | 12 | Документ согласия: `url` — `https://`, не длиннее 2000; `title` — от 1 до 500 символов; формат `type` и `version`; у каждого типа, который читает сервис, есть ровно одна текущая версия (схема держит «не больше одной») | документы приходят только миграцией данных; тест миграций данных проверяет все строки `consent_document` (появится с первой версией документа) |
 | 13 | Звено refresh: `generation > 0`, `expires_at > issued_at`, `rotated_at ≥ issued_at` | звенья пишет только сценарий выдачи (`generation = 1`) и ротации (`generation + 1`, время из часов) |
 | 14 | `provider`, `result_key_id`, `scope` лимита — известные значения | константы в коде; `provider` — имя реализации интерфейса провайдера, `scope` — из конфигурации лимитов |
-| 15 | Счётчик лимита: `hits ≥ 0`, `window_end > window_start`, `subject` ≤ 64 | Lock вставляет 0, Check атомарно увеличивает все окна; Refund уменьшает только существующие исходные окна с hits>0; время вычисляет limiter, компенсация fenced библиотекой |
+| 15 | Счётчик лимита: `hits ≥ 0`, `window_end > window_start`, `subject` ≤ 64 | Lock вставляет 0, Check атомарно увеличивает все окна; Refund уменьшает только существующие исходные окна с hits>0; время вычисляет limiter, компенсация fenced библиотекой. TestStartLostRejectionCannotCompensateAnotherReservation доказывает отсутствие Refund/Reject и сохранность попытки при потере fence |
 | 16 | `provider_call_id` — 1…128 байт. Недоверенный ввод провайдера | validateCall отклоняет пустой/длинный ID с INTERNAL без ПДн и частичного завершения; общий Confirm проверяет Proof отдельно; неверный ответ не превращается в ErrProviderDuplicate и не даёт компенсацию неопределённого внешнего эффекта |
 | 17 | Принадлежность восстановления, request_hash32, windows — массив из 4 или 0 элементов | Starter сравнивает свой ключ/хеш; decodeStartRecord проверяет сохранённые start_request_hash/start_reserved_windows (TestDecodeStartRecordWithoutDatabase и PG corruption); Refund проверяет четыре фиксированных scope/порядок/границы; busy не даёт владения чужой попыткой; unit/PG/API-тесты |
 | 18 | Завершение не воскрешает удалённую/изменённую попытку | DoReserved fencing + Complete CAS по id/provider/placeholder hash/ключу/хешу и исходному pending-состоянию; selector и encrypted replay коммитятся вместе; тесты rollback/конкуренции с Delete |
