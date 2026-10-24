@@ -211,11 +211,13 @@ Priorities when they pull apart, in this order:
 - Identity: the user of a user call is `reqctx.UserID(ctx)` (the verified `sub`), never a request field; a system
   call takes `user_id` from the request. Every new method gets its row in `AccessPolicy()`, copied from
   grpc-api.md 3.3; the server does not start without it.
-- **SQL construction:** use [Squirrel](https://github.com/Masterminds/squirrel)
-  (`github.com/Masterminds/squirrel`) instead of assembling SQL by concatenating Go strings wherever the builder
-  supports the query. This is an approved exception to "standard library first". Pass values as query arguments,
-  use `PlaceholderFormat(sq.Dollar)` for PostgreSQL, and keep table and column names constant. If the builder
-  cannot express the query, explain the limitation next to the manual SQL construction and keep it parameterized.
+- **SQL construction:** write fixed-structure queries as plain SQL with parameters (`$1`, `$2`, … for
+  PostgreSQL). Use [Squirrel](https://github.com/Masterminds/squirrel) (`github.com/Masterminds/squirrel`) only
+  when assembling a query dynamically, such as optional predicates or varying column lists. Changing argument
+  values alone does not make a query dynamic. This limited use is an approved exception to "standard library
+  first". Parameterize values; keep identifiers and structural fragments constant or from an explicit allowlist.
+  Use `PlaceholderFormat(sq.Dollar)` for PostgreSQL builders. If a dynamic query cannot be expressed by the
+  builder, explain the limitation beside its manual construction and preserve parameterization.
 - Database: SQL with parameters only (`$1`), table and column names are constants. A usecase opens the transaction
   with `db.Run`; repositories take `db.Writer(ctx)` / `db.Reader(ctx)`; no calls to other services inside `Run`.
   Migrations follow `docs/migrations.md` (two releases for an incompatible change, `CONCURRENTLY` alone in a file).

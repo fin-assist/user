@@ -5,8 +5,6 @@ import (
 	"errors"
 	"time"
 
-	sq "github.com/Masterminds/squirrel"
-
 	"github.com/fin-assist/user/internal/verification"
 )
 
@@ -16,11 +14,9 @@ func (r *Verifications) SavePool(ctx context.Context, id int32, pool []string, s
 	if _, ok := Tx(ctx); !ok {
 		return errVerificationTx
 	}
-	q, args, err := sq.Update("phone_verification").Set("allowed_phones_for_call", pool).Set("callback_number", selected).Where(sq.Eq{"id": id, "callback_number": nil}).Where("provider_call_id IS NOT NULL").PlaceholderFormat(sq.Dollar).ToSql()
-	if err != nil {
-		return err
-	}
-	tag, err := r.db.Writer(ctx).Exec(ctx, q, args...)
+	tag, err := r.db.Writer(ctx).Exec(ctx, `UPDATE phone_verification
+		SET allowed_phones_for_call=$1, callback_number=$2
+		WHERE id=$3 AND callback_number IS NULL AND provider_call_id IS NOT NULL`, pool, selected, id)
 	if err != nil {
 		return errors.New("verification: save callback pool failed")
 	}
@@ -30,17 +26,21 @@ func (r *Verifications) SavePool(ctx context.Context, id int32, pool []string, s
 	return nil
 }
 
-const poolOutcome = "CASE WHEN verified_at IS NOT NULL THEN 'confirmed' WHEN expires_at<=CURRENT_TIMESTAMP THEN 'expired' ELSE 'pending' END"
-
 // PoolOutcomes bounds detail rows to 1024 while retaining exact totals for all
 // requests, so rotating pools cannot grow metrics or Go memory without a limit.
 func (r *Verifications) PoolOutcomes(ctx context.Context, since time.Time) ([]verification.PoolOutcome, map[string]int64, error) {
-	source := sq.Select("callback_number", poolOutcome+" AS outcome").From("phone_verification").Where(sq.GtOrEq{"created_at": since}).Where("callback_number IS NOT NULL")
-	q, args, err := sq.Select("callback_number", "outcome", "count(*)").FromSelect(source, "outcomes").GroupBy("GROUPING SETS ((callback_number,outcome), (outcome))").OrderBy("callback_number IS NOT NULL", "count(*) DESC", "callback_number", "outcome").Limit(1027).PlaceholderFormat(sq.Dollar).ToSql()
-	if err != nil {
-		return nil, nil, err
-	}
-	rows, err := r.db.Writer(ctx).Query(ctx, q, args...)
+	rows, err := r.db.Writer(ctx).Query(ctx, `SELECT callback_number, outcome, count(*)
+		FROM (
+			SELECT callback_number,
+				CASE WHEN verified_at IS NOT NULL THEN 'confirmed'
+					WHEN expires_at<=CURRENT_TIMESTAMP THEN 'expired'
+					ELSE 'pending' END AS outcome
+			FROM phone_verification
+			WHERE created_at >= $1 AND callback_number IS NOT NULL
+		) AS outcomes
+		GROUP BY GROUPING SETS ((callback_number,outcome), (outcome))
+		ORDER BY callback_number IS NOT NULL, count(*) DESC, callback_number, outcome
+		LIMIT 1027`, since)
 	if err != nil {
 		return nil, nil, errors.New("verification: read callback outcomes failed")
 	}
