@@ -13,52 +13,58 @@ import (
 	"github.com/fin-assist/user/internal/app/apitest"
 )
 
-func TestAPIRegistrationDeferredCommitMapsAndRollsBackEveryEffect(t *testing.T) {
-	for _, constraint := range []string{"user_consent_document_fkey", "unexpected_document_fkey"} {
-		t.Run(constraint, func(t *testing.T) {
-			env := apitest.Start(t)
-			seedDocuments(t, env)
-			// Test-only fault injection: keep the visible current document, while a deferred
-			// FK checks another catalog. The production schema/migrations are unchanged.
-			_, err := env.App.DB.Primary().Exec(t.Context(), `CREATE TABLE test_document(type text,version text,PRIMARY KEY(type,version));
+func TestAPIRegistrationConstraintRefusalsRollBackEveryEffect(t *testing.T) {
+	for _, timing := range []struct{ name, clause string }{
+		{"immediate", "NOT DEFERRABLE"},
+		{"deferred", "DEFERRABLE INITIALLY DEFERRED"},
+	} {
+		for _, constraint := range []string{"user_consent_document_fkey", "unexpected_document_fkey"} {
+			t.Run(timing.name+"/"+constraint, func(t *testing.T) {
+				env := apitest.Start(t)
+				seedDocuments(t, env)
+				// Test-only fault injection: keep the visible current document, while the
+				// FK checks another catalog. Immediate checks fail inside engine.Do; deferred
+				// checks fail at outer COMMIT. The production schema/migrations are unchanged.
+				_, err := env.App.DB.Primary().Exec(t.Context(), `CREATE TABLE test_document(type text,version text,PRIMARY KEY(type,version));
  ALTER TABLE user_consent DROP CONSTRAINT user_consent_document_fkey;`)
-			if err != nil {
-				t.Fatal(err)
-			}
-			sql := `ALTER TABLE user_consent ADD CONSTRAINT ` + constraint + ` FOREIGN KEY(type,version) REFERENCES test_document(type,version) DEFERRABLE INITIALLY DEFERRED`
-			if _, err = env.App.DB.Primary().Exec(t.Context(), sql); err != nil {
-				t.Fatal(err)
-			}
-			raw, key := "deferred-registration", authKey()
-			id := seedRegistration(t, env, raw, "+79008887766", time.Now().UTC().Add(-time.Minute))
-			client := userv1.NewAuthServiceClient(env.Conn)
-			_, err = client.Register(authContext(t.Context(), key), registrationRequest(raw))
-			want := "CONSENT_OUTDATED"
-			if constraint != "user_consent_document_fkey" {
-				want = ""
-			}
-			if err == nil || apitest.Reason(err) != want || (want == "" && (status.Code(err) != codes.Internal || status.Convert(err).Message() != codes.Internal.String())) || strings.Contains(err.Error(), "79008887766") || strings.Contains(err.Error(), "test_document") {
-				t.Fatal("unsafe/wrong commit refusal", err)
-			}
-			for _, table := range []string{"app_user", "auth_session", "refresh_token", "user_consent", "outbox_events", "idempotency_keys"} {
-				var n int
-				if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT count(*) FROM `+table).Scan(&n); err != nil || n != 0 {
-					t.Fatal("partial transaction", table, n, err)
+				if err != nil {
+					t.Fatal(err)
 				}
-			}
-			var closed bool
-			if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT closed_at IS NOT NULL FROM phone_verification WHERE id=$1`, id).Scan(&closed); err != nil || closed {
-				t.Fatal("registration result consumed", closed, err)
-			}
-			// The same idempotency key can succeed once the deferred reference is repaired.
-			if _, err = env.App.DB.Primary().Exec(t.Context(), `INSERT INTO test_document VALUES('personal_data','v1')`); err != nil {
-				t.Fatal(err)
-			}
-			out, err := client.Register(authContext(t.Context(), key), registrationRequest(raw))
-			if err != nil || out.GetUserId() == "" {
-				t.Fatal("retry after rollback", out, err)
-			}
-		})
+				sql := `ALTER TABLE user_consent ADD CONSTRAINT ` + constraint + ` FOREIGN KEY(type,version) REFERENCES test_document(type,version) ` + timing.clause
+				if _, err = env.App.DB.Primary().Exec(t.Context(), sql); err != nil {
+					t.Fatal(err)
+				}
+				raw, key := timing.name+"-registration", authKey()
+				id := seedRegistration(t, env, raw, "+79008887766", time.Now().UTC().Add(-time.Minute))
+				client := userv1.NewAuthServiceClient(env.Conn)
+				_, err = client.Register(authContext(t.Context(), key), registrationRequest(raw))
+				want, wantCode := "CONSENT_OUTDATED", codes.FailedPrecondition
+				if constraint != "user_consent_document_fkey" {
+					want, wantCode = "", codes.Internal
+				}
+				if err == nil || status.Code(err) != wantCode || apitest.Reason(err) != want || (want == "" && (status.Code(err) != codes.Internal || status.Convert(err).Message() != codes.Internal.String())) || strings.Contains(err.Error(), "79008887766") || strings.Contains(err.Error(), "test_document") {
+					t.Fatal("unsafe/wrong constraint refusal", err)
+				}
+				for _, table := range []string{"app_user", "auth_session", "refresh_token", "user_consent", "outbox_events", "idempotency_keys"} {
+					var n int
+					if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT count(*) FROM `+table).Scan(&n); err != nil || n != 0 {
+						t.Fatal("partial transaction", table, n, err)
+					}
+				}
+				var closed bool
+				if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT closed_at IS NOT NULL FROM phone_verification WHERE id=$1`, id).Scan(&closed); err != nil || closed {
+					t.Fatal("registration result consumed", closed, err)
+				}
+				// The same idempotency key can succeed once the missing reference is repaired.
+				if _, err = env.App.DB.Primary().Exec(t.Context(), `INSERT INTO test_document VALUES('personal_data','v1')`); err != nil {
+					t.Fatal(err)
+				}
+				out, err := client.Register(authContext(t.Context(), key), registrationRequest(raw))
+				if err != nil || out.GetUserId() == "" {
+					t.Fatal("retry after rollback", out, err)
+				}
+			})
+		}
 	}
 }
 
