@@ -54,7 +54,7 @@ func profileDB(t *testing.T) (*DB, *profile.Service, *Profiles) {
 		t.Fatal(err)
 	}
 	repo := NewProfiles(db)
-	return db, profile.New(db, repo, guard, events.NewEvents(publisher), clock), repo
+	return db, profile.New(NewProfileTransactions(db), repo, guard, events.NewEvents(publisher), clock), repo
 }
 
 func profileReason(err error) string {
@@ -163,12 +163,12 @@ func TestIntegrationProfilesConsentHistoryAndVersionSwitch(t *testing.T) {
 		t.Fatal("foreign grant")
 	}
 	for _, tt := range []struct{ id, version, want string }{{otherProfileID, "missing", "CONSENT_OUTDATED"}, {"019c7714-3b77-74d1-9866-e1f484aae2ad", "v3", "NOT_FOUND"}} {
-		err := db.Run(t.Context(), func(ctx context.Context) error { return repo.Grant(ctx, tt.id, tt.version, time.Now()) })
+		err := profile.GrantError(NewProfileTransactions(db).RunGrant(t.Context(), func(ctx context.Context) error { return repo.Grant(ctx, tt.id, tt.version, time.Now()) }))
 		if profileReason(err) != tt.want {
 			t.Fatalf("foreign key mapping: %v", err)
 		}
 	}
-	if err := db.Run(t.Context(), func(ctx context.Context) error { return repo.Grant(ctx, profileID, "v3", time.Now()) }); !errors.Is(err, profile.ErrConsentConflict) {
+	if err := NewProfileTransactions(db).RunGrant(t.Context(), func(ctx context.Context) error { return repo.Grant(ctx, profileID, "v3", time.Now()) }); !errors.Is(err, profile.ErrConsentConflict) {
 		t.Fatalf("unique mapping: %v", err)
 	}
 }
@@ -185,7 +185,7 @@ func TestIntegrationProfilesRollbackConcurrencyAndDeletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bad := profile.New(db, repo, guard, failedSettings{}, time.Now)
+	bad := profile.New(NewProfileTransactions(db), repo, guard, failedSettings{}, time.Now)
 	zone := "UTC"
 	if _, err := bad.Update(t.Context(), profileID, profile.Patch{Timezone: &zone}); err == nil {
 		t.Fatal("publisher failure hidden")

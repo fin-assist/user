@@ -49,7 +49,7 @@ func TestIntegrationAccountLifecycleUsesOneTransactionForConsentSessionAndEvents
 		t.Fatalf("consumed token reused: %v", err)
 	}
 	checkAccessJWT(t, env, registered.Pair.Access, registered.UserID)
-	profiles := profile.New(env.App.DB, postgres.NewProfiles(env.App.DB), env.App.Tombstones, events, time.Now)
+	profiles := profile.New(postgres.NewProfileTransactions(env.App.DB), postgres.NewProfiles(env.App.DB), env.App.Tombstones, events, time.Now)
 	p, err := profiles.Get(t.Context(), registered.UserID)
 	if err != nil || p.Timezone != "Europe/Moscow" {
 		t.Fatalf("initial profile: %+v %v", p, err)

@@ -40,17 +40,17 @@ func TestIntegrationPhoneAssemblyKeySeparationAndFailureCleanup(t *testing.T) {
 	goodPhone := config.PhoneConfig{ResultKeyFile: phonePath, ResultKeyID: "test", MaxStreams: 2, ResyncInterval: time.Second}
 	a := &App{DB: db, Log: slog.New(slog.DiscardHandler), Tokens: client.DevToken("user"), Cfg: config.Config{Service: "phone-wiring", DB: config.DBConfig{PrimaryDSN: dsn}, Phone: goodPhone, Sessions: config.SessionsConfig{IdempotencyKeyFile: authPath, RefreshTTL: time.Hour, MaxConns: 2}, Outbox: config.OutboxConfig{TimezoneTargets: []string{"assistant"}, DeletionTargets: []string{"bank-statement-data", "analytics", "assistant"}, MaxConns: 6, PollInterval: time.Second}, Peers: map[string]string{"bank-statement-data": "passthrough:///127.0.0.1:1", "analytics": "passthrough:///127.0.0.1:1", "assistant": "passthrough:///127.0.0.1:1"}}}
 	a.Cfg.Phone.ResultKeyFile = "/missing/phone.key"
-	if _, _, err = wirePhone(t.Context(), a, prometheus.NewRegistry()); err == nil {
+	if _, _, err = wirePhone(t.Context(), a, a.DB, a.Tombstones, prometheus.NewRegistry()); err == nil {
 		t.Fatal("missing phone key accepted")
 	}
 	a.Cfg.Phone = goodPhone
 	a.Cfg.Sessions.IdempotencyKeyFile = "/missing/auth.key"
-	if _, _, err = wirePhone(t.Context(), a, prometheus.NewRegistry()); err == nil {
+	if _, _, err = wirePhone(t.Context(), a, a.DB, a.Tombstones, prometheus.NewRegistry()); err == nil {
 		t.Fatal("missing auth key accepted")
 	}
 	a.Cfg.Sessions.IdempotencyKeyFile = authPath
 	a.Cfg.Phone.ResultKeyFile = authPath
-	if _, _, err = wirePhone(t.Context(), a, prometheus.NewRegistry()); err == nil || !strings.Contains(err.Error(), "must differ") {
+	if _, _, err = wirePhone(t.Context(), a, a.DB, a.Tombstones, prometheus.NewRegistry()); err == nil || !strings.Contains(err.Error(), "must differ") {
 		t.Fatal("same AES key accepted", err)
 	}
 	// Different paths with equal material must also be rejected.
@@ -58,7 +58,7 @@ func TestIntegrationPhoneAssemblyKeySeparationAndFailureCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.Cfg.Phone = goodPhone
-	if _, _, err = wirePhone(t.Context(), a, prometheus.NewRegistry()); err == nil || !strings.Contains(err.Error(), "must differ") {
+	if _, _, err = wirePhone(t.Context(), a, a.DB, a.Tombstones, prometheus.NewRegistry()); err == nil || !strings.Contains(err.Error(), "must differ") {
 		t.Fatal("copied key accepted", err)
 	}
 	if err = os.WriteFile(phonePath, bytes.Repeat([]byte{42}, 32), 0o600); err != nil {
@@ -66,7 +66,7 @@ func TestIntegrationPhoneAssemblyKeySeparationAndFailureCleanup(t *testing.T) {
 	}
 	a.Cfg.Env = config.EnvProd
 	prodRegistry := prometheus.NewRegistry()
-	if _, closePhone, err := wirePhone(t.Context(), a, prodRegistry); err != nil {
+	if _, closePhone, err := wirePhone(t.Context(), a, a.DB, a.Tombstones, prodRegistry); err != nil {
 		t.Fatal(err)
 	} else {
 		if changed, err := a.Verifications.Confirm(t.Context(), verification.Proof{Provider: "zvonok", CallID: "prod-call", Phone: "+70000001234"}); changed || !errors.Is(err, verification.ErrProof) {
@@ -77,24 +77,24 @@ func TestIntegrationPhoneAssemblyKeySeparationAndFailureCleanup(t *testing.T) {
 	// Registration failure must also close the listener just opened by assembly.
 	badGuardRegistry := prometheus.NewRegistry()
 	badGuardRegistry.MustRegister(prometheus.NewCounter(prometheus.CounterOpts{Name: "finassist_phone_test_confirmation_rejected_total", Help: "Already registered"}))
-	if _, _, err := wirePhone(t.Context(), a, badGuardRegistry); err == nil {
+	if _, _, err := wirePhone(t.Context(), a, a.DB, a.Tombstones, badGuardRegistry); err == nil {
 		t.Fatal("duplicate prod guard metric accepted")
 	}
 	a.Cfg.Env, a.Cfg.Zvonok.Provider = config.EnvDev, "fake"
 	a.phoneProvider = fakephone.New()
-	if _, _, err := wirePhone(t.Context(), a, prometheus.NewRegistry()); err == nil {
+	if _, _, err := wirePhone(t.Context(), a, a.DB, a.Tombstones, prometheus.NewRegistry()); err == nil {
 		t.Fatal("two backends accepted")
 	}
 	a.phoneProvider = nil
 	fakeRegistry := prometheus.NewRegistry()
 	fakeRegistry.MustRegister(prometheus.NewGauge(prometheus.GaugeOpts{Name: "finassist_phone_callback_outcomes_24h", Help: "Already registered"}))
-	if _, _, err := wirePhone(t.Context(), a, fakeRegistry); err == nil {
+	if _, _, err := wirePhone(t.Context(), a, a.DB, a.Tombstones, fakeRegistry); err == nil {
 		t.Fatal("duplicate number collector accepted")
 	}
 	a.Cfg.Zvonok.Provider = ""
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(prometheus.NewGauge(prometheus.GaugeOpts{Name: "finassist_phone_watch_active_streams", Help: "Already registered"}))
-	if _, _, err = wirePhone(t.Context(), a, reg); err == nil {
+	if _, _, err = wirePhone(t.Context(), a, a.DB, a.Tombstones, reg); err == nil {
 		t.Fatal("duplicate listener collector accepted")
 	}
 	reg = prometheus.NewRegistry()

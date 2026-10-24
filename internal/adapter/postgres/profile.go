@@ -8,7 +8,6 @@ import (
 
 	"github.com/fin-assist/contracts/gen/go/finerr"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/fin-assist/user/internal/profile"
 )
@@ -88,17 +87,6 @@ func (r *Profiles) Grant(ctx context.Context, id, version string, now time.Time)
 	}
 	_, err := tx.Exec(ctx, `INSERT INTO user_consent(user_id,type,version,granted_at) VALUES($1,'assistant',$2,$3)`, id, version, now)
 	if err != nil {
-		var pg *pgconn.PgError
-		if errors.As(err, &pg) {
-			switch pg.ConstraintName {
-			case "user_consent_user_fkey":
-				return finerr.NotFound()
-			case "user_consent_document_fkey":
-				return finerr.ConsentOutdated()
-			case "user_consent_active_key":
-				return profile.ErrConsentConflict
-			}
-		}
 		return fmt.Errorf("grant assistant consent: %w", err)
 	}
 	return nil

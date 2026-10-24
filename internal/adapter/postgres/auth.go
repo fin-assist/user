@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/fin-assist/contracts/gen/go/finerr"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/fin-assist/user/internal/auth"
 	"github.com/fin-assist/user/internal/token"
@@ -201,15 +199,6 @@ func authError(err error) error {
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return auth.ErrMissing
-	}
-	var e *pgconn.PgError
-	if errors.As(err, &e) {
-		switch e.ConstraintName {
-		case "user_consent_document_fkey":
-			return finerr.ConsentOutdated()
-		case "auth_session_user_fkey", "auth_session_phone_verification_fkey", "phone_verification_user_fkey", "user_consent_user_fkey":
-			return auth.ErrMissing
-		}
 	}
 	return fmt.Errorf("auth repository: %w", err)
 }

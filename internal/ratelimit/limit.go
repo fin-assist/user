@@ -104,6 +104,14 @@ type Limiter struct {
 	utilization      *prometheus.HistogramVec
 }
 
+// WithStore creates a limiter for another transaction owner while sharing the immutable
+// rules, clock and concurrency-safe metrics. Assembly supplies a non-nil store.
+func (l *Limiter) WithStore(store CounterStore) *Limiter {
+	bound := *l
+	bound.store = store
+	return &bound
+}
+
 // New validates and copies rules, then registers metrics in the supplied registry.
 func New(rules Rules, store CounterStore, now func() time.Time, reg prometheus.Registerer) (*Limiter, error) {
 	if err := rules.Validate(); err != nil {

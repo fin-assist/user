@@ -19,24 +19,25 @@ func TestUnitDatabaseSelectorsAndNestedTransactionsRetainOwner(t *testing.T) {
 		t.Fatal("wrong pool selection")
 	}
 	tx := &unitTx{}
-	ctx = unitContext(tx)
-	if db.Writer(ctx) != tx || db.Reader(ctx) != tx {
-		t.Fatal("transaction replaced by pool")
-	}
-	if got, ok := db.Tx(ctx); !ok || got != tx {
-		t.Fatal("transaction owner lost")
-	}
-	cause := errors.New("domain failure")
-	called := false
-	if err := db.RunWith(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly}, func(got context.Context) error {
-		called = true
-		if got != ctx {
-			t.Fatal("nested transaction changed context")
+	withUnitTransaction(t, db, tx, func(ctx context.Context) {
+		if db.Writer(ctx) != tx || db.Reader(ctx) != tx {
+			t.Fatal("transaction replaced by pool")
 		}
-		return cause
-	}); !called || !errors.Is(err, cause) {
-		t.Fatal("nested transaction result", called, err)
-	}
+		if got, ok := db.Tx(ctx); !ok || got != tx {
+			t.Fatal("transaction owner lost")
+		}
+		cause := errors.New("domain failure")
+		called := false
+		if err := db.RunWith(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly}, func(got context.Context) error {
+			called = true
+			if got != ctx {
+				t.Fatal("nested transaction changed context")
+			}
+			return cause
+		}); !called || !errors.Is(err, cause) {
+			t.Fatal("nested transaction result", called, err)
+		}
+	})
 }
 
 func TestUnitPoolConfigurationIsLazyAndCancelledOpenFailsWithoutDial(t *testing.T) {

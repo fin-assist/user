@@ -6,9 +6,12 @@ import (
 
 	userv1 "github.com/fin-assist/contracts/gen/go/finassist/user/v1"
 	idempotency "github.com/fin-assist/go-idempotency"
+	outboxlib "github.com/fin-assist/go-outbox"
+	tombstone "github.com/fin-assist/go-tombstone"
 	"github.com/prometheus/client_golang/prometheus"
 
 	authgrpc "github.com/fin-assist/user/internal/adapter/grpc/auth"
+	eventsadapter "github.com/fin-assist/user/internal/adapter/outbox"
 	"github.com/fin-assist/user/internal/adapter/postgres"
 	"github.com/fin-assist/user/internal/auth"
 	"github.com/fin-assist/user/internal/config"
@@ -17,18 +20,18 @@ import (
 	"github.com/fin-assist/user/internal/worker"
 )
 
-func wireSessions(ctx context.Context, a *App, events auth.Events, reg prometheus.Registerer) (worker.Job, func(), error) {
+func wireSessions(ctx context.Context, a *App, reg prometheus.Registerer) ([]worker.Job, func(), error) {
 	key, err := config.LoadSessionKey(a.Cfg.Sessions)
 	if err != nil {
-		return worker.Job{}, nil, err
+		return nil, nil, err
 	}
 	cipher, err := idempotency.NewCipher(key)
 	if err != nil {
-		return worker.Job{}, nil, err
+		return nil, nil, err
 	}
 	pool, err := postgres.Open(ctx, postgres.Options{PrimaryDSN: a.Cfg.DB.PrimaryDSN, MaxConns: a.Cfg.Sessions.MaxConns, AppName: a.Cfg.Service + "-auth"})
 	if err != nil {
-		return worker.Job{}, nil, err
+		return nil, nil, err
 	}
 	engine, err := idempotency.New(pool, idempotency.Options{Clock: time.Now, Cipher: cipher, Registerer: reg, Methods: map[string]idempotency.Policy{
 		userv1.AuthService_StartPhoneVerification_FullMethodName: {Encrypt: true},
@@ -37,19 +40,36 @@ func wireSessions(ctx context.Context, a *App, events auth.Events, reg prometheu
 	}})
 	if err != nil {
 		pool.Close()
-		return worker.Job{}, nil, err
+		return nil, nil, err
 	}
-	repo := postgres.NewAuth(a.DB)
-	sessions := auth.New(pool, repo, a.Tombstones, a.Signing, events, time.Now, token.New, a.Cfg.Sessions.RefreshTTL)
-	starts, err := verification.NewStarter(pool, postgres.NewVerificationStarts(a.DB), engine, a.Limits, repo, a.Tombstones, a.phoneProvider, a.phoneSelector, time.Now, token.New, a.Log, reg)
+	guard, err := tombstone.New(pool, pool.Primary(), time.Now)
 	if err != nil {
 		pool.Close()
-		return worker.Job{}, nil, err
+		return nil, nil, err
+	}
+	publisher, err := outboxlib.NewPublisher(pool, time.Now)
+	if err != nil {
+		pool.Close()
+		return nil, nil, err
+	}
+	events := eventsadapter.NewEvents(publisher)
+	phoneJobs, closePhone, err := wirePhone(ctx, a, pool, guard, reg)
+	if err != nil {
+		pool.Close()
+		return nil, nil, err
+	}
+	closeAll := func() { closePhone(); pool.Close() }
+	repo := postgres.NewAuth(pool)
+	sessions := auth.New(pool, repo, guard, a.Signing, events, time.Now, token.New, a.Cfg.Sessions.RefreshTTL)
+	starts, err := verification.NewStarter(pool, postgres.NewVerificationStarts(pool), engine, a.Limits.WithStore(postgres.NewLimits(pool)), repo, guard, a.phoneProvider, a.phoneSelector, time.Now, token.New, a.Log, reg)
+	if err != nil {
+		closeAll()
+		return nil, nil, err
 	}
 	if a.Cfg.Zvonok.Provider == "fake" {
-		starts.SetImmediateConfirmation(a.Verifications)
+		starts.SetImmediateConfirmation(a.authConfirmation)
 	}
-	authgrpc.Register(a.GRPC.GRPC(), sessions, engine, pool, a.DB, a.Limits, a.Tombstones, a.Verifications, starts)
+	authgrpc.Register(a.GRPC.GRPC(), sessions, engine, postgres.NewSessionTransactions(pool), a.DB, a.Limits, guard, a.Verifications, starts)
 	cleanup := worker.Every("auth-cleanup", time.Minute, a.Log, func(ctx context.Context) error {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
@@ -73,5 +93,5 @@ func wireSessions(ctx context.Context, a *App, events auth.Events, reg prometheu
 			}
 		}
 	})
-	return cleanup, pool.Close, nil
+	return append(phoneJobs, cleanup), closeAll, nil
 }

@@ -8,6 +8,7 @@ import (
 	userv1 "github.com/fin-assist/contracts/gen/go/finassist/user/v1"
 	idempotency "github.com/fin-assist/go-idempotency"
 	outboxlib "github.com/fin-assist/go-outbox"
+	tombstone "github.com/fin-assist/go-tombstone"
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -45,9 +46,8 @@ func TestIntegrationHandlersCommitCachedSessionsAndSettingsAtomically(t *testing
 		t.Fatal(err)
 	}
 	events := outbox.NewEvents(publisher)
-	profiles := profile.New(env.App.DB, postgres.NewProfiles(env.App.DB), env.App.Tombstones, events, time.Now)
+	profiles := profile.New(postgres.NewProfileTransactions(env.App.DB), postgres.NewProfiles(env.App.DB), env.App.Tombstones, events, time.Now)
 	accounts := deletion.New(env.App.DB, env.App.Tombstones, postgres.NewAccounts(env.App.DB), events)
-	sessions := auth.New(env.App.DB, postgres.NewAuth(env.App.DB), env.App.Tombstones, env.App.Signing, events, time.Now, token.New, time.Hour)
 	key, err := config.LoadSessionKey(env.App.Cfg.Sessions)
 	if err != nil {
 		t.Fatal(err)
@@ -63,6 +63,15 @@ func TestIntegrationHandlersCommitCachedSessionsAndSettingsAtomically(t *testing
 		t.Fatal(err)
 	}
 	defer state.Close()
+	stateGuard, err := tombstone.New(state, state.Primary(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statePublisher, err := outboxlib.NewPublisher(state, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := auth.New(state, postgres.NewAuth(state), stateGuard, env.App.Signing, outbox.NewEvents(statePublisher), time.Now, token.New, time.Hour)
 	engine, err := idempotency.New(state, idempotency.Options{Clock: time.Now, Cipher: cipher, Registerer: prometheus.NewRegistry(), Methods: map[string]idempotency.Policy{
 		userv1.AuthService_StartPhoneVerification_FullMethodName: {Encrypt: true},
 		userv1.AuthService_Register_FullMethodName:               {Encrypt: true},
@@ -73,7 +82,7 @@ func TestIntegrationHandlersCommitCachedSessionsAndSettingsAtomically(t *testing
 	}
 	r := integrationRegistrar{}
 	starter := integrationStarter(t, env, &creationProvider{env: env})
-	authgrpc.Register(r, sessions, engine, state, env.App.DB, env.App.Limits, env.App.Tombstones, env.App.Verifications, starter)
+	authgrpc.Register(r, sessions, engine, postgres.NewSessionTransactions(state), env.App.DB, env.App.Limits, stateGuard, env.App.Verifications, starter)
 	profilegrpc.Register(r, profiles, accounts)
 	consentgrpc.Register(r, consent.New(postgres.NewConsentDocuments(env.App.DB)), env.App.Users, env.App.Tombstones)
 	signinggrpc.Register(r, env.App.Signing, profiles)

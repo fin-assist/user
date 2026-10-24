@@ -257,3 +257,26 @@ func TestUnitSessionHandlerReplayGuardAndReuseCompletion(t *testing.T) {
 		t.Fatal("revocation failure hidden", err)
 	}
 }
+
+func TestUnitUnknownEffectCauseSurvivesIdempotencyBoundary(t *testing.T) {
+	h, s, e, _, _ := handlerFixture(t)
+	s.err = errDependency
+	if _, err := h.Register(handlerContext(), &userv1.RegisterRequest{}); !errors.Is(err, errDependency) {
+		t.Fatal("effect cause replaced by ErrStorage", err)
+	}
+	s.err = nil
+	e.err = idempotency.ErrStorage
+	if _, err := h.Register(handlerContext(), &userv1.RegisterRequest{}); !errors.Is(err, idempotency.ErrStorage) {
+		t.Fatal("engine error replaced", err)
+	}
+	e.err = nil
+	s.err = finerr.InvalidToken()
+	if _, err := h.Register(handlerContext(), &userv1.RegisterRequest{}); grpcReason(err) != "INVALID_TOKEN" {
+		t.Fatal("ErrNotStored result lost", err)
+	}
+	h.state = &fakeTx{state: true, err: usecase.ErrMissing}
+	s.err = nil
+	if _, err := h.Register(handlerContext(), &userv1.RegisterRequest{}); grpcReason(err) != "INVALID_TOKEN" {
+		t.Fatal("late domain error not translated", err)
+	}
+}

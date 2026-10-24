@@ -12,6 +12,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	pgstore "github.com/fin-assist/go-postgres"
+
 	"github.com/fin-assist/user/internal/reqctx"
 )
 
@@ -35,8 +37,9 @@ type Options struct {
 // DB holds the pool on the primary (-rw) and the pool on the replicas (-ro). On the stand
 // both DSNs point to one PostgreSQL; with an empty replica DSN one pool serves both.
 type DB struct {
-	primary *pgxpool.Pool
-	replica *pgxpool.Pool
+	primary      *pgxpool.Pool
+	replica      *pgxpool.Pool
+	transactions *pgstore.Manager
 }
 
 // Open creates the pools and checks that the primary answers.
@@ -45,7 +48,7 @@ func Open(ctx context.Context, o Options) (*DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("primary pool: %w", err)
 	}
-	db := &DB{primary: primary, replica: primary}
+	db := &DB{primary: primary, replica: primary, transactions: pgstore.New(primary)}
 	if o.ReplicaDSN != "" && o.ReplicaDSN != o.PrimaryDSN {
 		if db.replica, err = newPool(ctx, o.ReplicaDSN, o); err != nil {
 			primary.Close()
@@ -85,65 +88,36 @@ func (db *DB) Close() {
 // Ping checks the primary; readiness uses it.
 func (db *DB) Ping(ctx context.Context) error { return db.primary.Ping(ctx) }
 
-type txKey struct{}
-
-// Run executes fn in a transaction on the primary: commit when fn returns nil, rollback
-// when it returns an error or panics. Repositories and libraries called with the ctx
-// that fn receives work inside this transaction (Writer, Reader, Tx).
-//
-// A Run inside another Run joins the outer transaction: the outer one commits or rolls
-// back everything. fn must not call other services or wait on anything slow — the
-// transaction holds a connection and its locks for the whole time.
-func (db *DB) Run(ctx context.Context, fn func(ctx context.Context) error) error {
-	return db.RunWith(ctx, pgx.TxOptions{}, fn)
+// Run executes fn in a transaction using go-postgres. Nested calls join the outer
+// transaction. Callbacks must propagate errors and must not call remote services.
+func (db *DB) Run(ctx context.Context, fn func(context.Context) error) error {
+	return db.transactions.Run(ctx, fn)
 }
 
-// RunWith is Run with explicit transaction options (isolation level, read only).
-// Joining an outer transaction ignores opts.
-func (db *DB) RunWith(ctx context.Context, opts pgx.TxOptions, fn func(ctx context.Context) error) (err error) {
-	if _, ok := Tx(ctx); ok {
-		return fn(ctx)
-	}
-	tx, err := db.primary.BeginTx(ctx, opts)
-	if err != nil {
-		return fmt.Errorf("begin: %w", err)
-	}
-	defer func() {
-		if p := recover(); p != nil {
-			_ = tx.Rollback(context.WithoutCancel(ctx))
-			panic(p)
-		}
-		if err != nil {
-			// Rollback after a cancelled ctx still has to reach the server.
-			if rbErr := tx.Rollback(context.WithoutCancel(ctx)); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
-				err = errors.Join(err, fmt.Errorf("rollback: %w", rbErr))
-			}
-		}
-	}()
-	if err = fn(context.WithValue(ctx, txKey{}, tx)); err != nil {
-		return err
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit: %w", err)
-	}
-	return nil
+// RunWith is Run with explicit transaction options; an outer transaction's options win.
+func (db *DB) RunWith(ctx context.Context, opts pgx.TxOptions, fn func(context.Context) error) error {
+	return db.transactions.RunWith(ctx, opts, fn)
 }
 
-// Tx returns the transaction of ctx. A library that must write in the same transaction
-// as the effect (idempotency FIN-78, outbox FIN-109) declares an interface with this
-// method and fails when ok is false, instead of silently writing outside it.
-func (db *DB) Tx(ctx context.Context) (pgx.Tx, bool) { return Tx(ctx) }
-
-// Tx returns the transaction of ctx, if any.
-func Tx(ctx context.Context) (pgx.Tx, bool) {
-	tx, ok := ctx.Value(txKey{}).(pgx.Tx)
-	return tx, ok
+// RunMapped runs an outer business transaction with an operation mapper defined by
+// its adapter. A nested non-nil mapper is rejected; nested work must use Run.
+func (db *DB) RunMapped(ctx context.Context, opts pgx.TxOptions, mapper pgstore.ErrorMapper, fn func(context.Context) error) error {
+	return db.transactions.RunMapped(ctx, opts, mapper, fn)
 }
+
+// Tx supplies this database's transaction to repositories, idempotency and outbox.
+func (db *DB) Tx(ctx context.Context) (pgx.Tx, bool) { return db.transactions.Tx(ctx) }
+
+// Tx returns the transaction carried by ctx. The owner alone completes it.
+func Tx(ctx context.Context) (pgx.Tx, bool) { return pgstore.Tx(ctx) }
 
 // Writer returns the transaction of ctx or the primary pool.
 func (db *DB) Writer(ctx context.Context) Querier {
-	if tx, ok := Tx(ctx); ok {
+	if tx, ok := db.Tx(ctx); ok {
 		return tx
+	}
+	if _, ok := Tx(ctx); ok {
+		return rejectedQuerier{}
 	}
 	return db.primary
 }
@@ -152,8 +126,11 @@ func (db *DB) Writer(ctx context.Context) Querier {
 // asked to read its own write (reqctx.ReadPrimary), otherwise the replicas. Replicas lag:
 // a read that decides a write (a check before an update) belongs in Run, not here.
 func (db *DB) Reader(ctx context.Context) Querier {
-	if tx, ok := Tx(ctx); ok {
+	if tx, ok := db.Tx(ctx); ok {
 		return tx
+	}
+	if _, ok := Tx(ctx); ok {
+		return rejectedQuerier{}
 	}
 	if reqctx.ReadPrimary(ctx) {
 		return db.primary

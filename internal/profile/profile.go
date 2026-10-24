@@ -37,9 +37,16 @@ type Patch struct{ Theme, Timezone *string }
 // ErrConsentConflict means another active grant prevented a history insertion.
 var ErrConsentConflict = errors.New("profile: active consent conflict")
 
+// ErrConsentUserMissing and ErrConsentOutdated describe an expected grant refusal.
+var (
+	ErrConsentUserMissing = errors.New("profile: consent user missing")
+	ErrConsentOutdated    = errors.New("profile: consent outdated")
+)
+
 // Transactions keeps profile effects and events in one service-owned transaction.
 type Transactions interface {
 	Run(context.Context, func(context.Context) error) error
+	RunGrant(context.Context, func(context.Context) error) error
 }
 
 // Repository supplies snapshots and user-scoped writes in the service transaction.
@@ -131,7 +138,7 @@ func (s *Service) Update(ctx context.Context, id string, patch Patch) (out Recor
 // Grant records the current assistant-document version. Repeated grants preserve
 // the original timestamp; a newer document replaces the active grant with history.
 func (s *Service) Grant(ctx context.Context, id, version string) (out Record, err error) {
-	err = s.tx.Run(ctx, func(ctx context.Context) error {
+	err = s.tx.RunGrant(ctx, func(ctx context.Context) error {
 		p, err := s.writable(ctx, id)
 		if err != nil {
 			return err
@@ -156,7 +163,7 @@ func (s *Service) Grant(ctx context.Context, id, version string) (out Record, er
 		out, err = s.current(ctx, id)
 		return err
 	})
-	return out, err
+	return out, GrantError(err)
 }
 
 // Revoke removes the active assistant grant without deleting its history.
@@ -248,4 +255,15 @@ func validID(s string) bool {
 }
 func invalid(field string) error {
 	return finerr.ValidationError(&errdetails.BadRequest_FieldViolation{Field: field, Reason: "INVALID_FORMAT", Description: "Invalid value"})
+}
+
+// GrantError selects contract codes for grant refusals after statement or COMMIT.
+func GrantError(err error) error {
+	if errors.Is(err, ErrConsentUserMissing) {
+		return finerr.NotFound()
+	}
+	if errors.Is(err, ErrConsentOutdated) {
+		return finerr.ConsentOutdated()
+	}
+	return err
 }

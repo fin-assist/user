@@ -18,7 +18,7 @@ func TestUnitFakePhoneProdStartupFailsBeforeOpeningResources(t *testing.T) {
 	}
 	// Trusted test-assembly seams cannot accidentally run the fake in prod either.
 	a := &App{Cfg: config.Config{Env: config.EnvProd}, phoneProvider: fakephone.New()}
-	if _, _, err := wirePhone(t.Context(), a, prometheus.NewRegistry()); err == nil || !strings.Contains(err.Error(), "forbidden in prod") {
+	if _, _, err := wirePhone(t.Context(), a, a.DB, a.Tombstones, prometheus.NewRegistry()); err == nil || !strings.Contains(err.Error(), "forbidden in prod") {
 		t.Fatal(err)
 	}
 }

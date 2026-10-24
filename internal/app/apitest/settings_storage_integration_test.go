@@ -24,7 +24,7 @@ func TestIntegrationSettingsRollBackWhenStorageOrOutboxIsUnavailable(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			svc := profile.New(env.App.DB, postgres.NewProfiles(env.App.DB), env.App.Tombstones, outbox.NewEvents(pub), time.Now)
+			svc := profile.New(postgres.NewProfileTransactions(env.App.DB), postgres.NewProfiles(env.App.DB), env.App.Tombstones, outbox.NewEvents(pub), time.Now)
 			if _, err := env.App.DB.Primary().Exec(t.Context(), tc.breakSQL); err != nil {
 				t.Fatal(err)
 			}
@@ -54,7 +54,7 @@ func TestIntegrationSettingsRollBackWhenStorageOrOutboxIsUnavailable(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := profile.New(env.App.DB, postgres.NewProfiles(env.App.DB), env.App.Tombstones, outbox.NewEvents(pub), time.Now)
+	svc := profile.New(postgres.NewProfileTransactions(env.App.DB), postgres.NewProfiles(env.App.DB), env.App.Tombstones, outbox.NewEvents(pub), time.Now)
 	if _, err := env.App.DB.Primary().Exec(t.Context(), `UPDATE app_user SET settings_version=2147483647 WHERE id=$1`, profileUserA); err != nil {
 		t.Fatal(err)
 	}

@@ -120,3 +120,15 @@ go test ./...
 ```
 
 Проверка up → down → up в migratetest распознаёт числовую версию независимо от числа ведущих нулей: NNN у библиотек и NNNNNN у сервиса. Файлы миграций библиотек не переименовываются.
+
+## Общий менеджер транзакций (FIN-240)
+
+`postgres.DB` использует `go-postgres v0.1.1`: Run/RunWith и RunMapped, COMMIT/ROLLBACK и ограниченный cleanup после отмены контекста находятся в библиотеке. Пулы, primary/replica и read-primary hint остаются в сервисе. Контекст другого Manager отклоняется: Writer/Reader не переходят к своему пулу с autocommit. Вложенный Run присоединяется без раннего COMMIT; вложенный обработчик запрещён.
+
+Адаптер `SessionTransactions` выбирает соответствие по доверенному endpoint контекста идемпотентности: Register и RefreshTokens имеют разные ожидаемые ограничения. Именно внешний handler Run охватывает effect, запись идемпотентности и COMMIT; внутренние usecase используют обычный Run. Неизвестная ошибка effect сохраняется через границу go-idempotency для перевода/диагностики, а ErrNotStored и контрактные ошибки библиотеки сохраняют прежний путь. Доменные отказы превращаются в finerr после фактического завершения внешней транзакции.
+
+Для профиля только `ProfileTransactions.RunGrant` устанавливает обработчик выдачи согласия. Остальные операции его не наследуют. Проверяется точная пара SQLSTATE + constraint; неправильный SQLSTATE, неизвестное имя и joined error не переводятся. Мапперы остаются в `internal/adapter/postgres/operations.go`, доменные ошибки не содержат PgError или Detail. Отложенные FK обрабатываются на COMMIT без принудительного SET CONSTRAINTS.
+
+Выделенный auth-пул передаётся auth/Start-репозиториям, tombstone guard, outbox publisher, limiter store, записи callback pool и немедленному fake ConfirmCreated. У обычного Confirm/Watch свои экземпляры на основном DB. Immutable limiter rules и метрики общие; повторной регистрации collectors нет. Callback outcome-report читает основной пул, а IP attempts по-прежнему фиксируются отдельной транзакцией вне auth effect. Лимиты пулов и порядок блокировок не меняются.
+
+Изменений схемы и контракта нет. API-тесты с test-only отложенными ограничениями проверяют COMMIT-ошибки, полный откат аккаунта/согласия/session/outbox/idempotency, безопасный INTERNAL для неизвестного нарушения и повтор с тем же ключом после исправления ссылки.
