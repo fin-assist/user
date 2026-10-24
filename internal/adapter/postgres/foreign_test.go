@@ -3,10 +3,12 @@ package postgres_test
 import (
 	"context"
 	"errors"
-	pgstore "github.com/fin-assist/go-postgres"
-	"github.com/fin-assist/user/internal/adapter/postgres"
-	"github.com/jackc/pgx/v5"
 	"testing"
+
+	pgstore "github.com/fin-assist/go-postgres"
+	"github.com/jackc/pgx/v5"
+
+	"github.com/fin-assist/user/internal/adapter/postgres"
 )
 
 func TestIntegrationForeignTransactionCannotFallBackToPool(t *testing.T) {

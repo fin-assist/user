@@ -2,13 +2,15 @@ package apitest_test
 
 import (
 	"context"
-	userv1 "github.com/fin-assist/contracts/gen/go/finassist/user/v1"
-	"github.com/fin-assist/user/internal/app/apitest"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"strings"
 	"testing"
 	"time"
+
+	userv1 "github.com/fin-assist/contracts/gen/go/finassist/user/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"github.com/fin-assist/user/internal/app/apitest"
 )
 
 func TestAPIRegistrationDeferredCommitMapsAndRollsBackEveryEffect(t *testing.T) {
@@ -35,7 +37,7 @@ func TestAPIRegistrationDeferredCommitMapsAndRollsBackEveryEffect(t *testing.T) 
 			if constraint != "user_consent_document_fkey" {
 				want = ""
 			}
-			if err == nil || apitest.Reason(err) != want || (want == "" && status.Code(err) != codes.Internal) || strings.Contains(err.Error(), "79008887766") || strings.Contains(err.Error(), "test_document") {
+			if err == nil || apitest.Reason(err) != want || (want == "" && (status.Code(err) != codes.Internal || status.Convert(err).Message() != codes.Internal.String())) || strings.Contains(err.Error(), "79008887766") || strings.Contains(err.Error(), "test_document") {
 				t.Fatal("unsafe/wrong commit refusal", err)
 			}
 			for _, table := range []string{"app_user", "auth_session", "refresh_token", "user_consent", "outbox_events", "idempotency_keys"} {
@@ -79,6 +81,11 @@ func TestAPIDedicatedAuthTransactionKeepsConfirmationEventsAndMetrics(t *testing
 		t.Fatal(err)
 	}
 	if _, err = client.RefreshTokens(authContext(t.Context(), authKey()), &userv1.RefreshTokensRequest{RefreshToken: registered.GetTokens().GetRefreshToken()}); err != nil {
+		t.Fatal(err)
+	}
+	// Expire only the old phone claim; its confirmed result remains valid. This
+	// exercises a later login without bypassing the production busy-phone policy.
+	if _, err := env.App.DB.Primary().Exec(t.Context(), `UPDATE phone_verification SET released_at=now(),expires_at=now()-interval '1 second' WHERE phone=$1`, phone); err != nil {
 		t.Fatal(err)
 	}
 	second, err := startCall(t, env, authKey(), phone)

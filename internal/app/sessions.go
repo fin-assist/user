@@ -8,10 +8,10 @@ import (
 	idempotency "github.com/fin-assist/go-idempotency"
 	outboxlib "github.com/fin-assist/go-outbox"
 	tombstone "github.com/fin-assist/go-tombstone"
-	eventsadapter "github.com/fin-assist/user/internal/adapter/outbox"
 	"github.com/prometheus/client_golang/prometheus"
 
 	authgrpc "github.com/fin-assist/user/internal/adapter/grpc/auth"
+	eventsadapter "github.com/fin-assist/user/internal/adapter/outbox"
 	"github.com/fin-assist/user/internal/adapter/postgres"
 	"github.com/fin-assist/user/internal/auth"
 	"github.com/fin-assist/user/internal/config"
