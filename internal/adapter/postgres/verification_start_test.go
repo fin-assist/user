@@ -22,6 +22,64 @@ func startRecord(key, phone string, now time.Time) verification.StartRecord {
 const startKeyA = "019c7714-3b77-74d1-9866-000000000001"
 const startKeyB = "019c7714-3b77-74d1-9866-000000000002"
 
+func TestStartPurgeParentCancellationReleasesGuard(t *testing.T) {
+	db, _, _ := profileDB(t)
+	a := startRecord(startKeyA, "+79001234567", time.Now().UTC())
+	if err := db.Run(t.Context(), func(ctx context.Context) error {
+		var err error
+		a, _, err = NewVerificationStarts(db).Claim(ctx, a)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	parent, err := db.Primary().Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = parent.Rollback(context.Background()) }()
+	if _, err = parent.Exec(t.Context(), `SELECT 1 FROM phone_verification WHERE id=$1 FOR KEY SHARE`, a.Request.ID); err != nil {
+		t.Fatal(err)
+	}
+	guard, err := tombstone.New(db, db.Primary(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, stop := context.WithTimeout(t.Context(), 5*time.Second)
+	defer stop()
+	waiter, cancel := context.WithCancel(ctx)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- db.Run(waiter, func(ctx context.Context) error { return guard.Purge(ctx, profileID, NewAccounts(db).Remove) })
+	}()
+	waitPhoneCondition(t, func() bool {
+		var waiting bool
+		err := db.Primary().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock')`).Scan(&waiting)
+		return err == nil && waiting
+	})
+	cancel()
+	select {
+	case err = <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	if err = db.Run(ctx, func(ctx context.Context) error {
+		tx, _ := db.Tx(ctx)
+		// Cancellation may close the old connection asynchronously. Wait for its
+		// server-side rollback, bounded by ctx, before checking the request survived.
+		_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,110))`, profileID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = NewVerificationStarts(db).Find(ctx, a.Key); err != nil {
+		t.Fatal("cancelled purge removed attempt", err)
+	}
+}
+
 func TestStartPurgeIncludesBusyKeyCommittedWhileDeletionWaits(t *testing.T) {
 	db, _, _ := profileDB(t)
 	a := startRecord(startKeyA, "+79001234567", time.Now().UTC())

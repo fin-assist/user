@@ -672,3 +672,27 @@ func TestStartAPIResourceBindingFailureRollsBackClaimAndLimits(t *testing.T) {
 		t.Fatal("failed link prevented retry", err)
 	}
 }
+
+func TestStartAPIPurgeParentStorageFailureRollsBack(t *testing.T) {
+	env := startEnv(t, &creationProvider{})
+	seedProfiles(t, env)
+	if _, err := startCall(t, env, authKey(), "+79001234567"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.App.DB.Primary().Exec(t.Context(), `ALTER TABLE phone_verification RENAME TO temporarily_unavailable`); err != nil {
+		t.Fatal(err)
+	}
+	profiles := userv1.NewProfileServiceClient(env.Conn)
+	if _, err := profiles.DeleteAccount(apitest.User(t.Context(), profileUserA), &userv1.DeleteAccountRequest{}); status.Code(err) != codes.Internal {
+		t.Fatal(err)
+	}
+	if _, err := env.App.DB.Primary().Exec(t.Context(), `ALTER TABLE temporarily_unavailable RENAME TO phone_verification`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := profiles.GetProfile(apitest.User(t.Context(), profileUserA), &userv1.GetProfileRequest{}); err != nil {
+		t.Fatal("failed parent lock partially purged account", err)
+	}
+	if _, err := profiles.DeleteAccount(apitest.User(t.Context(), profileUserA), &userv1.DeleteAccountRequest{}); err != nil {
+		t.Fatal("failed parent lock prevented retry", err)
+	}
+}
