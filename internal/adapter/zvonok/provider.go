@@ -12,6 +12,14 @@ import (
 	"github.com/fin-assist/user/internal/verification"
 )
 
+// maxPhoneHistoryCalls bounds decoded history before ownership checks. The
+// response-byte cap still applies; this is a local safety limit, not an API quota.
+const maxPhoneHistoryCalls = 200
+
+// phoneHistoryLookback includes a full day before an attempt because the provider
+// date filter has no documented timezone; it covers every possible 5-minute holder.
+const phoneHistoryLookback = 24 * time.Hour
+
 func (c *Client) lookup(ctx context.Context, operation string, values url.Values) ([]remoteCall, error) {
 	r, err := c.request(ctx, operation, values, false)
 	if err != nil {
@@ -27,7 +35,7 @@ func (c *Client) lookup(ctx context.Context, operation string, values url.Values
 		return nil, errUnavailable
 	}
 	var calls []remoteCall
-	if bytes.Equal(bytes.TrimSpace(r.body), []byte("null")) || json.Unmarshal(r.body, &calls) != nil || len(calls) > 200 {
+	if bytes.Equal(bytes.TrimSpace(r.body), []byte("null")) || json.Unmarshal(r.body, &calls) != nil || len(calls) > maxPhoneHistoryCalls {
 		return nil, errUnavailable
 	}
 	for _, call := range calls {
@@ -50,7 +58,7 @@ func terminal(r remoteCall) bool {
 // phone histories bounded without relying on an undocumented timezone for the
 // provider's naive date filter; every possible five-minute holder is included.
 func (c *Client) phoneHistory(a verification.Attempt) url.Values {
-	return url.Values{"campaign_id": {c.campaign}, "phone": {a.Phone}, "from_created_date": {a.CreatedAt.Add(-24 * time.Hour).UTC().Format("2006-01-02 15:04:05")}}
+	return url.Values{"campaign_id": {c.campaign}, "phone": {a.Phone}, "from_created_date": {a.CreatedAt.Add(-phoneHistoryLookback).UTC().Format("2006-01-02 15:04:05")}}
 }
 
 // Create checks for a foreign unfinished provider call before adding this attempt.
@@ -168,7 +176,7 @@ func (c *Client) confirm(ctx context.Context, a verification.Attempt, previous s
 		return verification.Call{}, errUnavailable
 	}
 	var call remoteCall
-	if json.Unmarshal(envelope.Data, &call) != nil || !call.valid() || call.Phone != a.Phone || len(call.Numbers) < 1 || len(call.Numbers) > 1000 || call.Created.After(c.now()) {
+	if json.Unmarshal(envelope.Data, &call) != nil || !call.valid() || call.Phone != a.Phone || len(call.Numbers) < 1 || len(call.Numbers) > verification.MaxCallbackPoolNumbers || call.Created.After(c.now()) {
 		return verification.Call{}, errUnavailable
 	}
 	if call.Created.Before(a.CreatedAt.Truncate(time.Millisecond)) {

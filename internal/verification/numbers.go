@@ -12,6 +12,17 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+// MaxCallbackPoolNumbers bounds an untrusted provider pool before validation
+// and selection. It is a defensive capacity, not a documented provider quota.
+const MaxCallbackPoolNumbers = 1000
+
+// maxCallbackMetricNumbers caps distinct public numbers retained as metric
+// labels for a process lifetime. Additional requests contribute to other.
+const maxCallbackMetricNumbers = 256
+
+// callbackOutcomeWindow is the rolling diagnostic period of the 24h gauges.
+const callbackOutcomeWindow = 24 * time.Hour
+
 // PoolOutcome is an aggregate of public provider callback numbers, never caller phones.
 type PoolOutcome struct {
 	Number, State string
@@ -62,7 +73,7 @@ func NewNumbers(repo NumberRepository, log *slog.Logger, reg prometheus.Register
 // Select runs after the request row is locked by Start. A rollback removes both
 // pool/selection and the idempotent reply; a replay never selects again.
 func (n *Numbers) Select(ctx context.Context, id int32, pool []string) (string, error) {
-	if id < 1 || len(pool) < 1 || len(pool) > 1000 {
+	if id < 1 || len(pool) < 1 || len(pool) > MaxCallbackPoolNumbers {
 		return "", ErrProviderUnavailable
 	}
 	seen := map[string]bool{}
@@ -89,7 +100,7 @@ func (n *Numbers) Select(ctx context.Context, id int32, pool []string) (string, 
 // Report derives restart-safe rolling gauges from stored lifecycle state. Logs
 // contain public provider numbers and aggregate counts, no request IDs or phones.
 func (n *Numbers) Report(ctx context.Context) error {
-	rows, totals, err := n.repo.PoolOutcomes(ctx, n.now().Add(-24*time.Hour))
+	rows, totals, err := n.repo.PoolOutcomes(ctx, n.now().Add(-callbackOutcomeWindow))
 	if err != nil {
 		return err
 	}
@@ -99,7 +110,7 @@ func (n *Numbers) Report(ctx context.Context) error {
 	remaining := map[string]int64{"pending": totals["pending"], "confirmed": totals["confirmed"], "expired": totals["expired"]}
 	for _, r := range rows {
 		n.log.InfoContext(ctx, "phone callback outcome (rolling 24h)", "callback_number", r.Number, "outcome", r.State, "requests", r.Count)
-		if !n.known[r.Number] && len(n.known) < 256 {
+		if !n.known[r.Number] && len(n.known) < maxCallbackMetricNumbers {
 			n.known[r.Number] = true
 		}
 		if n.known[r.Number] {

@@ -9,6 +9,9 @@ import (
 	"github.com/fin-assist/user/internal/ratelimit"
 )
 
+// zvonokRequestsPerSecond is Zvonok V1's documented account-wide API quota.
+const zvonokRequestsPerSecond = 20
+
 // ZvonokGate shares the API account's twenty-per-second allowance across all
 // replicas/campaigns. Only the key digest is stored; no credential enters SQL.
 type ZvonokGate struct {
@@ -28,14 +31,14 @@ func (g *ZvonokGate) Wait(ctx context.Context) error {
 	store := NewLimits(g.db)
 	for {
 		start := time.Now().UTC().Truncate(time.Second)
-		windows := []ratelimit.Window{{Scope: "zvonok_api", Subject: g.subject, Start: start, End: start.Add(time.Second), Limit: 20}}
+		windows := []ratelimit.Window{{Scope: "zvonok_api", Subject: g.subject, Start: start, End: start.Add(time.Second), Limit: zvonokRequestsPerSecond}}
 		allowed := false
 		err := g.db.Run(ctx, func(ctx context.Context) error {
 			counts, err := store.Lock(ctx, windows)
 			if err != nil {
 				return err
 			}
-			if counts[0] >= 20 {
+			if counts[0] >= zvonokRequestsPerSecond {
 				return nil
 			}
 			if err = store.Increment(ctx, windows); err != nil {
