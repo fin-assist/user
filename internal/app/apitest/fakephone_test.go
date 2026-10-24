@@ -175,3 +175,119 @@ func TestFakePhoneAPINamespaceRefusalAndSharedLimits(t *testing.T) {
 		t.Fatal("fake bypasses Watch IP limits")
 	}
 }
+
+func TestFakePhoneAPIAccountAppearsWhileStartWaitsForRequest(t *testing.T) {
+	env := fakePhoneEnv(t)
+	seedDocuments(t, env)
+	phone, key := "+70000008765", authKey()
+	seedRegistration(t, env, "earlier-confirmation", phone, time.Now().UTC().Add(-time.Minute))
+	// Leave a real unfinished claim, including its original key/hash/limit slots.
+	if _, err := env.App.DB.Primary().Exec(t.Context(), `ALTER TABLE phone_verification RENAME COLUMN registration_token_hash TO temporarily_unavailable`); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := startCall(t, env, key, phone); err == nil || out != nil {
+		t.Fatal(out, err)
+	}
+	if _, err := env.App.DB.Primary().Exec(t.Context(), `ALTER TABLE phone_verification RENAME COLUMN temporarily_unavailable TO registration_token_hash`); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+	defer cancel()
+	blocker, err := env.App.DB.Primary().Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = blocker.Rollback(context.WithoutCancel(ctx)) }()
+	var blockerPID, id int32
+	if err = blocker.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&blockerPID); err != nil {
+		t.Fatal(err)
+	}
+	// NO KEY UPDATE allows the preflight Resource FK's KEY SHARE to finish.
+	// The completion UPDATE then waits after owner lookup has found no account.
+	if err = blocker.QueryRow(ctx, `SELECT id FROM phone_verification WHERE start_key=$1 FOR NO KEY UPDATE`, key).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	type reply struct {
+		out *userv1.StartPhoneVerificationResponse
+		err error
+	}
+	done := make(chan reply, 1)
+	client := userv1.NewAuthServiceClient(env.Conn)
+	go func() {
+		out, err := client.StartPhoneVerification(authContext(ctx, key), &userv1.StartPhoneVerificationRequest{Phone: phone})
+		done <- reply{out, err}
+	}()
+	for {
+		var waiting bool
+		err = env.App.DB.Primary().QueryRow(ctx, `SELECT EXISTS(
+			SELECT 1 FROM pg_stat_activity WHERE datname=current_database()
+			AND application_name='user-auth' AND $1=ANY(pg_blocking_pids(pid))
+			AND query LIKE 'UPDATE phone_verification v SET provider_call_id=%')`, blockerPID).Scan(&waiting)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		timer := time.NewTimer(5 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			t.Fatal("Start did not reach completion lock", ctx.Err())
+		case <-timer.C:
+		}
+	}
+	// A different, already confirmed request now creates the account while Start
+	// is still blocked. Its commit must not wait for Start's unfinished request.
+	first, err := client.Register(authContext(ctx, authKey()), registrationRequest("earlier-confirmation"))
+	if err != nil {
+		t.Fatal("registration blocked on unrelated request", err)
+	}
+	if _, err = env.App.DB.Primary().Exec(ctx, `UPDATE app_user SET timezone='UTC',theme='dark' WHERE id=$1`, first.GetUserId()); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := func() (account, consents string, events int) {
+		t.Helper()
+		err := env.App.DB.Primary().QueryRow(ctx, `SELECT to_jsonb(u)::text,
+			(SELECT jsonb_agg(to_jsonb(c) ORDER BY c.id)::text FROM user_consent c WHERE c.user_id=u.id),
+			(SELECT count(*) FROM outbox_events) FROM app_user u WHERE u.id=$1`, first.GetUserId()).Scan(&account, &consents, &events)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	accountBefore, consentsBefore, eventsBefore := snapshot()
+	if err = blocker.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var started *userv1.StartPhoneVerificationResponse
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatal("Start failed after concurrent registration", got.err)
+		}
+		started = got.out
+	case <-ctx.Done():
+		t.Fatal("Start deadlocked", ctx.Err())
+	}
+	verified, err := openPhoneWatch(t, env, phoneContext(ctx), started.GetVerificationToken()).Recv()
+	if err != nil || !verified.GetIsNewUser() || verified.GetRegistrationToken() == "" {
+		t.Fatal(verified, err)
+	}
+	req := registrationRequest(verified.GetRegistrationToken())
+	req.Timezone = stringPtr("Asia/Tokyo")
+	second, err := client.Register(authContext(ctx, authKey()), req)
+	if err != nil || second.GetUserId() != first.GetUserId() ||
+		second.GetTokens().GetRefreshToken() == first.GetTokens().GetRefreshToken() {
+		t.Fatal(second, err)
+	}
+	checkAccessJWT(t, env, second.GetTokens().GetAccessToken(), first.GetUserId())
+	accountAfter, consentsAfter, eventsAfter := snapshot()
+	if accountAfter != accountBefore || consentsAfter != consentsBefore || eventsAfter != eventsBefore {
+		t.Fatal("existing account, consent history or timezone events overwritten")
+	}
+	var users, sessions int
+	if err = env.App.DB.Primary().QueryRow(ctx, `SELECT (SELECT count(*) FROM app_user),(SELECT count(*) FROM auth_session)`).Scan(&users, &sessions); err != nil || users != 1 || sessions != 2 || startHits(t, env) != 1 {
+		t.Fatal(users, sessions, err)
+	}
+}
