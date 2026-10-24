@@ -1,0 +1,63 @@
+# A tag vX.Y.Z on main publishes a release (docs/releasing.md). The owner pushes the tag after
+# the release PR is merged; this workflow checks it and creates the GitHub release with the
+# notes of its CHANGELOG.md section, preserving an existing release. Image publishing and deployment are separate workflows.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to validate and publish
+        required: true
+        type: string
+
+permissions:
+  contents: write # the GitHub release
+
+jobs:
+  release:
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+      - name: The tag is a release of this service
+        run: |
+          if ! [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "$TAG is not vX.Y.Z"
+            exit 1
+          fi
+          git fetch -q origin main
+          # For a manual run GITHUB_SHA identifies the workflow's main, not the tag.
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "$TAG does not point to a commit on main"
+            exit 1
+          fi
+          python3 scripts/changelog.py check
+          if [ "$(python3 scripts/changelog.py latest)" != "$TAG" ]; then
+            echo "The newest section of CHANGELOG.md is not $TAG: merge the release PR first"
+            exit 1
+          fi
+          python3 scripts/changelog.py notes "$TAG" > notes.md
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "GitHub Release $TAG already exists; preserving its notes and assets"
+          elif gh release create "$TAG" --verify-tag --title "$TAG" --notes-file notes.md; then
+            echo "GitHub Release $TAG published"
+          elif gh release view "$TAG" > /dev/null 2>&1; then
+            # Another publisher may have created it between the first read and create.
+            echo "GitHub Release $TAG now exists; preserving its notes and assets"
+          else
+            echo "Could not publish or confirm GitHub Release $TAG" >&2
+            exit 1
+          fi

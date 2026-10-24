@@ -1,5 +1,7 @@
 # user
 
+- [docs/releasing.md](docs/releasing.md) — версии сервиса, CHANGELOG и повторяемый GitHub Release ([FIN-239](https://finassist.youtrack.cloud/issue/FIN-239)); публикация образов и deployment выполняются отдельно.
+
 Сервис `user` «Понятных финансов»: вход по телефону с подтверждением обратным звонком, регистрация, токены (access JWT и refresh с ротацией), профиль, согласия и их документы, удаление аккаунта; ключи подписи access-токенов для остальных сервисов (`GetSigningKeys`). Инициатор удаления данных (`PurgeUserData`) и синхронизации часового пояса (`SetUserTimezone`) в другие сервисы через outbox. Контракт — пакет `finassist.user.v1` в [`fin-assist/contracts`](https://github.com/fin-assist/contracts) (`docs/api.md` 1–2, `docs/grpc-api.md` 7.1), модуль `github.com/fin-assist/contracts/gen/go`.
 
 Создан из шаблона [`fin-assist/go-service-template`](https://github.com/fin-assist/go-service-template) ([FIN-117](https://finassist.youtrack.cloud/issue/FIN-117)) в состоянии `main` 740a202 ([FIN-191](https://finassist.youtrack.cloud/issue/FIN-191)). Изменения шаблона после этого коммита в сервис не приходят сами — переносятся отдельной задачей.
