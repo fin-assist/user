@@ -7,6 +7,7 @@ import (
 
 	userv1 "github.com/fin-assist/contracts/gen/go/finassist/user/v1"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	"github.com/fin-assist/user/internal/app/apitest"
@@ -155,6 +156,9 @@ func TestAPIProfileWritesDoNotExposePartialSettingsOrConsentAfterStorageFailure(
 	if _, err := c.GrantAssistantConsent(ctx, &userv1.GrantAssistantConsentRequest{Version: "v2"}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := env.App.DB.Primary().Exec(t.Context(), `UPDATE user_consent SET granted_at=now()+interval '1 hour' WHERE user_id=$1`, profileUserA); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := env.App.DB.Primary().Exec(t.Context(), `ALTER TABLE user_consent ALTER COLUMN revoked_at TYPE bigint USING NULL`); err != nil {
 		t.Fatal(err)
 	}
@@ -176,6 +180,80 @@ func TestAPIProfileWritesDoNotExposePartialSettingsOrConsentAfterStorageFailure(
 	}
 	zone := "Asia/Tokyo"
 	if got, err := c.UpdateProfile(ctx, &userv1.UpdateProfileRequest{Timezone: &zone}); got != nil || status.Code(err) != codes.Internal {
+		t.Fatal(got, err)
+	}
+}
+
+func TestAPIRegistrationRejectsUnpublishedConsentAndFutureProofBeforeAccountCreation(t *testing.T) {
+	env := apitest.Start(t)
+	seedDocuments(t, env)
+	seedRegistration(t, env, "guarded-public-registration", "+79001234567", time.Now().Add(time.Minute))
+	c := userv1.NewAuthServiceClient(env.Conn)
+	in := registrationRequest("guarded-public-registration")
+	if got, err := c.Register(authContext(t.Context(), authKey()), in); got != nil || status.Code(err) != codes.Internal {
+		t.Fatal(got, err)
+	}
+	if _, err := env.App.DB.Primary().Exec(t.Context(), `UPDATE phone_verification SET verified_at=now();UPDATE consent_document SET is_current=false WHERE type='personal_data'`); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := c.Register(authContext(t.Context(), authKey()), in); got != nil || status.Code(err) != codes.Internal {
+		t.Fatal(got, err)
+	}
+	if _, err := env.App.DB.Primary().Exec(t.Context(), `UPDATE consent_document SET is_current=true WHERE type='personal_data';ALTER TABLE consent_document RENAME COLUMN is_current TO unavailable`); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := c.Register(authContext(t.Context(), authKey()), in); got != nil || status.Code(err) != codes.Internal {
+		t.Fatal(got, err)
+	}
+	if _, err := env.App.DB.Primary().Exec(t.Context(), `ALTER TABLE consent_document RENAME COLUMN unavailable TO is_current`); err != nil {
+		t.Fatal(err)
+	}
+	registered, err := c.Register(authContext(t.Context(), authKey()), in)
+	if err != nil {
+		t.Fatal("repair must preserve one-time proof", err)
+	}
+	old := registered.GetTokens().GetRefreshToken()
+	first, err := c.RefreshTokens(authContext(t.Context(), authKey()), &userv1.RefreshTokensRequest{RefreshToken: old})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Reuse revocation remains monotonic after a backwards wall-clock correction.
+	if _, err := env.App.DB.Primary().Exec(t.Context(), `UPDATE refresh_token SET rotated_at=now()+interval '1 minute' WHERE token_hash=$1`, tokenHash(old)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.RefreshTokens(authContext(t.Context(), authKey()), &userv1.RefreshTokensRequest{RefreshToken: old}); apitest.Reason(err) != "TOKEN_REVOKED" {
+		t.Fatal(err)
+	}
+	if _, err := c.RefreshTokens(authContext(t.Context(), authKey()), &userv1.RefreshTokensRequest{RefreshToken: first.GetTokens().GetRefreshToken()}); apitest.Reason(err) != "TOKEN_REVOKED" {
+		t.Fatal(err)
+	}
+}
+
+func TestAPIConditionalConsentAuthenticationFailsClosedWhenDeletionStoreIsUnavailable(t *testing.T) {
+	env := apitest.Start(t)
+	seedProfiles(t, env)
+	c := userv1.NewConsentDocumentServiceClient(env.Conn)
+	request := &userv1.GetConsentDocumentRequest{Type: userv1.ConsentType_CONSENT_TYPE_ASSISTANT}
+	for _, token := range []string{"Bearer", "Basic invalid", "Bearer invalid-jwt"} {
+		ctx := metadata.AppendToOutgoingContext(apitest.Caller(t.Context(), "bank-bff"), "authorization", token)
+		if got, err := c.GetConsentDocument(ctx, request); got != nil || apitest.Reason(err) != "INVALID_TOKEN" {
+			t.Fatal(got, err)
+		}
+	}
+	if _, err := env.App.DB.Primary().Exec(t.Context(), `ALTER TABLE tombstone_users RENAME TO unavailable_tombstones`); err != nil {
+		t.Fatal(err)
+	}
+	ctx := apitest.User(t.Context(), profileUserA)
+	if got, err := c.GetConsentDocument(ctx, request); got != nil || status.Code(err) != codes.Internal || apitest.Reason(err) != "" {
+		t.Fatal(got, err)
+	}
+	if got, err := userv1.NewProfileServiceClient(env.Conn).GetProfile(ctx, &userv1.GetProfileRequest{}); got != nil || status.Code(err) != codes.Unavailable || apitest.Reason(err) != "" {
+		t.Fatal(got, err)
+	}
+	if _, err := env.App.DB.Primary().Exec(t.Context(), `ALTER TABLE unavailable_tombstones RENAME TO tombstone_users`); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := c.GetConsentDocument(ctx, request); err != nil || got.GetDocument().GetVersion() != "v2" {
 		t.Fatal(got, err)
 	}
 }

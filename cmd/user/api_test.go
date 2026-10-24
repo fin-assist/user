@@ -49,6 +49,69 @@ func TestAPIServeFromEnvironmentPublishesSigningKeysAndStops(t *testing.T) {
 	if err := run(t.Context(), []string{"migrate", "up"}); err != nil {
 		t.Fatal(err)
 	}
+	// Invalid operator commands and dirty migration state must stop the rollout
+	// before its final serve step. Repairing the checked version must restore the
+	// actual public API below, without modifying another source's schema.
+	for _, args := range [][]string{nil, {"unknown"}, {"serve", "extra"}, {"migrate"}, {"migrate", "unknown"}, {"migrate", "up", "extra"}, {"migrate", "version", "extra"}, {"migrate", "down"}, {"migrate", "force"}, {"migrate", "down", "unknown", "1"}, {"migrate", "force", "service", "bad"}, {"migrate", "down", "service", "0"}, {"migrate", "force", "service", "-2"}} {
+		if err := run(t.Context(), args); err == nil {
+			t.Fatalf("invalid rollout command accepted: %v", args)
+		} else if err.Error() == "" {
+			t.Fatal("operator received no error diagnostic")
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		env  map[string]string
+		args []string
+	}{
+		{"migration-invalid-timeout", map[string]string{"MIGRATE_LOCK_TIMEOUT": "0s"}, []string{"migrate", "up"}},
+		{"migration-missing-dsn", map[string]string{"DB_PRIMARY_DSN": "", "DB_PRIMARY_DSN_FILE": ""}, []string{"migrate", "up"}},
+		{"migration-invalid-dsn", map[string]string{"DB_PRIMARY_DSN": "://bad", "DB_PRIMARY_DSN_FILE": ""}, []string{"migrate", "up"}},
+		{"migration-unavailable-database", map[string]string{"DB_PRIMARY_DSN": "postgres://postgres@127.0.0.1:1/missing?sslmode=disable&connect_timeout=1", "DB_PRIMARY_DSN_FILE": ""}, []string{"migrate", "version"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for key, value := range tc.env {
+				t.Setenv(key, value)
+			}
+			if err := run(t.Context(), tc.args); err == nil {
+				t.Fatal("invalid rollout configuration accepted")
+			}
+		})
+	}
+	operatorDB, err := pgx.Connect(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := operatorDB.Exec(t.Context(), `UPDATE schema_migrations SET dirty=true`); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(t.Context(), []string{"migrate", "up"}); err == nil {
+		t.Fatal("dirty schema accepted for rollout")
+	}
+	capture, err := os.CreateTemp(t.TempDir(), "migration-versions-*.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdoutBefore := os.Stdout
+	os.Stdout = capture
+	versionErr := run(t.Context(), []string{"migrate", "version"})
+	os.Stdout = stdoutBefore
+	if err := capture.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if versionErr != nil {
+		t.Fatal(versionErr)
+	}
+	versionBytes, err := os.ReadFile(capture.Name())
+	if err != nil || !bytes.Contains(versionBytes, []byte("service\t4 (dirty)")) {
+		t.Fatal(string(versionBytes), err)
+	}
+	if err := run(t.Context(), []string{"migrate", "force", "service", "4"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := operatorDB.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	// A deploy may roll back only the service source and then reapply it before
 	// serving. The executable's commands must preserve library migration versions.
 	var versions bytes.Buffer
