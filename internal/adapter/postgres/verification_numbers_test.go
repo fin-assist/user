@@ -114,8 +114,10 @@ func TestZvonokAPIGateIsSharedByKeyAndHonorsCancellation(t *testing.T) {
 	if err = other.Wait(t.Context()); err != nil {
 		t.Fatal(err)
 	}
+	// A reservation committed across a second boundary is retried in a new
+	// window; each window still gets at most one hit from this Wait.
 	var count int
-	if err = db.Primary().QueryRow(t.Context(), `SELECT sum(hits) FROM rate_limit_window WHERE subject=$1`, other.subject).Scan(&count); err != nil || count != 1 {
+	if err = db.Primary().QueryRow(t.Context(), `SELECT max(hits) FROM rate_limit_window WHERE subject=$1`, other.subject).Scan(&count); err != nil || count != 1 {
 		t.Fatal(count, err)
 	}
 }

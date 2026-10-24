@@ -24,17 +24,18 @@ import (
 )
 
 type zvonokCall struct {
-	ID      int64     `json:"call_id"`
-	Phone   string    `json:"phone"`
-	Created time.Time `json:"created"`
-	State   string    `json:"call_status"`
-	Numbers []string  `json:"allowed_phones_for_call,omitempty"`
-	Balance string    `json:"balance,omitempty"`
+	ID      int64           `json:"call_id"`
+	Phone   string          `json:"phone"`
+	Created time.Time       `json:"created"`
+	State   string          `json:"call_status"`
+	Numbers []string        `json:"allowed_phones_for_call,omitempty"`
+	Balance json.RawMessage `json:"balance,omitempty"`
 }
 type zvonokHTTP struct {
 	mu      sync.Mutex
 	calls   map[string]zvonokCall
 	mode    string
+	balance json.RawMessage
 	adds    int
 	lookups int
 	next    int64
@@ -100,7 +101,7 @@ func (p *zvonokHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	c, ok := p.calls[phone]
 	if !ok || c.State != "in_process" {
 		p.next++
-		c = zvonokCall{ID: p.next, Phone: phone, Created: time.Now().UTC(), State: "in_process", Numbers: []string{"+74951234567", "+74957654321"}, Balance: "100.29"}
+		c = zvonokCall{ID: p.next, Phone: phone, Created: time.Now().UTC(), State: "in_process", Numbers: []string{"+74951234567", "+74957654321"}, Balance: p.balance}
 		p.calls[phone] = c
 	}
 	if (p.mode == "lost" || p.mode == "lost-unavailable" || p.mode == "lost-reject") && p.adds == 1 {
@@ -129,7 +130,7 @@ func (x zvonokHTTPTransport) RoundTrip(r *http.Request) (*http.Response, error) 
 
 func zvonokEnv(t *testing.T, mode string) (*apitest.Env, *zvonokHTTP) {
 	t.Helper()
-	p := &zvonokHTTP{calls: map[string]zvonokCall{}, mode: mode}
+	p := &zvonokHTTP{calls: map[string]zvonokCall{}, mode: mode, balance: json.RawMessage(`"100.29"`)}
 	srv := httptest.NewTLSServer(p)
 	t.Cleanup(srv.Close)
 	u, _ := url.Parse(srv.URL)
@@ -171,7 +172,24 @@ func mockCall(p *zvonokHTTP, phone string, state string) zvonokCall {
 }
 
 func TestZvonokAPIStartRecoveryPoolAndIdempotentReplay(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		balance json.RawMessage
+	}{
+		{"absent", nil},
+		{"number", json.RawMessage(`100.29`)},
+		{"string", json.RawMessage(`"100.29"`)},
+	} {
+		t.Run(tt.name, func(t *testing.T) { zvonokStartRecoveryPoolAndReplay(t, tt.balance) })
+	}
+}
+
+func zvonokStartRecoveryPoolAndReplay(t *testing.T, balance json.RawMessage) {
+	t.Helper()
 	env, p := zvonokEnv(t, "lost")
+	p.mu.Lock()
+	p.balance = balance
+	p.mu.Unlock()
 	key, phone := authKey(), "+79991234567"
 	first, err := startCall(t, env, key, phone)
 	if err != nil {

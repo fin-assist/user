@@ -77,6 +77,39 @@ func TestCreateMultipartAndPrivateReads(t *testing.T) {
 	}
 }
 
+func TestCreateAndRecoverIgnoreBalance(t *testing.T) {
+	for _, tt := range []struct {
+		name, field string
+	}{
+		{"absent", ""},
+		{"number", `,"balance":100.29`},
+		{"string", `,"balance":"100.29"`},
+	} {
+		for _, recoverCall := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/recover=%t", tt.name, recoverCall), func(t *testing.T) {
+				data := strings.Replace(remote("1", attempt().CreatedAt, "in_process"), `,"balance":"100.29"`, tt.field, 1)
+				c := client(t, func(r *http.Request) (*http.Response, error) {
+					if r.Method == http.MethodGet {
+						if recoverCall {
+							return reply(200, "["+data+"]"), nil
+						}
+						return reply(200, "[]"), nil
+					}
+					return reply(200, `{"status":"ok","data":`+data+`}`), nil
+				})
+				operation := c.Create
+				if recoverCall {
+					operation = c.Recover
+				}
+				out, err := operation(t.Context(), attempt())
+				if err != nil || out.ID != "1" || out.StartedAt != attempt().CreatedAt || len(out.Numbers) != 2 {
+					t.Fatal(out, err)
+				}
+			})
+		}
+	}
+}
+
 func TestRecoveryChecksIdentityAndTerminalRace(t *testing.T) {
 	for _, tt := range []struct {
 		name, lookup, returned string
