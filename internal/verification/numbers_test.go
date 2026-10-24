@@ -29,7 +29,7 @@ func (s *numberStore) PoolOutcomes(context.Context, time.Time) ([]PoolOutcome, m
 	return s.rows, s.totals, s.err
 }
 
-func TestNumbersPersistOnlyFreshPoolAndHandleFailures(t *testing.T) {
+func TestUnitNumbersPersistOnlyFreshPoolAndHandleFailures(t *testing.T) {
 	s := &numberStore{}
 	n, err := NewNumbers(s, slog.New(slog.DiscardHandler), prometheus.NewRegistry())
 	if err != nil {
@@ -71,7 +71,7 @@ func TestNumbersPersistOnlyFreshPoolAndHandleFailures(t *testing.T) {
 	}
 }
 
-func TestNumberOutcomesAreRestartSafeAndLabelsBounded(t *testing.T) {
+func TestUnitNumberOutcomesAreRestartSafeAndLabelsBounded(t *testing.T) {
 	s := &numberStore{totals: map[string]int64{"confirmed": 300, "expired": 1}}
 	for i := range 300 {
 		s.rows = append(s.rows, PoolOutcome{Number: fmt.Sprintf("+7495%07d", i), State: "confirmed", Count: 1})

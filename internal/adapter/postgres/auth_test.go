@@ -13,7 +13,7 @@ import (
 	"github.com/fin-assist/user/internal/token"
 )
 
-func TestAuthRepositoryPrimaryLocksAndConstraintTranslation(t *testing.T) {
+func TestIntegrationAuthRepositoryPrimaryLocksAndConstraintTranslation(t *testing.T) {
 	db, _, _ := profileDB(t)
 	repo := NewAuth(db)
 	ctx := t.Context()
@@ -83,7 +83,7 @@ func TestAuthRepositoryPrimaryLocksAndConstraintTranslation(t *testing.T) {
 	}
 }
 
-func TestAuthRepositoryStorageFailurePreservesAtomicity(t *testing.T) {
+func TestIntegrationAuthRepositoryStorageFailurePreservesAtomicity(t *testing.T) {
 	db, _, _ := profileDB(t)
 	repo := NewAuth(db)
 	now := time.Now().UTC()
@@ -120,7 +120,7 @@ func TestAuthRepositoryStorageFailurePreservesAtomicity(t *testing.T) {
 	}
 }
 
-func TestAuthRepositoryCleanupKeepsLiveLinks(t *testing.T) {
+func TestIntegrationAuthRepositoryCleanupKeepsLiveLinks(t *testing.T) {
 	db, _, _ := profileDB(t)
 	repo := NewAuth(db)
 	ctx := t.Context()

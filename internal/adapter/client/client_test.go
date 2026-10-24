@@ -81,7 +81,7 @@ func dial(t *testing.T, p *peer) (testgrpc.TestServiceClient, *Metrics) {
 
 func newPeer() *peer { return &peer{md: make(chan metadata.MD, 1), hasDeadline: make(chan bool, 1)} }
 
-func TestRetriesOnlyListedMethodsOnUnavailable(t *testing.T) {
+func TestIntegrationRetriesOnlyListedMethodsOnUnavailable(t *testing.T) {
 	p := newPeer()
 	c, _ := dial(t, p)
 
@@ -103,7 +103,7 @@ func TestRetriesOnlyListedMethodsOnUnavailable(t *testing.T) {
 	}
 }
 
-func TestMetadataAndDefaultDeadline(t *testing.T) {
+func TestIntegrationMetadataAndDefaultDeadline(t *testing.T) {
 	p := newPeer()
 	c, m := dial(t, p)
 
@@ -131,7 +131,7 @@ func TestMetadataAndDefaultDeadline(t *testing.T) {
 	}
 }
 
-func TestServiceConfigRejectsBadRetryEntries(t *testing.T) {
+func TestUnitServiceConfigRejectsBadRetryEntries(t *testing.T) {
 	for _, bad := range []string{"", "/Method", "a.B/C/D"} {
 		if _, err := serviceConfig([]string{bad}); err == nil {
 			t.Errorf("%q must be rejected", bad)
@@ -139,7 +139,7 @@ func TestServiceConfigRejectsBadRetryEntries(t *testing.T) {
 	}
 }
 
-func TestFileTokenRereadsAfterRotation(t *testing.T) {
+func TestUnitFileTokenRereadsAfterRotation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "token")
 	if err := os.WriteFile(path, []byte("one\n"), 0o600); err != nil {
 		t.Fatal(err)

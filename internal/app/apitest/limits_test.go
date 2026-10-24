@@ -14,7 +14,7 @@ import (
 	"github.com/fin-assist/user/internal/ratelimit"
 )
 
-func TestConfiguredLimitsAndCommittedMetricsAreExposed(t *testing.T) {
+func TestIntegrationConfiguredLimitsAndCommittedMetricsAreExposed(t *testing.T) {
 	env := apitest.Start(t, func(c *config.Config) {
 		c.Limits[ratelimit.WatchIP] = ratelimit.Rule{Limit: 1, Window: 2 * time.Minute}
 	})

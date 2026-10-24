@@ -30,7 +30,7 @@ func noPhoneSignal(t *testing.T, ch <-chan struct{}) {
 	default:
 	}
 }
-func TestPhoneNotificationBoundedSubscriptionsAndCoalescing(t *testing.T) {
+func TestIntegrationPhoneNotificationBoundedSubscriptionsAndCoalescing(t *testing.T) {
 	n := notificationBroker(2)
 	if _, err := n.Subscribe(0); err == nil {
 		t.Fatal("invalid ID accepted")
@@ -78,7 +78,7 @@ func TestPhoneNotificationBoundedSubscriptionsAndCoalescing(t *testing.T) {
 		t.Fatal("disconnected listener accepted subscription")
 	}
 }
-func TestPhoneNotificationRealPrimaryReconnectAndClose(t *testing.T) {
+func TestIntegrationPhoneNotificationRealPrimaryReconnectAndClose(t *testing.T) {
 	db, _, _, _ := phoneState(t)
 	reg := prometheus.NewRegistry()
 	cfg := db.Primary().Config().ConnConfig.Copy()
@@ -196,7 +196,7 @@ func waitPhoneCondition(t *testing.T, check func() bool) {
 	}
 }
 
-func TestPhoneNotificationConstructorRollsBackMetricsOnFailure(t *testing.T) {
+func TestIntegrationPhoneNotificationConstructorRollsBackMetricsOnFailure(t *testing.T) {
 	db, _, _, _ := phoneState(t)
 	cfg := db.Primary().Config().ConnConfig.Copy()
 	reg := prometheus.NewRegistry()

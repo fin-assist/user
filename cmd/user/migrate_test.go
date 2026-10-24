@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func TestMigrateConfig(t *testing.T) {
+func TestUnitMigrateConfig(t *testing.T) {
 	t.Setenv("DB_PRIMARY_DSN", "")
 	if _, err := migrateConfig(); err == nil {
 		t.Fatal("missing DSN must be an error")
@@ -39,7 +39,7 @@ func TestMigrateConfig(t *testing.T) {
 	}
 }
 
-func TestMigrateUsage(t *testing.T) {
+func TestUnitMigrateUsage(t *testing.T) {
 	t.Setenv("DB_PRIMARY_DSN", "postgres://localhost/db")
 	for _, args := range [][]string{
 		{}, {"sideways"}, {"up", "extra"}, {"version", "extra"},

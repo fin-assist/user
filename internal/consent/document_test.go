@@ -19,7 +19,7 @@ func (d *documents) Current(context.Context, string) (Document, error) {
 	return d.document, d.err
 }
 
-func TestCurrentDocument(t *testing.T) {
+func TestUnitCurrentDocument(t *testing.T) {
 	for _, kind := range []string{"personal_data", "assistant"} {
 		repo := &documents{document: Document{Type: kind, Version: "v1", Title: "Consent", URL: "https://example.test/consent"}}
 		got, err := New(repo).Current(t.Context(), kind)

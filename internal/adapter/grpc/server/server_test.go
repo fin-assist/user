@@ -167,7 +167,7 @@ func call(t *testing.T, caller, user string, kv ...string) context.Context {
 
 func reasonOf(err error) string { return Reason(err) }
 
-func TestUserCall(t *testing.T) {
+func TestIntegrationUserCall(t *testing.T) {
 	e := start(t, policy())
 	c := testgrpc.NewTestServiceClient(e.conn)
 	ctx := call(t, "bank-bff", "u1", "x-client-ip", "203.0.113.7", "x-client-version", "android/0.2.5+41", "x-read-primary", "1")
@@ -181,7 +181,7 @@ func TestUserCall(t *testing.T) {
 	}
 }
 
-func TestRefusals(t *testing.T) {
+func TestIntegrationRefusals(t *testing.T) {
 	e := start(t, policy())
 	c := testgrpc.NewTestServiceClient(e.conn)
 	cases := []struct {
@@ -219,7 +219,7 @@ func TestRefusals(t *testing.T) {
 	}
 }
 
-func TestHintsOnlyFromBankBFF(t *testing.T) {
+func TestIntegrationHintsOnlyFromBankBFF(t *testing.T) {
 	e := start(t, Policy{"/grpc.testing.TestService/*": {Callers: []string{"assistant"}, Model: ModelSystem}})
 	c := testgrpc.NewTestServiceClient(e.conn)
 	ctx := call(t, "assistant", "u1", "x-client-ip", "203.0.113.7", "x-read-primary", "1")
@@ -235,7 +235,7 @@ func TestHintsOnlyFromBankBFF(t *testing.T) {
 	}
 }
 
-func TestMixedModel(t *testing.T) {
+func TestIntegrationMixedModel(t *testing.T) {
 	e := start(t, policy())
 	c := testgrpc.NewTestServiceClient(e.conn)
 	_, err := c.UnaryCall(call(t, "assistant", ""), &testgrpc.SimpleRequest{})
@@ -251,7 +251,7 @@ func TestMixedModel(t *testing.T) {
 	}
 }
 
-func TestStream(t *testing.T) {
+func TestIntegrationStream(t *testing.T) {
 	e := start(t, policy())
 	c := testgrpc.NewTestServiceClient(e.conn)
 	st, err := c.StreamingOutputCall(call(t, "user", ""), &testgrpc.StreamingOutputCallRequest{})
@@ -274,7 +274,7 @@ func TestStream(t *testing.T) {
 	}
 }
 
-func TestPanicIsInternalAndLogged(t *testing.T) {
+func TestIntegrationPanicIsInternalAndLogged(t *testing.T) {
 	e := start(t, policy())
 	e.svc.panic = true
 	c := testgrpc.NewTestServiceClient(e.conn)
@@ -309,7 +309,7 @@ type subjectless struct{}
 
 func (subjectless) VerifyUser(context.Context, string) (string, error) { return "", nil }
 
-func TestUserTokenWithoutSubjectIsRefused(t *testing.T) {
+func TestIntegrationUserTokenWithoutSubjectIsRefused(t *testing.T) {
 	e := start(t, policy(), func(d *Deps) { d.Users = subjectless{} })
 	_, err := testgrpc.NewTestServiceClient(e.conn).EmptyCall(call(t, "bank-bff", "u1"), &testgrpc.Empty{})
 	if status.Code(err) != codes.Unauthenticated || reasonOf(err) != "INVALID_TOKEN" {
@@ -356,7 +356,7 @@ func detailNames(err error) []string {
 	return names
 }
 
-func TestNormalize(t *testing.T) {
+func TestUnitNormalize(t *testing.T) {
 	if normalize(nil) != nil {
 		t.Fatal("nil must stay nil")
 	}
@@ -398,7 +398,7 @@ func (okStatus) GRPCStatus() *status.Status { return status.New(codes.OK, "ok") 
 // What the handler returns without a status must not travel to the caller as text:
 // grpc-go would send UNKNOWN with err.Error() as the message. Unary and stream handlers
 // go through separate interceptors, so both are exercised.
-func TestHandlerErrorsAreNormalized(t *testing.T) {
+func TestIntegrationHandlerErrorsAreNormalized(t *testing.T) {
 	for _, tc := range normalizeCases {
 		for _, kind := range []string{"unary", "stream"} {
 			t.Run(kind+"/"+tc.name, func(t *testing.T) {
@@ -436,7 +436,7 @@ func TestHandlerErrorsAreNormalized(t *testing.T) {
 	}
 }
 
-func TestLogsMaskSecretsAndMetricsHaveNoUser(t *testing.T) {
+func TestIntegrationLogsMaskSecretsAndMetricsHaveNoUser(t *testing.T) {
 	e := start(t, policy())
 	ctx := call(t, "bank-bff", "u1", "idempotency-key", "k-123")
 	if _, err := testgrpc.NewTestServiceClient(e.conn).EmptyCall(ctx, &testgrpc.Empty{}); err != nil {
@@ -461,7 +461,7 @@ func TestLogsMaskSecretsAndMetricsHaveNoUser(t *testing.T) {
 	}
 }
 
-func TestHealthIsOpenAndFollowsReadiness(t *testing.T) {
+func TestIntegrationHealthIsOpenAndFollowsReadiness(t *testing.T) {
 	e := start(t, policy())
 	h := healthpb.NewHealthClient(e.conn)
 	resp, err := h.Check(context.Background(), &healthpb.HealthCheckRequest{})
@@ -475,7 +475,7 @@ func TestHealthIsOpenAndFollowsReadiness(t *testing.T) {
 	}
 }
 
-func TestServeRefusesUncoveredMethods(t *testing.T) {
+func TestIntegrationServeRefusesUncoveredMethods(t *testing.T) {
 	srv, err := New(Options{}, Deps{Logger: slog.New(slog.DiscardHandler), Metrics: prometheus.NewRegistry(),
 		Policy:   Policy{emptyCall: {Callers: []string{"bank-bff"}, Model: ModelUser}},
 		Services: DevServiceVerifier{}, Users: DevUserVerifier{}, Tombstones: NoTombstones{}})
@@ -489,7 +489,7 @@ func TestServeRefusesUncoveredMethods(t *testing.T) {
 	}
 }
 
-func TestPolicyValidation(t *testing.T) {
+func TestUnitPolicyValidation(t *testing.T) {
 	for name, p := range map[string]Policy{
 		"bad key":    {"grpc.testing.TestService/EmptyCall": {Callers: []string{"a"}, Model: ModelUser}},
 		"no callers": {emptyCall: {Model: ModelUser}},
@@ -501,7 +501,7 @@ func TestPolicyValidation(t *testing.T) {
 	}
 }
 
-func TestNewRequiresDeps(t *testing.T) {
+func TestUnitNewRequiresDeps(t *testing.T) {
 	if _, err := New(Options{}, Deps{}); err == nil {
 		t.Fatal("missing deps must be an error, not a server that lets everyone in")
 	}
@@ -544,8 +544,8 @@ func validationMessage(t *testing.T) *dynamicpb.Message {
 	return m
 }
 
-func TestValidationBecomesBadRequest(t *testing.T) {
-	e := start(t, policy())
+func TestUnitValidationBecomesBadRequest(t *testing.T) {
+	e := unitServer(t)
 	err := e.srv.validate(context.Background(), validationMessage(t))
 	if reasonOf(err) != "VALIDATION_ERROR" {
 		t.Fatalf("got %v", err)
@@ -601,8 +601,8 @@ func brokenRuleMessage(t *testing.T) *dynamicpb.Message {
 // A rule that protovalidate cannot evaluate is our defect: the caller gets INTERNAL_ERROR,
 // not a validation error that blames its request, and the defect is logged with the
 // request ID of the call.
-func TestBrokenValidationRuleIsInternalAndLogged(t *testing.T) {
-	e := start(t, policy())
+func TestUnitBrokenValidationRuleIsInternalAndLogged(t *testing.T) {
+	e := unitServer(t)
 	ctx := reqctx.WithRequestID(context.Background(), "req-broken")
 	err := e.srv.validate(ctx, brokenRuleMessage(t))
 	if status.Code(err) != codes.Internal || reasonOf(err) != "INTERNAL_ERROR" {
@@ -614,7 +614,7 @@ func TestBrokenValidationRuleIsInternalAndLogged(t *testing.T) {
 	}
 }
 
-func TestMaskMessage(t *testing.T) {
+func TestUnitMaskMessage(t *testing.T) {
 	req := &userv1.WatchPhoneVerificationRequest{VerificationToken: "vt-secret"}
 	got, ok := maskMessage(req).(*userv1.WatchPhoneVerificationRequest)
 	if !ok || got.GetVerificationToken() != masked {
@@ -628,7 +628,7 @@ func TestMaskMessage(t *testing.T) {
 	}
 }
 
-func TestDeletedAdmissionRequiresExactUserRule(t *testing.T) {
+func TestUnitDeletedAdmissionRequiresExactUserRule(t *testing.T) {
 	for _, r := range []Rule{{Callers: []string{"bank-bff"}, Model: ModelNoUser, AllowDeleted: true}, {Callers: []string{"bank-bff"}, Model: ModelMixed, AllowDeleted: true}} {
 		if err := (Policy{"/test.Profile/Delete": r}).validate(grpc.NewServer()); err == nil {
 			t.Fatal("non-user deleted admission accepted")

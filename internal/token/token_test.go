@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestOpaqueSecretsHave256BitsAndStableWholeHash(t *testing.T) {
+func TestUnitOpaqueSecretsHave256BitsAndStableWholeHash(t *testing.T) {
 	seen := map[string]bool{}
 	for range 100 {
 		s, err := New()

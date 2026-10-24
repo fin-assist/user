@@ -162,7 +162,7 @@ func verification(t *testing.T, db *pgxpool.Pool, phone, token string, now time.
 	return id
 }
 
-func TestPhoneIsUniqueAmongUsers(t *testing.T) {
+func TestIntegrationPhoneIsUniqueAmongUsers(t *testing.T) {
 	db, _ := schema(t)
 	id := newUser(t, db, phoneA)
 	newUser(t, db, phoneB)
@@ -183,7 +183,7 @@ func TestPhoneIsUniqueAmongUsers(t *testing.T) {
 	}
 }
 
-func TestProfileDefaults(t *testing.T) {
+func TestIntegrationProfileDefaults(t *testing.T) {
 	db, _ := schema(t)
 	id := newUser(t, db, phoneA)
 
@@ -216,7 +216,7 @@ func TestProfileDefaults(t *testing.T) {
 	notNull(t, db, "theme", `UPDATE app_user SET theme = NULL WHERE id = $1`, id)
 }
 
-func TestConsents(t *testing.T) {
+func TestIntegrationConsents(t *testing.T) {
 	db, _ := schema(t)
 	documents(t, db)
 	id := newUser(t, db, phoneA)
@@ -270,7 +270,7 @@ func TestConsents(t *testing.T) {
 // The current version of a consent document: one per type (consent_document_current_key,
 // owner's decision of 20.10.2026), switched by "clear the old, then set the new" in one
 // transaction. GetConsentDocument (1.6) and the CONSENT_OUTDATED check read it by type.
-func TestCurrentConsentDocument(t *testing.T) {
+func TestIntegrationCurrentConsentDocument(t *testing.T) {
 	db, _ := schema(t)
 	ctx := context.Background()
 	documents(t, db)
@@ -339,7 +339,7 @@ func TestCurrentConsentDocument(t *testing.T) {
 	}
 }
 
-func TestOneHoldingVerificationPerPhone(t *testing.T) {
+func TestIntegrationOneHoldingVerificationPerPhone(t *testing.T) {
 	db, _ := schema(t)
 	ctx := context.Background()
 
@@ -382,7 +382,7 @@ func TestOneHoldingVerificationPerPhone(t *testing.T) {
 		VALUES ('+79005550001', 'zvonok', $1, $2)`, t0, t0.Add(5*time.Minute))
 }
 
-func TestConcurrentVerificationsOfOnePhone(t *testing.T) {
+func TestIntegrationConcurrentVerificationsOfOnePhone(t *testing.T) {
 	db, _ := schema(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -425,7 +425,7 @@ func TestConcurrentVerificationsOfOnePhone(t *testing.T) {
 	}
 }
 
-func TestVerificationLookups(t *testing.T) {
+func TestIntegrationVerificationLookups(t *testing.T) {
 	db, _ := schema(t)
 	ctx := context.Background()
 	id := verification(t, db, phoneA, "vt-1", t0)
@@ -475,7 +475,7 @@ func TestVerificationLookups(t *testing.T) {
 // The verification and its notification are one transaction of the service (there is no
 // trigger): WatchPhoneVerification sees the notification only after the commit, and a
 // rolled-back verification notifies nobody.
-func TestVerificationNotifiesOnCommit(t *testing.T) {
+func TestIntegrationVerificationNotifiesOnCommit(t *testing.T) {
 	db, dsn := schema(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -580,7 +580,7 @@ func rotate(ctx context.Context, db *pgxpool.Pool, presented, next string, now t
 	return outcome, err
 }
 
-func TestRefreshRotationAndReuse(t *testing.T) {
+func TestIntegrationRefreshRotationAndReuse(t *testing.T) {
 	db, _ := schema(t)
 	ctx := context.Background()
 	user := newUser(t, db, phoneA)
@@ -633,7 +633,7 @@ func TestRefreshRotationAndReuse(t *testing.T) {
 	}
 }
 
-func TestConcurrentRotationOfOneLink(t *testing.T) {
+func TestIntegrationConcurrentRotationOfOneLink(t *testing.T) {
 	db, _ := schema(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -666,7 +666,7 @@ func TestConcurrentRotationOfOneLink(t *testing.T) {
 	}
 }
 
-func TestAccountDeletionRemovesPersonalData(t *testing.T) {
+func TestIntegrationAccountDeletionRemovesPersonalData(t *testing.T) {
 	db, _ := schema(t)
 	ctx := context.Background()
 	documents(t, db)
@@ -712,7 +712,7 @@ func TestAccountDeletionRemovesPersonalData(t *testing.T) {
 
 // Cleanup of an old verification request keeps the session it signed in: the link becomes
 // NULL (ON DELETE SET NULL), the session and its refresh links stay.
-func TestVerificationCleanupKeepsTheSession(t *testing.T) {
+func TestIntegrationVerificationCleanupKeepsTheSession(t *testing.T) {
 	db, _ := schema(t)
 	ctx := context.Background()
 	user := newUser(t, db, phoneA)
@@ -737,7 +737,7 @@ func TestVerificationCleanupKeepsTheSession(t *testing.T) {
 // transaction the user's row goes, its consents, sessions and requests with its user_id go
 // by cascade, and every other request of the phone — unverified, or verified for a new
 // user who never registered — goes by DELETE ... WHERE phone. Requests of other phones stay.
-func TestAccountDeletionRemovesAllRequestsOfThePhone(t *testing.T) {
+func TestIntegrationAccountDeletionRemovesAllRequestsOfThePhone(t *testing.T) {
 	db, _ := schema(t)
 	ctx := context.Background()
 	user := newUser(t, db, phoneA)
@@ -800,7 +800,7 @@ func TestAccountDeletionRemovesAllRequestsOfThePhone(t *testing.T) {
 	verification(t, db, phoneA, "vt-7", t0.Add(41*time.Minute))
 }
 
-func TestRateLimitWindow(t *testing.T) {
+func TestIntegrationRateLimitWindow(t *testing.T) {
 	db, _ := schema(t)
 	ctx := context.Background()
 
@@ -834,7 +834,7 @@ func TestRateLimitWindow(t *testing.T) {
 // The schema has no CHECK or EXCLUDE constraints, triggers or functions (owner's decision of
 // 19.10.2026, docs/schema.md): such rules are the service's code. The test keeps a new
 // migration from bringing them back unnoticed.
-func TestSchemaHasNoRulesOrLogic(t *testing.T) {
+func TestIntegrationSchemaHasNoRulesOrLogic(t *testing.T) {
 	db, _ := schema(t)
 	var checks, triggers, functions int
 	if err := db.QueryRow(context.Background(), `
@@ -853,7 +853,7 @@ func TestSchemaHasNoRulesOrLogic(t *testing.T) {
 }
 
 // The down file drops the tables and leaves nothing behind; up applies again.
-func TestDownLeavesNothing(t *testing.T) {
+func TestIntegrationDownLeavesNothing(t *testing.T) {
 	db, dsn := schema(t)
 	ctx := context.Background()
 	files, err := fs.Glob(migrations.FS, "*.up.sql")
@@ -880,7 +880,7 @@ func TestDownLeavesNothing(t *testing.T) {
 // the empty INSERT ... DO NOTHING and the SELECT of the holder, DeleteAccount may delete
 // every request of the phone. The SELECT then finds no holder, and repeating release and
 // insert in the same transaction creates the request.
-func TestVerificationRetryWhenTheHolderIsDeletedByPhone(t *testing.T) {
+func TestIntegrationVerificationRetryWhenTheHolderIsDeletedByPhone(t *testing.T) {
 	db, _ := schema(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

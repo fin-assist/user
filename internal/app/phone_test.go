@@ -23,7 +23,7 @@ import (
 	"github.com/fin-assist/user/internal/verification"
 )
 
-func TestPhoneAssemblyKeySeparationAndFailureCleanup(t *testing.T) {
+func TestIntegrationPhoneAssemblyKeySeparationAndFailureCleanup(t *testing.T) {
 	dsn := migratetest.DSN(t)
 	db, err := postgres.Open(t.Context(), postgres.Options{PrimaryDSN: dsn, MaxConns: 2})
 	if err != nil {

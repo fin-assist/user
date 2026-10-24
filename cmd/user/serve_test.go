@@ -19,7 +19,7 @@ import (
 	"github.com/fin-assist/user/internal/app"
 )
 
-func TestServeFailsBeforeConnectingWithoutSigningKey(t *testing.T) {
+func TestUnitServeFailsBeforeConnectingWithoutSigningKey(t *testing.T) {
 	t.Setenv("SERVICE_NAME", "user")
 	t.Setenv("DB_PRIMARY_DSN", "postgres://nowhere.invalid/db")
 	t.Setenv("ENV", "prod")
@@ -31,7 +31,7 @@ func TestServeFailsBeforeConnectingWithoutSigningKey(t *testing.T) {
 
 // The whole serve path against a real database: config, pools, server, ops listener,
 // readiness and an orderly stop on cancel.
-func TestServeRunsAndStops(t *testing.T) {
+func TestIntegrationServeRunsAndStops(t *testing.T) {
 	for _, provider := range []string{"disabled", "zvonok"} {
 		t.Run(provider, func(t *testing.T) { serveAndStop(t, provider) })
 	}
@@ -106,7 +106,7 @@ func serveAndStop(t *testing.T, provider string) {
 	}
 }
 
-func TestServeFailsOnBadInput(t *testing.T) {
+func TestIntegrationServeFailsOnBadInput(t *testing.T) {
 	setSigningKey(t)
 	setPhoneKey(t)
 	base := map[string]string{"SERVICE_NAME": "user", "ENV": "dev", "AUTH_MODE": "insecure-dev", "LOG_LEVEL": "error",

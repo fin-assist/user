@@ -65,7 +65,7 @@ func profileReason(err error) string {
 	return rest.Code
 }
 
-func TestProfilesSettingsOutboxAndPrimaryReads(t *testing.T) {
+func TestIntegrationProfilesSettingsOutboxAndPrimaryReads(t *testing.T) {
 	db, s, repo := profileDB(t)
 	if _, err := repo.Read(t.Context(), profileID); profileReason(err) != "NOT_FOUND" {
 		t.Fatalf("replica was bypassed: %v", err)
@@ -109,7 +109,7 @@ func TestProfilesSettingsOutboxAndPrimaryReads(t *testing.T) {
 	}
 }
 
-func TestProfilesConsentHistoryAndVersionSwitch(t *testing.T) {
+func TestIntegrationProfilesConsentHistoryAndVersionSwitch(t *testing.T) {
 	db, s, repo := profileDB(t)
 	var wg sync.WaitGroup
 	for range 12 {
@@ -179,7 +179,7 @@ func (failedSettings) TimezoneChanged(context.Context, string, string, int32) er
 	return errors.New("publisher failed")
 }
 
-func TestProfilesRollbackConcurrencyAndDeletion(t *testing.T) {
+func TestIntegrationProfilesRollbackConcurrencyAndDeletion(t *testing.T) {
 	db, s, repo := profileDB(t)
 	guard, err := tombstone.New(db, db.Primary(), time.Now)
 	if err != nil {
@@ -269,7 +269,7 @@ func TestProfilesRollbackConcurrencyAndDeletion(t *testing.T) {
 	}
 }
 
-func TestProfilesTransactionAndStorageErrors(t *testing.T) {
+func TestIntegrationProfilesTransactionAndStorageErrors(t *testing.T) {
 	db, s, repo := profileDB(t)
 	for name, fn := range map[string]func() error{"lock": func() error { return repo.Lock(t.Context(), profileID) }, "update": func() error { return repo.Update(t.Context(), profileID, "dark", "UTC", 1, time.Now()) }, "grant": func() error { return repo.Grant(t.Context(), profileID, "v2", time.Now()) }, "revoke": func() error { return repo.Revoke(t.Context(), profileID, time.Now()) }} {
 		if err := fn(); err == nil {

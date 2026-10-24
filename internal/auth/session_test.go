@@ -147,7 +147,7 @@ func validRegister() RegisterInput {
 	return RegisterInput{Token: "registration", Accepted: true, ConsentVersion: "v1"}
 }
 
-func TestRefreshRotatesAndClosesResult(t *testing.T) {
+func TestUnitRefreshRotatesAndClosesResult(t *testing.T) {
 	f := newFixture()
 	out, err := f.s.Refresh(t.Context(), "old")
 	if err != nil || out.Pair != (Pair{"access", "refresh"}) || out.UserID != "user" || out.Reused {
@@ -164,7 +164,7 @@ func TestRefreshRotatesAndClosesResult(t *testing.T) {
 	}
 }
 
-func TestRefreshRejectsAndCompletesReuse(t *testing.T) {
+func TestUnitRefreshRejectsAndCompletesReuse(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		mutate func(*fixture)
@@ -221,7 +221,7 @@ func TestRefreshRejectsAndCompletesReuse(t *testing.T) {
 	}
 }
 
-func TestRefreshAndLogoutDependencyFailures(t *testing.T) {
+func TestUnitRefreshAndLogoutDependencyFailures(t *testing.T) {
 	for _, stage := range []string{"find", "lock", "rotate", "close"} {
 		f := newFixture()
 		f.r.fail[stage] = errDependency
@@ -251,7 +251,7 @@ func TestRefreshAndLogoutDependencyFailures(t *testing.T) {
 	}
 }
 
-func TestRegistrationNewAccountAndExistingAccount(t *testing.T) {
+func TestUnitRegistrationNewAccountAndExistingAccount(t *testing.T) {
 	f := newFixture()
 	out, err := f.s.Register(t.Context(), validRegister())
 	if err != nil || out.UserID != "user" || out.Pair.Refresh != "refresh" || f.e.calls != 1 || f.e.zone != "Europe/Moscow" || !f.r.expiry.Equal(f.now.Add(60*24*time.Hour)) {
@@ -278,7 +278,7 @@ func TestRegistrationNewAccountAndExistingAccount(t *testing.T) {
 	}
 }
 
-func TestRegistrationValidationOrderAndOneTimeResult(t *testing.T) {
+func TestUnitRegistrationValidationOrderAndOneTimeResult(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		mutate func(*fixture, *RegisterInput)
@@ -309,7 +309,7 @@ func TestRegistrationValidationOrderAndOneTimeResult(t *testing.T) {
 	}
 }
 
-func TestRegistrationRollsBackDependencyFailures(t *testing.T) {
+func TestUnitRegistrationRollsBackDependencyFailures(t *testing.T) {
 	for _, stage := range []string{"reg-read", "document", "create", "user-lock", "reg-lock", "consent", "session", "close"} {
 		f := newFixture()
 		f.r.fail[stage] = errDependency

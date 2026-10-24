@@ -13,7 +13,7 @@ import (
 
 // The template registers no service of its own, so the API test of the template is the
 // assembly itself: it starts, is healthy and refuses what it does not serve.
-func TestServiceStartsAndServes(t *testing.T) {
+func TestAPIServiceStartsAndServes(t *testing.T) {
 	env := Start(t)
 	resp, err := healthpb.NewHealthClient(env.Conn).Check(t.Context(), &healthpb.HealthCheckRequest{})
 	if err != nil || resp.GetStatus() != healthpb.HealthCheckResponse_SERVING {
@@ -25,7 +25,7 @@ func TestServiceStartsAndServes(t *testing.T) {
 	}
 }
 
-func TestHelpers(t *testing.T) {
+func TestUnitHelpers(t *testing.T) {
 	md, _ := metadata.FromOutgoingContext(User(t.Context(), "u1"))
 	if md.Get("authorization")[0] != "Bearer dev:u1" || md.Get("x-service-authorization")[0] != "Bearer dev:bank-bff" {
 		t.Fatalf("user md: %v", md)

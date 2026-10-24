@@ -145,7 +145,7 @@ func grpcReason(err error) string {
 	return ""
 }
 
-func TestSessionHandlerMappingAndIndependentAttempts(t *testing.T) {
+func TestUnitSessionHandlerMappingAndIndependentAttempts(t *testing.T) {
 	h, s, e, l, _ := handlerFixture(t)
 	zone := "UTC"
 	r, err := h.Register(handlerContext(), &userv1.RegisterRequest{RegistrationToken: "reg", PdConsentAccepted: true, PdConsentVersion: "v1", Timezone: &zone})
@@ -171,7 +171,7 @@ func TestSessionHandlerMappingAndIndependentAttempts(t *testing.T) {
 	server.Stop()
 }
 
-func TestSessionHandlerKeysAndFailurePaths(t *testing.T) {
+func TestUnitSessionHandlerKeysAndFailurePaths(t *testing.T) {
 	for _, keys := range [][]string{nil, {"bad"}, {"019c7714-3b77-74d1-9866-e1f484aae2ab", "019c7714-3b77-74d1-9866-e1f484aae2ac"}} {
 		h, _, _, l, _ := handlerFixture(t)
 		ctx := metadata.NewIncomingContext(t.Context(), metadata.MD{"idempotency-key": keys})
@@ -214,7 +214,7 @@ func TestSessionHandlerKeysAndFailurePaths(t *testing.T) {
 	}
 }
 
-func TestSessionHandlerReplayGuardAndReuseCompletion(t *testing.T) {
+func TestUnitSessionHandlerReplayGuardAndReuseCompletion(t *testing.T) {
 	for _, mode := range []string{"live", "deleted", "missing-owner", "guard-error", "malformed-body"} {
 		h, _, e, l, g := handlerFixture(t)
 		e.replay = true

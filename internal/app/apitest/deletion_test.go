@@ -15,7 +15,7 @@ import (
 	"github.com/fin-assist/user/internal/token"
 )
 
-func TestDeleteAccountPurgesPhoneSecretsAndRepeats(t *testing.T) {
+func TestAPIDeleteAccountPurgesPhoneSecretsAndRepeats(t *testing.T) {
 	env := apitest.Start(t)
 	seedDocuments(t, env)
 	original, regKey := registerAPI(t, env, "delete-reg", "+79001234567")
@@ -98,7 +98,7 @@ func TestDeleteAccountPurgesPhoneSecretsAndRepeats(t *testing.T) {
 	}
 }
 
-func TestDeleteAccountRollbackOnStorageFailure(t *testing.T) {
+func TestAPIDeleteAccountRollbackOnStorageFailure(t *testing.T) {
 	env := apitest.Start(t)
 	seedDocuments(t, env)
 	r, _ := registerAPI(t, env, "rollback-reg", "+79001234567")
@@ -116,7 +116,7 @@ func TestDeleteAccountRollbackOnStorageFailure(t *testing.T) {
 	}
 }
 
-func TestDeleteAccountConcurrentReplayAndProfileWrite(t *testing.T) {
+func TestAPIDeleteAccountConcurrentReplayAndProfileWrite(t *testing.T) {
 	env := apitest.Start(t)
 	seedDocuments(t, env)
 	r, key := registerAPI(t, env, "race-reg", "+79001234567")
@@ -181,7 +181,7 @@ func TestDeleteAccountConcurrentReplayAndProfileWrite(t *testing.T) {
 	}
 }
 
-func TestDeleteAccountInvalidTokenAndUnknownUser(t *testing.T) {
+func TestAPIDeleteAccountInvalidTokenAndUnknownUser(t *testing.T) {
 	env := apitest.Start(t)
 	c := userv1.NewProfileServiceClient(env.Conn)
 	ctx := metadata.AppendToOutgoingContext(apitest.Caller(t.Context(), "bank-bff"), "authorization", "Bearer invalid")
@@ -200,7 +200,7 @@ func TestDeleteAccountInvalidTokenAndUnknownUser(t *testing.T) {
 	}
 }
 
-func TestDeleteAccountSerializesWithNewAuthEffects(t *testing.T) {
+func TestAPIDeleteAccountSerializesWithNewAuthEffects(t *testing.T) {
 	for _, operation := range []string{"register", "refresh"} {
 		t.Run(operation, func(t *testing.T) {
 			env := apitest.Start(t)

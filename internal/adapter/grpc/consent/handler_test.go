@@ -37,7 +37,7 @@ type fakeDeleted struct {
 
 func (f fakeDeleted) Deleted(context.Context, string) (bool, error) { return f.deleted, f.err }
 
-func TestDocumentAuthorization(t *testing.T) {
+func TestUnitDocumentAuthorization(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
 		token   []string
@@ -73,7 +73,7 @@ func TestDocumentAuthorization(t *testing.T) {
 	}
 }
 
-func TestPublicUnknownAndStorageError(t *testing.T) {
+func TestUnitPublicUnknownAndStorageError(t *testing.T) {
 	repo := &fakeDocuments{}
 	h := &handler{documents: repo}
 	if _, err := h.GetConsentDocument(t.Context(), &userv1.GetConsentDocumentRequest{Type: userv1.ConsentType_CONSENT_TYPE_PERSONAL_DATA}); err != nil {

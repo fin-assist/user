@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func TestReadinessFollowsCheck(t *testing.T) {
+func TestUnitReadinessFollowsCheck(t *testing.T) {
 	var fail atomic.Bool
 	changes := make(chan bool, 10)
 	r := &Readiness{}

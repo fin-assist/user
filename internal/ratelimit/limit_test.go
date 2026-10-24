@@ -23,7 +23,7 @@ func (f incrementFailure) Increment(context.Context, []Window) error {
 	return errors.New("increment failed")
 }
 
-func TestIncrementFailureAndCorruptCount(t *testing.T) {
+func TestUnitIncrementFailureAndCorruptCount(t *testing.T) {
 	for _, store := range []CounterStore{
 		incrementFailure{func(context.Context, []Window) ([]int, error) { return []int{0}, nil }},
 		counterFunc(func(context.Context, []Window) ([]int, error) { return []int{-1}, nil }),
@@ -41,7 +41,7 @@ func TestIncrementFailureAndCorruptCount(t *testing.T) {
 	}
 }
 
-func TestOperationsWindowsAndPrivateSubjects(t *testing.T) {
+func TestUnitOperationsWindowsAndPrivateSubjects(t *testing.T) {
 	now := time.Date(2026, 12, 31, 23, 59, 59, 0, time.FixedZone("device", 3*3600))
 	for _, tt := range []struct {
 		op     Operation
@@ -90,7 +90,7 @@ func TestOperationsWindowsAndPrivateSubjects(t *testing.T) {
 	}
 }
 
-func TestMetricsRequireCommitAndReceiptIsIdempotent(t *testing.T) {
+func TestUnitMetricsRequireCommitAndReceiptIsIdempotent(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	denied := false
 	reset := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -156,7 +156,7 @@ func TestMetricsRequireCommitAndReceiptIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestInvalidSubjectsAndCounterErrors(t *testing.T) {
+func TestUnitInvalidSubjectsAndCounterErrors(t *testing.T) {
 	calls := 0
 	broken := false
 	l, err := New(Defaults(), counterFunc(func(ctx context.Context, _ []Window) ([]int, error) {
@@ -200,7 +200,7 @@ func TestInvalidSubjectsAndCounterErrors(t *testing.T) {
 	}
 }
 
-func TestRulesAndRegistration(t *testing.T) {
+func TestUnitRulesAndRegistration(t *testing.T) {
 	store := counterFunc(func(context.Context, []Window) ([]int, error) { return nil, nil })
 	for _, mutate := range []func(Rules){func(r Rules) { delete(r, WatchIP) }, func(r Rules) { r["phone-as-label"] = Rule{1, time.Minute} }, func(r Rules) { r[WatchIP] = Rule{0, time.Minute} }, func(r Rules) { r[WatchIP] = Rule{math.MaxInt32 + 1, time.Minute} }, func(r Rules) { r[WatchIP] = Rule{1, time.Millisecond} }, func(r Rules) { r[WatchIP] = Rule{1, 25 * time.Hour} }, func(r Rules) { r[WatchIP] = Rule{1, time.Second + time.Nanosecond} }} {
 		r := Defaults()

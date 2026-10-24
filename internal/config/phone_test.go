@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func TestPhoneConfigurationAndIndependentKey(t *testing.T) {
+func TestUnitPhoneConfigurationAndIndependentKey(t *testing.T) {
 	get, list := env(base())
 	cfg, err := load(get, noFiles, list)
 	if err != nil || cfg.Phone.MaxStreams != 1024 || cfg.Phone.ResyncInterval != 5*time.Second || cfg.Phone.ResultKeyID != "primary" {

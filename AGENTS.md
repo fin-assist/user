@@ -14,7 +14,7 @@ A PR that changes what this file, `README.md` or `docs/` say (layout, commands, 
 updates them in the same PR. A service made from the template rewrites the first paragraph for itself.
 - Blocks between `<!-- generated:… -->` markers are produced from code; do not edit them by hand. The tables of
   `docs/config.md` come from `Vars` in `internal/config/vars.go`: a new variable or default is a line there, then
-  `go test ./internal/config -run TestDocIsCurrent -update`. `go test` fails on a stale table, on a variable read
+  `go test ./internal/config -run TestUnitDocIsCurrent -update`. `go test` fails on a stale table, on a variable read
   but not declared, and on one declared but never read.
 
 ## Where things are decided
@@ -294,28 +294,33 @@ Also:
   has negative tests: what must not happen is asserted — the handler did not run, no row was written, nothing leaked.
 - Tests assert behaviour; a test that only executes lines or asserts on a fake it set up itself is not coverage.
   Run with `-race`; no sleeps for synchronisation — wait on a channel or a condition with a deadline.
-- The measurable check is coverage of changed lines: at least 80 % of changed executable lines of production code
-  (`make cover`, README «Покрытие изменённых строк»; CI posts the table in the PR). Uncovered changed lines are listed
-  in the PR («Как проверено») with the reason; an uncovered line without a reason is a review finding.
+- The measurable gate is at least 80% of all production statements independently in unit, integration and API
+  suites. The same `-coverpkg=./...` denominator includes generated production code and `.go` test helpers;
+  no exclusions to reach the threshold. Name every test `TestUnit*`, `TestIntegration*` or `TestAPI*` by its
+  actual boundary. Direct handlers on fakes are unit; full-assembly jobs without public RPC are integration.
+  Coverage percentage never substitutes for the use-case review.
 
 ## Checks
 
-CI (table in `README.md`): `go mod tidy` clean, `go vet`, `go test -race` with PostgreSQL 18 in Docker and coverage of changed lines,
-golangci-lint, image build, and on PRs the migration checks (existing files unchanged, squawk on new ones). Run
-`make test` (or `make cover`) and `make lint` before pushing.
+Run `make test` and `make lint` before pushing. `make cover-unit`, `make cover-integration`, `make cover-api`
+run independent race-enabled uncached suites with an eight-minute test timeout. `make cover` runs every suite,
+then the supplementary union. All require `jq`; integration/API need PostgreSQL 18 (Docker or TEST_DATABASE_URL).
 
 `make test` and CI also run the Python script tests and check CHANGELOG format. Service releases follow
 `docs/releasing.md`: prepare a dated version section in a reviewed PR, wait for post-merge CI, then the owner
 pushes the tag. Agents never create, move or delete version tags. Release publishes GitHub metadata only;
 image publication and deployment remain separate. Existing releases are preserved after validating the tag.
 
-### Coverage reports (FIN-210)
+### Coverage reports (FIN-238)
 
-CI reports project totals and changed executable lines together from the same profile of the root Go module in one
-updated PR comment and the run summary; push runs retain project totals. The 80% target remains for changed
-lines only. Count unique lines in blocks with nonzero statement counts, including generated production code;
-exclude `_test.go` and `testdata/`. An empty profile means no data, never 100%. Fork PRs cannot post comments.
-Test changes to the report with `python3 -m unittest discover -s scripts -p 'test_coverage_diff.py'`.
+Use pinned `go-test-coverage/v2@v2.20.1`: total >=80 independently for unit.out, integration.out and api.out.
+Owner accepts its one-decimal rounding (79.95% passes as 80.0%). The old changed-line metric and custom parser
+are removed. Built-in comma-separated profile merging produces combined coverage, never a substitute for
+one failed suite. A JSON Go-test log must contain an actual passed test; missing, empty and header-only
+profiles fail before analysis. Skipped or failed Test events fail the execution guard; `make test-names`
+rejects Test names outside the three selectors. CI=true makes missing PostgreSQL fatal. CI retains the required `go` job,
+collects all independent outcomes, fails if any gate fails, and uploads logs, profiles and built-in reports.
+Forks need no PR-write permission. README documents the boundaries and outstanding baseline gaps.
 
 ## Workflow
 
@@ -346,8 +351,9 @@ Test changes to the report with `python3 -m unittest discover -s scripts -p 'tes
   - `@codex` — the Codex GitHub integration under the owner's ChatGPT subscription. Its model is chosen by OpenAI
     and cannot be pinned from here; a pinned model would need the OpenAI API with per-token billing, which was
     declined (FIN-103).
-  - A review is requested only once `.github/workflows/claude.yml` is on `main`: comment-triggered workflows run
-    from the default branch.
+  - Claude review is requested only once `.github/workflows/claude.yml` is on `main`: its comment-triggered
+    workflow runs from the default branch. Codex review is independent and is requested whenever its
+    GitHub integration is available.
   - Replies in threads and other comments never mention `@codex` or `@claude`: any mention with text starts them
     again.
 - Waiting for the review: react to the PR's GitHub events when the session receives them; otherwise check 3 minutes
@@ -418,7 +424,7 @@ it. Check:
 ### Tests
 
 The criterion is not a percentage of lines but whether the use cases of the changed functionality are covered; the
-80 % changed-line target in Tests is the author's minimum, and meeting it does not settle this check. For
+80% per-suite total-statements target in Tests is the author's minimum, and meeting it does not settle this check. For
 each behaviour the PR adds or changes:
 
 1. List its use cases from the code, the contract and the issue: the main path; alternative paths; every error a
@@ -459,7 +465,7 @@ security-relevant behaviour has negative tests.
 - A new migration follows `docs/migrations.md` and passes squawk and up → down → up.
 - A new metric has bounded labels and is listed in `docs/server.md`; a new setting is declared in `Vars` and the
   tables of `docs/config.md` are regenerated, not edited by hand.
-- Changed lines the coverage comment of the PR (posted by CI) shows as uncovered have a reason in the PR.
+- Each suite independently meets the 80% total-statements target; lower coverage is explicitly reported as incomplete.
 
 ## Renovate automation
 

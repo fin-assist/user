@@ -8,7 +8,7 @@ import (
 // Var declares one environment variable: its default and its description in docs/config.md.
 // Every variable the binary reads is declared here; reading an undeclared one is a
 // configuration error, and the tables of docs/config.md are generated from this list
-// (TestDocIsCurrent), so the documentation cannot drift from the code.
+// (TestUnitDocIsCurrent), so the documentation cannot drift from the code.
 type Var struct {
 	Name     string
 	Command  string // serve or migrate: the table of docs/config.md it belongs to

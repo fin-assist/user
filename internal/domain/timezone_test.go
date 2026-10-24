@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestTimezoneContract(t *testing.T) {
+func TestUnitTimezoneContract(t *testing.T) {
 	for _, s := range []string{"Europe/Moscow", "Asia/Kathmandu", "UTC", "Etc/GMT+12"} {
 		if !ValidTimezone(s) {
 			t.Fatal(s)

@@ -14,7 +14,7 @@ import (
 	"github.com/fin-assist/user/internal/config"
 )
 
-func TestOutboxAssemblyFailsClosed(t *testing.T) {
+func TestUnitOutboxAssemblyFailsClosed(t *testing.T) {
 	a := &App{Cfg: config.Config{Outbox: config.OutboxConfig{DeletionTargets: []string{"bank-statement-data", "analytics", "assistant"}, TimezoneTargets: []string{"assistant", "bank-statement-data"}, MaxConns: 6, PollInterval: time.Second}}}
 	if _, _, _, err := wireOutbox(t.Context(), a, prometheus.NewRegistry()); err == nil || !strings.Contains(err.Error(), "peer address required") {
 		t.Fatal(err)
@@ -31,7 +31,7 @@ func TestOutboxAssemblyFailsClosed(t *testing.T) {
 	}
 }
 
-func TestOutboxConstructionFailureClosesDedicatedPool(t *testing.T) {
+func TestIntegrationOutboxConstructionFailureClosesDedicatedPool(t *testing.T) {
 	dsn := migratetest.DSN(t)
 	db, err := postgres.Open(t.Context(), postgres.Options{PrimaryDSN: dsn, MaxConns: 2})
 	if err != nil {

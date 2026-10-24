@@ -8,7 +8,7 @@ import (
 	"github.com/fin-assist/user/internal/ratelimit"
 )
 
-func TestLimitDefaultsAndOverrides(t *testing.T) {
+func TestUnitLimitDefaultsAndOverrides(t *testing.T) {
 	get, list := env(base())
 	c, err := load(get, noFiles, list)
 	if err != nil {
@@ -30,7 +30,7 @@ func TestLimitDefaultsAndOverrides(t *testing.T) {
 	}
 }
 
-func TestInvalidLimitConfiguration(t *testing.T) {
+func TestUnitInvalidLimitConfiguration(t *testing.T) {
 	for name, values := range map[string][]string{"LIMIT_WATCH_IP": {"0", "-1", "2147483648", "not-a-number"}, "WINDOW_WATCH_IP": {"0s", "-1s", "1ms", "24h1s", "1.5s", "bad"}} {
 		for _, v := range values {
 			vars := base()

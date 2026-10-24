@@ -58,7 +58,7 @@ func TestIntegrationForeignTransactionCannotFallBackToPool(t *testing.T) {
 	}
 }
 
-func TestRunWithPreservesTransactionOptions(t *testing.T) {
+func TestIntegrationRunWithPreservesTransactionOptions(t *testing.T) {
 	db := open(t)
 	err := db.RunWith(context.Background(), pgx.TxOptions{IsoLevel: pgx.Serializable, AccessMode: pgx.ReadOnly}, func(ctx context.Context) error {
 		var isolation, readOnly string

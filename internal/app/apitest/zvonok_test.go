@@ -171,7 +171,7 @@ func mockCall(p *zvonokHTTP, phone string, state string) zvonokCall {
 	return c
 }
 
-func TestZvonokAPIStartRecoveryPoolAndIdempotentReplay(t *testing.T) {
+func TestAPIZvonokAPIStartRecoveryPoolAndIdempotentReplay(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
 		balance json.RawMessage
@@ -218,7 +218,7 @@ func zvonokStartRecoveryPoolAndReplay(t *testing.T, balance json.RawMessage) {
 	}
 }
 
-func TestZvonokAPIUnknownOutcomeKeepsOwnAttemptAndRejectsForeignCall(t *testing.T) {
+func TestAPIZvonokAPIUnknownOutcomeKeepsOwnAttemptAndRejectsForeignCall(t *testing.T) {
 	for _, mode := range []string{"lost-unavailable", "lost-reject"} {
 		t.Run(mode, func(t *testing.T) { unknownZvonokOutcome(t, mode) })
 	}
@@ -257,7 +257,7 @@ func unknownZvonokOutcome(t *testing.T, mode string) {
 	}
 }
 
-func TestZvonokAPIExplicitRejectionRefundsAndAllowsRetry(t *testing.T) {
+func TestAPIZvonokAPIExplicitRejectionRefundsAndAllowsRetry(t *testing.T) {
 	env, p := zvonokEnv(t, "reject")
 	key := authKey()
 	if _, err := startCall(t, env, key, "+79991234567"); err == nil {
@@ -277,7 +277,7 @@ func TestZvonokAPIExplicitRejectionRefundsAndAllowsRetry(t *testing.T) {
 	}
 }
 
-func TestZvonokAPIPostbackCheckedProofRepeatAndLateEvent(t *testing.T) {
+func TestAPIZvonokAPIPostbackCheckedProofRepeatAndLateEvent(t *testing.T) {
 	env, p := zvonokEnv(t, "")
 	phoneJob(t, env)
 	phone := "+79991234567"
@@ -334,7 +334,7 @@ func TestZvonokAPIPostbackCheckedProofRepeatAndLateEvent(t *testing.T) {
 	}
 }
 
-func TestZvonokAPILostPostbackUsesWatchFallback(t *testing.T) {
+func TestAPIZvonokAPILostPostbackUsesWatchFallback(t *testing.T) {
 	env, p := zvonokEnv(t, "")
 	phoneJob(t, env)
 	out, err := startCall(t, env, authKey(), "+79991234567")
@@ -385,7 +385,7 @@ func zvonokMetric(t *testing.T, env *apitest.Env, name string, labels map[string
 	return 0
 }
 
-func TestZvonokAPIDeletedRequestCannotBeRecreatedByPostback(t *testing.T) {
+func TestAPIZvonokAPIDeletedRequestCannotBeRecreatedByPostback(t *testing.T) {
 	env, p := zvonokEnv(t, "")
 	phone := "+79991234567"
 	if _, err := startCall(t, env, authKey(), phone); err != nil {
