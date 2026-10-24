@@ -60,7 +60,7 @@ a dedicated primary pool and operator-configured recipients, with system credent
 Timezone defaults to bank-statement-data and assistant; deletion requires bank-statement-data,
 analytics and assistant. Pool capacity is at least the union of recipients + 3. Missing configured peer addresses fail startup. See docs/profile.md.
 
-Start, Register and RefreshTokens use go-idempotency v0.3.0 with encrypted no-user replies and result ownership (FIN-226).
+Start, Register and RefreshTokens use go-idempotency with Resource (FIN-230) with encrypted no-user replies and result ownership (FIN-226).
 Their key/effect transactions use a dedicated primary pool; IP attempts commit in
 the ordinary pool before token checks, even for rejected secrets. Reuse rolls the
 non-cacheable 401 back, then rechecks and commits revocation before returning it.
@@ -77,14 +77,15 @@ a busy replay rolls back the whole deletion before retrying, bounded by the call
 10 seconds. Never wait for an auth key while retaining the tombstone guard. See docs/deletion.md.
 
 Start commits the library reservation, four rate-limit slots and phone claim before
-calling Provider.Create/Recover outside a transaction. Its durable phone_verification_start
-link owns recovery and the original refundable windows; completed and busy keys retain
-empty windows for phone-scoped deletion. Completion takes key -> guard/user -> request;
-fresh claims take key -> limits -> guard/user -> request -> link. Selector runs inside
+calling Provider.Create/Recover outside a transaction. Its durable phone_verification.start_*
+fields own recovery and refundable windows. Library Resource binds the own reservation
+and successful/busy caches to the request ID; busy keys never overwrite attempt fields. Completion takes key -> guard/user -> request;
+fresh claims take key -> limits -> guard/user -> request -> BindResource. Selector runs inside
 the completion transaction. Only ReleaseIfCurrent permits refund after a definite provider
 rejection, in the same transaction as release; uncertain outcomes keep their claim.
 Deletion also purges successful and busy Start caches through phone links, including
-keys created before the account existed. Cleanup keeps those links while a cache is live.
+keys created before the account existed. Cleanup retains requests while a Resource cache is live. Purge locks request parents
+before its NOWAIT key snapshot; busy claims take KEY SHARE to close the uncommitted-link race.
 Runtime backend injection is app.WithPhoneBackend; controlled adapters live in API tests only.
 
 Phone confirmation accepts provider-checked Proof through the trusted Go usecase only: no

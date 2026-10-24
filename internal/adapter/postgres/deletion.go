@@ -68,10 +68,23 @@ func (r *Accounts) Remove(ctx context.Context, id string) error {
 }
 
 // Start keys may predate account creation and therefore have no OwnerID. The
-// workflow links every secret reply AND cached busy refusal to the phone's data.
+// library links every secret reply AND cached busy refusal to its request resource.
 func (r *Accounts) purgeStartKeys(ctx context.Context, phone string) error {
 	q := r.db.Writer(ctx)
-	rows, err := q.Query(ctx, `SELECT 1 FROM idempotency_keys k JOIN phone_verification_start s ON s.idempotency_key=k.key JOIN phone_verification v ON v.id=s.verification_id WHERE v.phone=$1 AND k.scope='00000000-0000-0000-0000-000000000000'::uuid AND k.endpoint='/finassist.user.v1.AuthService/StartPhoneVerification' FOR UPDATE OF k NOWAIT`, phone)
+	// Lock parents before selecting keys. Busy claims take KEY SHARE, so a link
+	// cannot commit behind our key snapshot while we delete its request.
+	parents, err := q.Query(ctx, `SELECT id FROM phone_verification WHERE phone=$1 FOR UPDATE`, phone)
+	if err != nil {
+		return deletionError(err)
+	}
+	for parents.Next() {
+	}
+	err = parents.Err()
+	parents.Close()
+	if err != nil {
+		return deletionError(err)
+	}
+	rows, err := q.Query(ctx, `SELECT 1 FROM idempotency_keys k JOIN phone_verification v ON k.resource_type='phone_verification' AND k.resource_id=v.id::text WHERE v.phone=$1 AND k.scope='00000000-0000-0000-0000-000000000000'::uuid AND k.endpoint='/finassist.user.v1.AuthService/StartPhoneVerification' FOR UPDATE OF k NOWAIT`, phone)
 	if err != nil {
 		return deletionError(err)
 	}
@@ -82,7 +95,7 @@ func (r *Accounts) purgeStartKeys(ctx context.Context, phone string) error {
 	if err != nil {
 		return deletionError(err)
 	}
-	_, err = q.Exec(ctx, `DELETE FROM idempotency_keys k USING phone_verification_start s,phone_verification v WHERE s.idempotency_key=k.key AND v.id=s.verification_id AND v.phone=$1 AND k.scope='00000000-0000-0000-0000-000000000000'::uuid AND k.endpoint='/finassist.user.v1.AuthService/StartPhoneVerification'`, phone)
+	_, err = q.Exec(ctx, `DELETE FROM idempotency_keys k USING phone_verification v WHERE k.resource_type='phone_verification' AND k.resource_id=v.id::text AND v.phone=$1 AND k.scope='00000000-0000-0000-0000-000000000000'::uuid AND k.endpoint='/finassist.user.v1.AuthService/StartPhoneVerification'`, phone)
 	if err != nil {
 		return deletionError(err)
 	}

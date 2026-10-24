@@ -17,10 +17,17 @@ import (
 )
 
 type startEngineFake struct {
+	bound                        idempotency.Resource
+	bindErr                      error
 	replay                       *idempotency.Result
 	reserveErr, finishErr        error
 	current                      bool
 	reserves, finishes, releases int
+}
+
+func (e *startEngineFake) BindResource(_ context.Context, _ idempotency.Reservation, r idempotency.Resource) error {
+	e.bound = r
+	return e.bindErr
 }
 
 func (e *startEngineFake) WithCompletion(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -41,6 +48,9 @@ func (e *startEngineFake) DoReserved(ctx context.Context, _ idempotency.Reservat
 		return idempotency.Result{}, e.finishErr
 	}
 	out, err := fn(ctx)
+	if out.Resource == (idempotency.Resource{}) {
+		out.Resource = e.bound
+	}
 	if err != nil {
 		if !out.DuplicateRetryAt.IsZero() {
 			return idempotency.Result{Response: out, Err: err}, nil
@@ -89,6 +99,10 @@ func (r *startRepoFake) Claim(_ context.Context, v StartRecord) (StartRecord, ti
 		return v, time.Time{}, errDependency
 	}
 	v.Request.ID = 1
+	if !r.busy.IsZero() {
+		v.Windows = nil
+		return v, r.busy, nil
+	}
 	r.record = &v
 	return v, r.busy, nil
 }
@@ -270,12 +284,13 @@ func TestStartRejectDuplicateAndBusy(t *testing.T) {
 }
 func TestStartErrorBranches(t *testing.T) {
 	for name, mutate := range map[string]func(*startFixtureData){
-		"reserve":     func(f *startFixtureData) { f.engine.reserveErr = errDependency },
-		"transaction": func(f *startFixtureData) { f.tx.err = errDependency },
-		"find":        func(f *startFixtureData) { f.repo.failure = "find" },
-		"claim":       func(f *startFixtureData) { f.repo.failure = "claim" },
-		"counter":     func(f *startFixtureData) { f.counters.err = errDependency },
-		"full limit":  func(f *startFixtureData) { f.counters.hits = []int{999, 999, 999, 999} },
+		"reserve":       func(f *startFixtureData) { f.engine.reserveErr = errDependency },
+		"bind resource": func(f *startFixtureData) { f.engine.bindErr = errDependency },
+		"transaction":   func(f *startFixtureData) { f.tx.err = errDependency },
+		"find":          func(f *startFixtureData) { f.repo.failure = "find" },
+		"claim":         func(f *startFixtureData) { f.repo.failure = "claim" },
+		"counter":       func(f *startFixtureData) { f.counters.err = errDependency },
+		"full limit":    func(f *startFixtureData) { f.counters.hits = []int{999, 999, 999, 999} },
 		"unavailable": func(f *startFixtureData) {
 			f.provider.createErr = ErrProviderUnavailable
 			f.provider.recoverErr = ErrProviderUnavailable
@@ -349,6 +364,7 @@ func TestStartReplayBindingAndConstructor(t *testing.T) {
 		"missing link":   func(f *startFixtureData) { f.repo.record = nil },
 		"wrong hash":     func(f *startFixtureData) { f.repo.record.Hash = token.Sum("other") },
 		"wrong token":    func(f *startFixtureData) { f.repo.record.Request.Hash = token.Sum("other") },
+		"wrong resource": func(f *startFixtureData) { f.engine.replay.Response.Resource.ID = "another-request" },
 		"bad body":       func(f *startFixtureData) { f.engine.replay.Response.Body = []byte("invalid") },
 		"owner mismatch": func(f *startFixtureData) { f.engine.replay.Response.OwnerID = "old-owner" },
 	} {

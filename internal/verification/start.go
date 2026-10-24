@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/fin-assist/contracts/gen/go/finerr"
@@ -24,9 +25,9 @@ type Started struct {
 	ExpiresAt             time.Time
 }
 
-// StartRecord links a key to its workflow and to phone-scoped deletion. Windows
-// contains four reserved slots only while this key owns unfinished creation;
-// completed responses and busy refusals have no refundable reservation.
+// StartRecord is the request's own durable creation attempt. Busy keys are linked
+// only through idempotency Resource metadata and never overwrite this identity.
+// Windows contains four refundable slots while creation is unfinished.
 type StartRecord struct {
 	Key     string
 	Hash    [32]byte
@@ -46,6 +47,7 @@ type Starts interface {
 
 // StartEngine is the shared library's external-effect protocol.
 type StartEngine interface {
+	BindResource(context.Context, idempotency.Reservation, idempotency.Resource) error
 	Reserve(context.Context, idempotency.Request) (idempotency.Reservation, idempotency.Result, error)
 	DoReserved(context.Context, idempotency.Reservation, func(context.Context) (idempotency.Response, error)) (idempotency.Result, error)
 	Release(context.Context, idempotency.Reservation) error
@@ -150,10 +152,10 @@ func (s *Starter) Start(ctx context.Context, key idempotency.Request, phone, ip 
 				if record.Request.Provider != s.provider.Name() || record.Request.CallID != "" {
 					return ErrProviderUnavailable
 				}
-				return nil
+				return s.engine.BindResource(tx, reservation, startResource(record.Request.ID))
 			}
-			// A busy key never owns the referenced request; dropping its link must not
-			// delete that request or its still-live verified result.
+			// Clear only an expired/finished attempt identity; its request and
+			// independently cached library resource links remain intact.
 			forget = true
 		} else if !errors.Is(err, ErrMissing) {
 			return err
@@ -189,12 +191,12 @@ func (s *Starter) Start(ctx context.Context, key idempotency.Request, phone, ip 
 		if !busy.IsZero() {
 			retry := ceilMinute(busy)
 			result, err = s.engine.DoReserved(tx, reservation, func(context.Context) (idempotency.Response, error) {
-				return idempotency.Response{DuplicateRetryAt: retry}, finerr.RateLimited(retry)
+				return idempotency.Response{DuplicateRetryAt: retry, Resource: startResource(record.Request.ID)}, finerr.RateLimited(retry)
 			})
 			return err
 		}
 		fresh = true
-		return nil
+		return s.engine.BindResource(tx, reservation, startResource(record.Request.ID))
 	})
 	if errors.Is(err, idempotency.ErrNotStored) {
 		return Started{}, result.Err
@@ -306,7 +308,7 @@ func (s *Starter) checkReplay(ctx context.Context, key idempotency.Request, resu
 		return ErrProviderUnavailable
 	}
 	h := token.Sum(out.Token)
-	if record.Hash != key.Hash || subtle.ConstantTimeCompare(h[:], record.Request.Hash[:]) != 1 {
+	if record.Hash != key.Hash || result.Response.Resource != startResource(record.Request.ID) || subtle.ConstantTimeCompare(h[:], record.Request.Hash[:]) != 1 {
 		return ErrProviderUnavailable
 	}
 	owner, err := s.owner(ctx, record.Request.Phone)
@@ -317,6 +319,10 @@ func (s *Starter) checkReplay(ctx context.Context, key idempotency.Request, resu
 		return ErrProviderUnavailable
 	}
 	return nil
+}
+
+func startResource(id int32) idempotency.Resource {
+	return idempotency.Resource{Type: "phone_verification", ID: strconv.FormatInt(int64(id), 10)}
 }
 
 func (s *Starter) reject(ctx context.Context, reservation idempotency.Reservation, record StartRecord) error {

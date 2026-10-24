@@ -226,7 +226,7 @@ func TestStartAPIFullNewAndExistingSignInAndDeletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	var keys, requests, links int
-	if err = env.App.DB.Primary().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM idempotency_keys WHERE key IN($1,$2,$3)),(SELECT count(*) FROM phone_verification WHERE phone=$4),(SELECT count(*) FROM phone_verification_start)`, key, secondKey, busyKey, phone).Scan(&keys, &requests, &links); err != nil || keys != 0 || requests != 0 || links != 0 {
+	if err = env.App.DB.Primary().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM idempotency_keys WHERE key IN($1,$2,$3)),(SELECT count(*) FROM phone_verification WHERE phone=$4),(SELECT count(*) FROM phone_verification WHERE start_key IS NOT NULL)`, key, secondKey, busyKey, phone).Scan(&keys, &requests, &links); err != nil || keys != 0 || requests != 0 || links != 0 {
 		t.Fatal("phone keys survived deletion", keys, requests, links, err)
 	}
 }
@@ -500,7 +500,7 @@ func TestStartAPIDeletionDuringProviderCannotResurrect(t *testing.T) {
 		t.Fatal("deleted request confirmed", changed, err)
 	}
 	var count int
-	if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM phone_verification WHERE phone=$1)+(SELECT count(*) FROM idempotency_keys WHERE key=$2)+(SELECT count(*) FROM phone_verification_start)`, phone, key).Scan(&count); err != nil || count != 0 {
+	if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM phone_verification WHERE phone=$1)+(SELECT count(*) FROM idempotency_keys WHERE key=$2)+(SELECT count(*) FROM phone_verification WHERE start_key IS NOT NULL)`, phone, key).Scan(&count); err != nil || count != 0 {
 		t.Fatal("creation resurrected data", count, err)
 	}
 }
@@ -645,5 +645,30 @@ func TestStartAPIDeletionRetriesBusyPreAccountCacheKey(t *testing.T) {
 	h := token.Sum(initial.GetVerificationToken())
 	if err = env.App.DB.Primary().QueryRow(t.Context(), `SELECT count(*) FROM phone_verification WHERE token_hash=$1`, h[:]).Scan(&count); err != nil || count != 0 {
 		t.Fatal("deleted verification survived", count, err)
+	}
+}
+
+func TestStartAPIResourceBindingFailureRollsBackClaimAndLimits(t *testing.T) {
+	p := &creationProvider{}
+	env := startEnv(t, p)
+	if _, err := env.App.DB.Primary().Exec(t.Context(), `ALTER TABLE idempotency_keys RENAME COLUMN resource_id TO unavailable`); err != nil {
+		t.Fatal(err)
+	}
+	key, phone := authKey(), "+79001234567"
+	if out, err := startCall(t, env, key, phone); out != nil || status.Code(err) != codes.Internal {
+		t.Fatal(out, err)
+	}
+	var requests, keys int
+	if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM phone_verification),(SELECT count(*) FROM idempotency_keys WHERE key=$1)`, key).Scan(&requests, &keys); err != nil || requests != 0 || keys != 0 || startHits(t, env) != 0 {
+		t.Fatal("failed link committed partial claim", requests, keys, err)
+	}
+	if creates, recovers := p.counts(); creates != 0 || recovers != 0 {
+		t.Fatal("unlinked claim called provider", creates, recovers)
+	}
+	if _, err := env.App.DB.Primary().Exec(t.Context(), `ALTER TABLE idempotency_keys RENAME COLUMN unavailable TO resource_id`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := startCall(t, env, key, phone); err != nil {
+		t.Fatal("failed link prevented retry", err)
 	}
 }

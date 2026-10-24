@@ -29,7 +29,7 @@ Ed25519-подпись access JWT на 15 минут, GetSigningKeys и GetConse
 Маршруты настраиваются без изменения производителя события, для доставки выделен
 отдельный primary-пул. Детали и ограничения — [docs/profile.md](docs/profile.md).
 
-StartPhoneVerification, Register, RefreshTokens и Logout работают через go-idempotency v0.3.0 с владельцем результата (FIN-226): зашифрованный
+StartPhoneVerification, Register, RefreshTokens и Logout работают через go-idempotency с Resource (FIN-230) с владельцем результата (FIN-226): зашифрованный
 повтор, одноразовая регистрация, скользящие refresh-сессии и отзыв цепочки при reuse.
 Регистрация атомарно сохраняет согласие на ПДн, первую сессию и начальный timezone.
 Две подтверждённые заявки одного нового номера получают один аккаунт и отдельные

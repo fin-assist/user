@@ -3,8 +3,8 @@
 Задача — [FIN-112](https://finassist.youtrack.cloud/issue/FIN-112). Миграция — [`migrations/000001_init_schema.up.sql`](../migrations/000001_init_schema.up.sql), проверки ключей, каскадов и ожидаемых запросов — [`migrations/schema_test.go`](../migrations/schema_test.go). Смысл полей — `fin-assist/contracts`: `docs/api.md` 1–2, `docs/grpc-api.md` 6, 6.1, 7.1; решения — Confluence PF «Архитектура» («Аутентификация», «Идемпотентность», «Идентификаторы», «PostgreSQL», «Бэкапы»).
 
 Исходная схема принята владельцем по ревью PR #2. Дополнение FIN-219 —
-[`000002_phone_start.up.sql`](../migrations/000002_phone_start.up.sql): таблица
-создания/восстановления и адресной очистки кэша, согласована владельцем 23.10.2026.
+[`000002_phone_start.up.sql`](../migrations/000002_phone_start.up.sql): данные попытки
+в существующей заявке; решение владельца 24.10.2026, FIN-230.
 Ниже аргументы и инварианты; исходные вопросы в конце закрыты 19.10.2026.
 
 **Решение владельца 19.10.2026 (ревью PR #2):** в БД нет правил валидации и логики. В схеме — только `PRIMARY KEY`, `UNIQUE` (в том числе частичные уникальные индексы), `FOREIGN KEY` с каскадами, `NOT NULL` и `DEFAULT` (в том числе `uuidv7()`, `now()`). Нет `CHECK`, `EXCLUDE`, триггеров и функций; форматы, диапазоны, согласованность состояний и уведомления — код сервиса (раздел «Инварианты в коде сервиса»). `TestSchemaHasNoRulesOrLogic` не даёт новой миграции вернуть их незаметно.
@@ -105,33 +105,36 @@
 - `provider` — `zvonok`, `fake` (FIN-122) и будущие; открытый код.
 - `user_id` → `app_user` `ON DELETE CASCADE`: при удалении аккаунта удаляются заявки с его `user_id`: подтверждённые для существующего пользователя (`user_id` ставит подтверждение) и закрытые `Register` (`user_id` ставит регистрация). Неподтверждённые заявки и подтверждённые для нового пользователя без `Register` `user_id` не имеют — их `DeleteAccount` удаляет по номеру (`phone_verification_phone_idx`), см. «Удаление аккаунта (2.5)» и вопрос 6.
 
-### `phone_verification_start` — принадлежность создания и очистка ответов (FIN-219)
+### Данные создания в `phone_verification` (FIN-219 / FIN-230)
+
+Отдельная таблица создания не нужна. Миграция 000002 расширяет заявку:
 
 | Столбец | Назначение |
 | --- | --- |
-| idempotency_key uuid PK | собственный ключ Start; ответы/секреты только в go-idempotency |
-| request_hash bytea NOT NULL | хеш всего protobuf-входа, в коде ровно 32 байта |
-| verification_id integer NOT NULL FK | phone_verification(id), ON DELETE CASCADE |
-| reserved_windows jsonb NOT NULL | исходные четыре окна лимитов своей незавершённой попытки; [] для завершённого или busy-ключа |
+| start_key uuid NULL | ключ собственной попытки; частичный UNIQUE для восстановления |
+| start_request_hash bytea NULL | хеш всего protobuf-входа, ровно 32 байта в коде |
+| start_reserved_windows jsonb NULL | четыре исходных окна незавершённой попытки; [] после завершения/дубля |
 
-Собственный ключ после сбоя восстанавливает свою попытку по хешу, не резервируя лимит
-повторно. Снимок окон содержит scope/subject/start/end и позволяет вернуть ровно исходные
-списания при доказанном отказе, даже после смены конфигурации/UTC-окна. Право компенсации
-даёт только действующий библиотечный резерв через ReleaseIfCurrent в той же транзакции.
-В таблице нет копий ответов, выбранных номеров или токенов.
+У заявок без собственной попытки все три поля NULL. Собственный ключ после сбоя
+восстанавливает попытку по хешу без повторного лимита. Снимок содержит
+scope/subject/start/end и разрешает вернуть ровно исходные списания после доказанного
+отказа, даже при смене UTC-окна/настроек. ReleaseIfCurrent и компенсация коммитятся
+вместе. Forget/Reject очищают только данные своей попытки, сохраняя заявку.
 
-verification_id намеренно не UNIQUE: несколько кэшируемых busy-ключей ссылаются на
-один holder. Индекс phone_verification_start_request_idx обслуживает FK/cascade и
-проверку живых кэшей при очистке. Отказ провайдера освобождает holder и удаляет только
-собственную ссылку; чужие busy-ссылки сохраняются для удаления вместе с телефоном.
-Forget блокирует родительскую заявку перед дочерней ссылкой, как каскадная очистка.
+Связь нескольких ключей с заявкой хранится в go-idempotency Resource:
+resource_type=phone_verification, resource_id=id заявки в десятичной записи.
+Свой резерв связывается через BindResource в транзакции claim, DoReserved наследует
+связь в ответе. Busy-ключ получает Resource holder в сохраняемом отказе и не меняет
+start_key/hash/windows чужой заявки. Ответы/токены только в библиотеке.
 
-DeleteAccount по связям phone → request → start → idempotency_keys удаляет все
-сохранённые Start-ответы телефона, включая no-user ключи до создания аккаунта.
-Ключи дополнительно ограничиваются scope и endpoint и блокируются NOWAIT под Guard.
-Очистка не удаляет заявку/ссылки, пока жив соответствующий кэш (24 ч от завершения).
+DeleteAccount берёт Guard/user, затем FOR UPDATE всех заявок телефона перед
+поиском связанных ключей. Это сериализует purge с FOR KEY SHARE busy-claim:
+незавершённая связь не может закоммититься за снимком удаляемых ключей. Далее
+scope/endpoint/Resource ограничивают NOWAIT-блокировку и удаление ключей.
+Очистка сохраняет заявку, пока жив кэш Resource (24 ч от завершения).
+FK между библиотекой и сервисом нет; жизненным циклом управляет сервис.
 Проверки — TestStartRepositoryOwnershipBusyAndAtomicCompletion,
-TestStartAPIRejectionKeepsBusyKeyForPhoneScopedDeletion и остальные TestStartAPI*.
+TestStartPurgeIncludesBusyKeyCommittedWhileDeletionWaits, TestStartAPI*.
 
 ### `auth_session`, `refresh_token` — refresh-сессии (1.2, 1.4, 1.5)
 
@@ -205,7 +208,7 @@ RETURNING hits;
 
 Одна транзакция `DeleteAccount` на primary:
 
-1. Guard пользователя (`go-tombstone`, FIN-110); если tombstone уже есть, немедленный OK; иначе блокировка ключей `scope = user_id OR owner_id = user_id` через `FOR UPDATE NOWAIT`, чтение телефона `app_user FOR UPDATE`; блокировка/удаление ключей Start телефона через phone_verification_start (тоже NOWAIT), затем удаление адресных ключей;
+1. Guard пользователя (`go-tombstone`, FIN-110); если tombstone уже есть, немедленный OK; иначе блокировка ключей `scope = user_id OR owner_id = user_id` через `FOR UPDATE NOWAIT`, чтение телефона `app_user FOR UPDATE`; блокировка/удаление ключей Start телефона через Resource (перед поиском ключей блокируются заявки телефона, ключи — NOWAIT), затем удаление адресных ключей;
 2. `DELETE FROM app_user WHERE id = $1` — каскадом согласия, заявки с `user_id` (подтверждённые для существующего пользователя и закрытые `Register`), сессии и все refresh (синхронный отзыв);
 3. `DELETE FROM phone_verification WHERE phone = $1` — все остальные заявки номера (решение владельца 19.10.2026, вопрос 6, вариант (а)); индекс `phone_verification_phone_idx`;
 4. удаление оставшихся событий `user.timezone_changed` этого пользователя и запись события `user.deleted` для `PurgeUserData` в `bank-statement-data`, `analytics`, `assistant` (`go-outbox`, FIN-109);
@@ -253,7 +256,7 @@ TestProfilesConsentHistoryAndVersionSwitch, TestProfilesRollbackConcurrencyAndDe
 | 14 | `provider`, `result_key_id`, `scope` лимита — известные значения | константы в коде; `provider` — имя реализации интерфейса провайдера, `scope` — из конфигурации лимитов |
 | 15 | Счётчик лимита: `hits ≥ 0`, `window_end > window_start`, `subject` ≤ 64 | Lock вставляет 0, Check атомарно увеличивает все окна; Refund уменьшает только существующие исходные окна с hits>0; время вычисляет limiter, компенсация fenced библиотекой |
 | 16 | `provider_call_id` — 1…128 байт. Недоверенный ввод провайдера | validateCall отклоняет пустой/длинный ID с INTERNAL без ПДн и частичного завершения; общий Confirm проверяет Proof отдельно; неверный ответ не превращается в ErrProviderDuplicate и не даёт компенсацию неопределённого внешнего эффекта |
-| 17 | Принадлежность восстановления, request_hash32, windows — массив из 4 или 0 элементов | Starter сравнивает свой ключ/хеш, репозиторий проверяет сохранённую форму; Refund проверяет четыре фиксированных scope/порядок/границы; busy не даёт владения чужой попыткой; unit/PG/API-тесты |
+| 17 | Принадлежность восстановления, request_hash32, windows — массив из 4 или 0 элементов | Starter сравнивает свой ключ/хеш, репозиторий проверяет сохранённые start_request_hash/start_reserved_windows; Refund проверяет четыре фиксированных scope/порядок/границы; busy не даёт владения чужой попыткой; unit/PG/API-тесты |
 | 18 | Завершение не воскрешает удалённую/изменённую попытку | DoReserved fencing + Complete CAS по id/provider/placeholder hash/ключу/хешу и исходному pending-состоянию; selector и encrypted replay коммитятся вместе; тесты rollback/конкуренции с Delete |
 | 19 | callback_number принадлежит свежему ответу провайдера | validateCall: телефон/срок/call_id, 1–1000 номеров E.164; selector получает копию, результат проверяется по исходному списку; FIN-216 реализует выбор/хранение пула |
 
@@ -267,8 +270,8 @@ TestProfilesConsentHistoryAndVersionSwitch, TestProfilesRollbackConcurrencyAndDe
 |---|---|
 | Живой пользователь по телефону: `SELECT … FROM app_user WHERE phone = $1` | `app_user_phone_key` |
 | Заявка по хешу токена (1.2): `WHERE token_hash = $1` | `phone_verification_token_hash_key` |
-| Восстановление Start по ключу | `phone_verification_start_pkey` |
-| Живой кэш Start при очистке / каскад ссылок | `phone_verification_start_request_idx`, PK библиотеки idempotency_keys |
+| Восстановление Start по ключу | `phone_verification_start_key` |
+| Живой кэш Start при очистке / адресное удаление | `idempotency_keys_resource_idx` библиотеки по scope/type/id |
 | Заявка по хешу `registration_token` (1.3) | `phone_verification_registration_token_hash_key` |
 | Постбэк по `call_id` | `phone_verification_provider_call_key` |
 | Номер занят / `retry_at` дубля: `WHERE phone = $1 AND released_at IS NULL`; освобождение истёкшего держателя; `ON CONFLICT (phone) WHERE released_at IS NULL` | `phone_verification_phone_held_key` (частичный уникальный) |
