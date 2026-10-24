@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func TestSessionsConfigAndKeyFile(t *testing.T) {
+func TestUnitSessionsConfigAndKeyFile(t *testing.T) {
 	r := reader{command: "serve", getenv: func(string) string { return "" }}
 	c := r.sessions()
 	if c.RefreshTTL != 60*24*time.Hour || c.MaxConns != 8 || c.IdempotencyKeyFile != "" || len(r.errs) != 0 {

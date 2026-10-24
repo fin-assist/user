@@ -9,7 +9,7 @@ import (
 )
 
 // Every migration of the service applies, rolls back and applies again on an empty database.
-func TestUpDownUp(t *testing.T) {
+func TestIntegrationUpDownUp(t *testing.T) {
 	src := migrate.Source{Name: "service", Table: "schema_migrations", FS: migrations.FS}
 	if err := migrate.Validate(src); err != nil {
 		t.Fatal(err)

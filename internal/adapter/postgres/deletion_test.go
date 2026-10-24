@@ -14,7 +14,7 @@ import (
 	"github.com/fin-assist/user/internal/deletion"
 )
 
-func TestDeletionRepositoryRequiresTransactionAndAvoidsReplayDeadlock(t *testing.T) {
+func TestIntegrationDeletionRepositoryRequiresTransactionAndAvoidsReplayDeadlock(t *testing.T) {
 	db, _, _ := profileDB(t)
 	if err := migrate.Up(t.Context(), migrate.DefaultConfig(db.primary.Config().ConnConfig.ConnString()), []migrate.Source{{Name: idempotency.MigrationsName, Table: idempotency.MigrationsTable, FS: idempotency.Migrations}}); err != nil {
 		t.Fatal(err)

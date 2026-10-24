@@ -10,7 +10,7 @@ import (
 	"github.com/fin-assist/user/internal/token"
 )
 
-func TestDecodeStartRecordWithoutDatabase(t *testing.T) {
+func TestUnitDecodeStartRecordWithoutDatabase(t *testing.T) {
 	hash := token.Sum("logical request")
 	start := time.Date(2026, 10, 24, 0, 0, 0, 0, time.UTC)
 	windows := []ratelimit.Window{

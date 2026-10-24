@@ -247,7 +247,7 @@ func fixture(t *testing.T) *phoneFixture {
 }
 func goodProof() Proof { return Proof{Provider: "test", CallID: "call-1", Phone: "+79001234567"} }
 
-func TestConfirmCreatedUsesPrelockedOwnerWithoutRediscovery(t *testing.T) {
+func TestUnitConfirmCreatedUsesPrelockedOwnerWithoutRediscovery(t *testing.T) {
 	for _, owner := range []string{"", "already-locked-user"} {
 		f := fixture(t)
 		f.a.id = "account-appeared-after-start-locked-request"
@@ -269,7 +269,7 @@ func reason(err error) string {
 	return ""
 }
 
-func TestConfirmNewExistingAndRepeatedProof(t *testing.T) {
+func TestUnitConfirmNewExistingAndRepeatedProof(t *testing.T) {
 	for _, existing := range []bool{false, true} {
 		t.Run(map[bool]string{false: "new", true: "existing"}[existing], func(t *testing.T) {
 			f := fixture(t)
@@ -302,7 +302,7 @@ func TestConfirmNewExistingAndRepeatedProof(t *testing.T) {
 		})
 	}
 }
-func TestConfirmRejectionsAndDependencyFailures(t *testing.T) {
+func TestUnitConfirmRejectionsAndDependencyFailures(t *testing.T) {
 	for _, p := range []Proof{{Provider: "invalid/provider", CallID: "call-1", Phone: "+79001234567"}, {Provider: "test", CallID: strings.Repeat("x", 129), Phone: "+79001234567"}, {Provider: "test", CallID: "", Phone: "+79001234567"}, {Provider: "test", CallID: "call-1", Phone: "+7900123456x"}, {Provider: "test", CallID: "call-1", Phone: "+79001234568"}} {
 		f := fixture(t)
 		if changed, err := f.s.Confirm(t.Context(), p); changed || !errors.Is(err, ErrProof) || f.tokens != 0 {
@@ -357,7 +357,7 @@ func TestConfirmRejectionsAndDependencyFailures(t *testing.T) {
 		})
 	}
 }
-func TestSnapshotBoundariesCorruptionAndOwnerRace(t *testing.T) {
+func TestUnitSnapshotBoundariesCorruptionAndOwnerRace(t *testing.T) {
 	for _, mode := range []string{"pending", "expiry", "missing", "wrong-hash", "closed", "by-token", "lock", "lock-missing", "future-result", "result-expired", "no-cipher", "no-key", "open-error", "bad-state", "bad-owner", "bad-kind", "bad-reg-hash", "empty-reg", "reg-pair", "session-missing", "session-reg"} {
 		t.Run(mode, func(t *testing.T) {
 			f := fixture(t)
@@ -441,7 +441,7 @@ func TestSnapshotBoundariesCorruptionAndOwnerRace(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-func TestWatchSubscribeBeforeSnapshotAndTerminalReplay(t *testing.T) {
+func TestUnitWatchSubscribeBeforeSnapshotAndTerminalReplay(t *testing.T) {
 	f := fixture(t)
 	f.n.subscribe = func() {
 		if _, err := f.s.Confirm(t.Context(), goodProof()); err != nil {
@@ -462,7 +462,7 @@ func TestWatchSubscribeBeforeSnapshotAndTerminalReplay(t *testing.T) {
 		t.Fatal(err, f.n.calls)
 	}
 }
-func TestWatchExpiryCancellationFailureAndRelease(t *testing.T) {
+func TestUnitWatchExpiryCancellationFailureAndRelease(t *testing.T) {
 	for _, mode := range []string{"expire", "cancel", "disconnect", "send", "subscribe", "missing"} {
 		t.Run(mode, func(t *testing.T) {
 			f := fixture(t)
@@ -532,7 +532,7 @@ func TestWatchExpiryCancellationFailureAndRelease(t *testing.T) {
 		})
 	}
 }
-func TestCleanupStagesCommitSeparatelyAndStopOnError(t *testing.T) {
+func TestUnitCleanupStagesCommitSeparatelyAndStopOnError(t *testing.T) {
 	for _, stage := range []string{"", "results", "detach", "delete"} {
 		f := fixture(t)
 		f.r.stageFailure = stage
@@ -551,7 +551,7 @@ func TestCleanupStagesCommitSeparatelyAndStopOnError(t *testing.T) {
 	}
 }
 
-func TestPhoneAdditionalErrorAndClockEdges(t *testing.T) {
+func TestUnitPhoneAdditionalErrorAndClockEdges(t *testing.T) {
 	f := fixture(t)
 	f.tokenErr = errDependency
 	if changed, err := f.s.Confirm(t.Context(), goodProof()); changed || !errors.Is(err, errDependency) {
@@ -591,7 +591,7 @@ func TestPhoneAdditionalErrorAndClockEdges(t *testing.T) {
 	}
 }
 
-func TestReleasedPendingCannotBecomeLiveAfterClockRollback(t *testing.T) {
+func TestUnitReleasedPendingCannotBecomeLiveAfterClockRollback(t *testing.T) {
 	f := fixture(t)
 	f.r.r.Released = true
 	if changed, err := f.s.Confirm(t.Context(), goodProof()); changed || err != nil || f.tokens != 0 {

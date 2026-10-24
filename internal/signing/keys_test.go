@@ -35,7 +35,7 @@ func keyFile(t *testing.T) string {
 	return p
 }
 
-func TestRotationAndPublicKeyValidation(t *testing.T) {
+func TestUnitRotationAndPublicKeyValidation(t *testing.T) {
 	now := time.Now
 	old, err := Load(Options{PrivateKeyFile: keyFile(t), KeyID: "old", Issuer: "user", Audience: "app", Clock: now})
 	if err != nil {
@@ -116,7 +116,7 @@ func mustSign(t *testing.T, k *Keys) string {
 	return s
 }
 
-func TestMalformedKeyFiles(t *testing.T) {
+func TestUnitMalformedKeyFiles(t *testing.T) {
 	o := Options{PrivateKeyFile: keyFile(t), KeyID: "key", Issuer: "user", Audience: "app", Clock: time.Now}
 	for _, body := range []string{"not a key", string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: []byte("x")})), string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte("x")})), strings.Repeat("x", 8193)} {
 		if err := os.WriteFile(o.PrivateKeyFile, []byte(body), 0o600); err != nil {
@@ -150,7 +150,7 @@ func TestMalformedKeyFiles(t *testing.T) {
 	}
 }
 
-func TestPublicKeyCountIncludesActiveKey(t *testing.T) {
+func TestUnitPublicKeyCountIncludesActiveKey(t *testing.T) {
 	var extra keySet
 	for i := 0; i < 64; i++ {
 		extra.Keys = append(extra.Keys, publicKey{Type: "OKP", Curve: "Ed25519", ID: fmt.Sprintf("k-%d", i), X: base64.RawURLEncoding.EncodeToString(make([]byte, 32))})
@@ -168,7 +168,7 @@ func TestPublicKeyCountIncludesActiveKey(t *testing.T) {
 	}
 }
 
-func TestSignAndVerify(t *testing.T) {
+func TestUnitSignAndVerify(t *testing.T) {
 	now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
 	clock := func() time.Time { return now }
 	k, err := Load(Options{PrivateKeyFile: keyFile(t), KeyID: "current", Issuer: "test-user", Audience: "test-app", Clock: clock})
@@ -209,7 +209,7 @@ func TestSignAndVerify(t *testing.T) {
 	}
 }
 
-func TestInvalidOptions(t *testing.T) {
+func TestUnitInvalidOptions(t *testing.T) {
 	good := Options{PrivateKeyFile: keyFile(t), KeyID: "key", Issuer: "user", Audience: "app", Clock: time.Now}
 	for _, mutate := range []func(*Options){
 		func(o *Options) { o.PrivateKeyFile = "" }, func(o *Options) { o.KeyID = "" },

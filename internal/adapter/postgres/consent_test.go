@@ -10,7 +10,7 @@ import (
 	"github.com/fin-assist/user/migrations"
 )
 
-func TestConsentDocumentsPrimaryAndVersionSwitch(t *testing.T) {
+func TestIntegrationConsentDocumentsPrimaryAndVersionSwitch(t *testing.T) {
 	dsn := migratetest.DSN(t)
 	if err := migrate.Up(t.Context(), migrate.DefaultConfig(dsn), []migrate.Source{{Name: "service", Table: "schema_migrations", FS: migrations.FS}}); err != nil {
 		t.Fatal(err)

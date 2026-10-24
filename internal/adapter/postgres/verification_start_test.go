@@ -22,7 +22,7 @@ func startRecord(key, phone string, now time.Time) verification.StartRecord {
 const startKeyA = "019c7714-3b77-74d1-9866-000000000001"
 const startKeyB = "019c7714-3b77-74d1-9866-000000000002"
 
-func TestStartPurgeParentCancellationReleasesGuard(t *testing.T) {
+func TestIntegrationStartPurgeParentCancellationReleasesGuard(t *testing.T) {
 	db, _, _ := profileDB(t)
 	a := startRecord(startKeyA, "+79001234567", time.Now().UTC())
 	if err := db.Run(t.Context(), func(ctx context.Context) error {
@@ -80,7 +80,7 @@ func TestStartPurgeParentCancellationReleasesGuard(t *testing.T) {
 	}
 }
 
-func TestStartPurgeIncludesBusyKeyCommittedWhileDeletionWaits(t *testing.T) {
+func TestIntegrationStartPurgeIncludesBusyKeyCommittedWhileDeletionWaits(t *testing.T) {
 	db, _, _ := profileDB(t)
 	a := startRecord(startKeyA, "+79001234567", time.Now().UTC())
 	if err := db.Run(t.Context(), func(ctx context.Context) error {
@@ -134,7 +134,7 @@ func TestStartPurgeIncludesBusyKeyCommittedWhileDeletionWaits(t *testing.T) {
 	}
 }
 
-func TestStartDeletionRollsBackOnLockedNoOwnerKey(t *testing.T) {
+func TestIntegrationStartDeletionRollsBackOnLockedNoOwnerKey(t *testing.T) {
 	db, _, _ := profileDB(t)
 	now := time.Now().UTC()
 	a := startRecord(startKeyA, "+79001234567", now)
@@ -193,7 +193,7 @@ func TestStartDeletionRollsBackOnLockedNoOwnerKey(t *testing.T) {
 	}
 }
 
-func TestStartRepositoryOwnershipBusyAndAtomicCompletion(t *testing.T) {
+func TestIntegrationStartRepositoryOwnershipBusyAndAtomicCompletion(t *testing.T) {
 	db, _, _ := profileDB(t)
 	var absent bool
 	if err := db.Primary().QueryRow(t.Context(), `SELECT to_regclass('phone_verification_start') IS NULL`).Scan(&absent); err != nil || !absent {
@@ -279,7 +279,7 @@ func TestStartRepositoryOwnershipBusyAndAtomicCompletion(t *testing.T) {
 		t.Fatal("completed call relabeled", err)
 	}
 }
-func TestStartRepositoryRefundUsesPersistedOriginalWindows(t *testing.T) {
+func TestIntegrationStartRepositoryRefundUsesPersistedOriginalWindows(t *testing.T) {
 	db, _, _ := profileDB(t)
 	repo := NewVerificationStarts(db)
 	now := time.Now().UTC().Truncate(time.Microsecond)
@@ -328,7 +328,7 @@ func TestStartRepositoryRefundUsesPersistedOriginalWindows(t *testing.T) {
 		t.Fatal("old refund recreated retention windows", err)
 	}
 }
-func TestStartRepositoryCorruptionAndCleanupMappingLifetime(t *testing.T) {
+func TestIntegrationStartRepositoryCorruptionAndCleanupMappingLifetime(t *testing.T) {
 	db, service, _, now := phoneState(t)
 	repo := NewVerificationStarts(db)
 	a := startRecord(startKeyA, "+79001234567", now.Add(-24*time.Hour-2*time.Second))

@@ -10,3 +10,13 @@ node_modules/
 
 # Local private signing material
 .local/
+
+# FIN-238 coverage profiles and built-in reports
+unit.out
+integration.out
+api.out
+*.jsonl
+*.coverage.txt
+*.breakdown
+*.report.txt
+test-names.txt

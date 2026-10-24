@@ -11,7 +11,7 @@ import (
 	"github.com/fin-assist/user/internal/config"
 )
 
-func TestFakePhoneProdStartupFailsBeforeOpeningResources(t *testing.T) {
+func TestUnitFakePhoneProdStartupFailsBeforeOpeningResources(t *testing.T) {
 	cfg := config.Config{Env: config.EnvProd, Zvonok: config.ZvonokConfig{Provider: "fake"}}
 	if a, err := New(t.Context(), cfg, slog.New(slog.DiscardHandler), prometheus.NewRegistry()); a != nil || err == nil || !strings.Contains(err.Error(), "fake backend") {
 		t.Fatal(a, err)

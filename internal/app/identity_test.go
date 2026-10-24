@@ -43,7 +43,7 @@ func signingConfig(t *testing.T) config.SigningConfig {
 	return config.SigningConfig{PrivateKeyFile: path, KeyID: "user-key", Issuer: "test-user", Audience: "test-app"}
 }
 
-func TestKubernetesIdentityTLS(t *testing.T) {
+func TestIntegrationKubernetesIdentityTLS(t *testing.T) {
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -126,20 +126,20 @@ func TestKubernetesIdentityTLS(t *testing.T) {
 	}
 }
 
-func TestNewRequiresSigningKey(t *testing.T) {
+func TestUnitNewRequiresSigningKey(t *testing.T) {
 	cfg := config.Config{Env: config.EnvDev, Auth: config.AuthConfig{Mode: config.AuthInsecureDev}}
 	if _, err := New(t.Context(), cfg, nil, prometheus.NewRegistry()); err == nil || !strings.Contains(err.Error(), "signing:") {
 		t.Fatalf("startup: %v", err)
 	}
 }
 
-func TestLibraryMigrationSources(t *testing.T) {
+func TestIntegrationLibraryMigrationSources(t *testing.T) {
 	for _, source := range MigrationSources() {
 		t.Run(source.Name, func(t *testing.T) { migratetest.CheckUpDownUp(t, source) })
 	}
 }
 
-func TestStageVerifierCannotStartInProd(t *testing.T) {
+func TestUnitStageVerifierCannotStartInProd(t *testing.T) {
 	cfg := config.Config{Env: config.EnvProd, Service: "user", Signing: signingConfig(t), Auth: config.AuthConfig{Mode: config.AuthVerify, ServiceMode: "stage", ServiceIssuer: "stage"}}
 	keys, err := signing.Load(signing.Options{PrivateKeyFile: cfg.Signing.PrivateKeyFile, KeyID: cfg.Signing.KeyID, Issuer: cfg.Signing.Issuer, Audience: cfg.Signing.Audience, Clock: time.Now})
 	if err != nil {
@@ -159,7 +159,7 @@ func TestStageVerifierCannotStartInProd(t *testing.T) {
 	}
 }
 
-func TestTombstoneServerAdapter(t *testing.T) {
+func TestIntegrationTombstoneServerAdapter(t *testing.T) {
 	db, err := postgres.Open(t.Context(), postgres.Options{PrimaryDSN: migratetest.DSN(t), MaxConns: 1})
 	if err != nil {
 		t.Fatal(err)

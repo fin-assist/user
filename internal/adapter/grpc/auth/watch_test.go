@@ -34,7 +34,7 @@ func (*watchStream) SendHeader(metadata.MD) error { return nil }
 func (*watchStream) SetTrailer(metadata.MD)       {}
 func (*watchStream) SendMsg(any) error            { return nil }
 func (*watchStream) RecvMsg(any) error            { return nil }
-func TestWatchLimitsBeforeSecretAndMessageMapping(t *testing.T) {
+func TestUnitWatchLimitsBeforeSecretAndMessageMapping(t *testing.T) {
 	for _, o := range []verification.Outcome{{State: verification.Pending}, {State: verification.Expired}, {State: verification.Verified, IsNewUser: true, RegistrationToken: "reg"}, {State: verification.Verified, Pair: auth.Pair{Access: "a", Refresh: "r"}}} {
 		h, _, _, limits, _ := handlerFixture(t)
 		calls := 0

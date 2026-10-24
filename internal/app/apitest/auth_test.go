@@ -74,7 +74,7 @@ func checkAccessJWT(t *testing.T, env *apitest.Env, raw, id string) {
 	}
 }
 
-func TestAuthAPIRegisterAtomicReplayAndInitialTimezone(t *testing.T) {
+func TestAPIAuthAPIRegisterAtomicReplayAndInitialTimezone(t *testing.T) {
 	env := apitest.Start(t)
 	seedDocuments(t, env)
 	c := userv1.NewAuthServiceClient(env.Conn)
@@ -122,7 +122,7 @@ func TestAuthAPIRegisterAtomicReplayAndInitialTimezone(t *testing.T) {
 	}
 }
 
-func TestAuthAPIRegisterErrorsDoNotConsumeTheResult(t *testing.T) {
+func TestAPIAuthAPIRegisterErrorsDoNotConsumeTheResult(t *testing.T) {
 	env := apitest.Start(t)
 	seedDocuments(t, env)
 	c := userv1.NewAuthServiceClient(env.Conn)
@@ -168,7 +168,7 @@ func TestAuthAPIRegisterErrorsDoNotConsumeTheResult(t *testing.T) {
 	}
 }
 
-func TestAuthAPIConcurrentRegisterSameKeyIsOneEffect(t *testing.T) {
+func TestAPIAuthAPIConcurrentRegisterSameKeyIsOneEffect(t *testing.T) {
 	env := apitest.Start(t)
 	seedDocuments(t, env)
 	seedRegistration(t, env, "reg", "+79001234567", time.Now().UTC().Add(-6*time.Minute))
@@ -202,7 +202,7 @@ func TestAuthAPIConcurrentRegisterSameKeyIsOneEffect(t *testing.T) {
 	}
 }
 
-func TestAuthAPIConcurrentRegisterDifferentKeysConsumesTokenOnce(t *testing.T) {
+func TestAPIAuthAPIConcurrentRegisterDifferentKeysConsumesTokenOnce(t *testing.T) {
 	env := apitest.Start(t)
 	seedDocuments(t, env)
 	seedRegistration(t, env, "reg", "+79001234567", time.Now().UTC().Add(-6*time.Minute))
@@ -260,7 +260,7 @@ func TestAuthAPIConcurrentRegisterDifferentKeysConsumesTokenOnce(t *testing.T) {
 	}
 }
 
-func TestAuthAPICleanupDrainsBatchesAndKeepsLiveState(t *testing.T) {
+func TestAPIAuthAPICleanupDrainsBatchesAndKeepsLiveState(t *testing.T) {
 	env := apitest.Start(t)
 	seedDocuments(t, env)
 	registered, _ := registerAPI(t, env, "reg", "+79001234567")
@@ -299,7 +299,7 @@ func TestAuthAPICleanupDrainsBatchesAndKeepsLiveState(t *testing.T) {
 	}
 }
 
-func TestAuthAPIRequestInProgressDoesNotConsumeSecondAttempt(t *testing.T) {
+func TestAPIAuthAPIRequestInProgressDoesNotConsumeSecondAttempt(t *testing.T) {
 	for _, method := range []string{"register", "refresh"} {
 		t.Run(method, func(t *testing.T) {
 			env := apitest.Start(t)
@@ -373,7 +373,7 @@ func (h authFailureLog) Handle(_ context.Context, r slog.Record) error {
 func (h authFailureLog) WithAttrs([]slog.Attr) slog.Handler { return h }
 func (h authFailureLog) WithGroup(string) slog.Handler      { return h }
 
-func TestAuthAPICleanupFailureLogsAndStops(t *testing.T) {
+func TestIntegrationAuthCleanupFailureLogsAndStops(t *testing.T) {
 	for _, table := range []string{"idempotency_keys", "refresh_token"} {
 		t.Run(table, func(t *testing.T) {
 			env := apitest.Start(t)
@@ -421,7 +421,7 @@ func TestAuthAPICleanupFailureLogsAndStops(t *testing.T) {
 	}
 }
 
-func TestAuthAPIConcurrentRegistrationsKeepOneAccountAndSettings(t *testing.T) {
+func TestAPIAuthAPIConcurrentRegistrationsKeepOneAccountAndSettings(t *testing.T) {
 	env := apitest.Start(t)
 	seedDocuments(t, env)
 	c := userv1.NewAuthServiceClient(env.Conn)
@@ -470,7 +470,7 @@ func TestAuthAPIConcurrentRegistrationsKeepOneAccountAndSettings(t *testing.T) {
 	}
 }
 
-func TestAuthAPIRefreshReplayReuseAndLogout(t *testing.T) {
+func TestAPIAuthAPIRefreshReplayReuseAndLogout(t *testing.T) {
 	env := apitest.Start(t)
 	seedDocuments(t, env)
 	c := userv1.NewAuthServiceClient(env.Conn)
@@ -517,7 +517,7 @@ func TestAuthAPIRefreshReplayReuseAndLogout(t *testing.T) {
 	checkAccessJWT(t, env, first.GetTokens().GetAccessToken(), registered.GetUserId())
 }
 
-func TestAuthAPIBadSecretsHitLimitsBeforeTokensAndKeysBeforeLimits(t *testing.T) {
+func TestAPIAuthAPIBadSecretsHitLimitsBeforeTokensAndKeysBeforeLimits(t *testing.T) {
 	env := apitest.Start(t, func(c *config.Config) {
 		c.Limits[ratelimit.RefreshIP] = ratelimit.Rule{Limit: 2, Window: time.Hour}
 		c.Limits[ratelimit.RegisterIP] = ratelimit.Rule{Limit: 1, Window: time.Hour}
@@ -552,7 +552,7 @@ func TestAuthAPIBadSecretsHitLimitsBeforeTokensAndKeysBeforeLimits(t *testing.T)
 	}
 }
 
-func TestAuthAPIConcurrentSameAndDifferentRefreshKeys(t *testing.T) {
+func TestAPIAuthAPIConcurrentSameAndDifferentRefreshKeys(t *testing.T) {
 	for _, sameKey := range []bool{true, false} {
 		t.Run(fmt.Sprint(sameKey), func(t *testing.T) {
 			env := apitest.Start(t)
@@ -605,7 +605,7 @@ func TestAuthAPIConcurrentSameAndDifferentRefreshKeys(t *testing.T) {
 	}
 }
 
-func TestAuthAPIAccessTableErrorsAndDeletedReplay(t *testing.T) {
+func TestAPIAuthAPIAccessTableErrorsAndDeletedReplay(t *testing.T) {
 	env := apitest.Start(t)
 	seedDocuments(t, env)
 	r, key := registerAPI(t, env, "reg", "+79001234567")
@@ -654,7 +654,7 @@ func TestAuthAPIAccessTableErrorsAndDeletedReplay(t *testing.T) {
 	}
 }
 
-func TestAuthAPICancelAfterEffectStillCommitsAndReplays(t *testing.T) {
+func TestAPIAuthAPICancelAfterEffectStillCommitsAndReplays(t *testing.T) {
 	env := apitest.Start(t)
 	seedDocuments(t, env)
 	r, _ := registerAPI(t, env, "reg", "+79001234567")
@@ -700,7 +700,7 @@ func TestAuthAPICancelAfterEffectStillCommitsAndReplays(t *testing.T) {
 	}
 }
 
-func TestAuthAPIFailedOwnerStorageRollsBackEveryRegistrationEffect(t *testing.T) {
+func TestAPIAuthAPIFailedOwnerStorageRollsBackEveryRegistrationEffect(t *testing.T) {
 	env := apitest.Start(t)
 	seedDocuments(t, env)
 	c := userv1.NewAuthServiceClient(env.Conn)
@@ -718,7 +718,7 @@ func TestAuthAPIFailedOwnerStorageRollsBackEveryRegistrationEffect(t *testing.T)
 	}
 }
 
-func TestAuthAPIExpiredRefreshReplayAndLiveKeyBeforeLimit(t *testing.T) {
+func TestAPIAuthAPIExpiredRefreshReplayAndLiveKeyBeforeLimit(t *testing.T) {
 	env := apitest.Start(t, func(c *config.Config) { c.Limits[ratelimit.RefreshIP] = ratelimit.Rule{Limit: 2, Window: time.Hour} })
 	seedDocuments(t, env)
 	r, _ := registerAPI(t, env, "reg", "+79001234567")
@@ -780,7 +780,7 @@ func counterValue(t *testing.T, env *apitest.Env, name, label, value string) flo
 	return 0
 }
 
-func TestAuthAPICachedOwnerIntegrityFailsClosed(t *testing.T) {
+func TestAPIAuthAPICachedOwnerIntegrityFailsClosed(t *testing.T) {
 	env := apitest.Start(t)
 	seedDocuments(t, env)
 	registered, registerKey := registerAPI(t, env, "reg", "+79001234567")

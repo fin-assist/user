@@ -25,7 +25,7 @@ type eventFunc func(context.Context, string) error
 
 func (f eventFunc) UserDeleted(ctx context.Context, id string) error { return f(ctx, id) }
 
-func TestDeleteAtomicBoundariesAndErrors(t *testing.T) {
+func TestUnitDeleteAtomicBoundariesAndErrors(t *testing.T) {
 	want := errors.New("dependency failure")
 	for _, mode := range []string{"ok", "repeat", "tx", "purger", "remove", "events"} {
 		t.Run(mode, func(t *testing.T) {
@@ -85,7 +85,7 @@ func TestDeleteAtomicBoundariesAndErrors(t *testing.T) {
 		})
 	}
 }
-func TestDeleteRollsBackBeforeContentionRetryAndStops(t *testing.T) {
+func TestUnitDeleteRollsBackBeforeContentionRetryAndStops(t *testing.T) {
 	attempts := 0
 	for _, cancelled := range []bool{false, true} {
 		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
@@ -122,7 +122,7 @@ func TestDeleteRollsBackBeforeContentionRetryAndStops(t *testing.T) {
 	}
 }
 
-func TestDeleteContentionHonorsCallerDeadline(t *testing.T) {
+func TestUnitDeleteContentionHonorsCallerDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
 	defer cancel()
 	tx := txFunc(func(ctx context.Context, fn func(context.Context) error) error { return fn(ctx) })

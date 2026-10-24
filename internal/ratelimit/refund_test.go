@@ -18,7 +18,7 @@ type refundStore struct {
 
 func (s *refundStore) Refund(context.Context, []Window) error { s.calls++; return s.err }
 
-func TestReservationRefundSnapshotAndMetrics(t *testing.T) {
+func TestUnitReservationRefundSnapshotAndMetrics(t *testing.T) {
 	s := &refundStore{counterFunc: func(_ context.Context, w []Window) ([]int, error) { return make([]int, len(w)), nil }}
 	l, err := New(Defaults(), s, time.Now, prometheus.NewRegistry())
 	if err != nil {

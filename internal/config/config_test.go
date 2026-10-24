@@ -26,7 +26,7 @@ func base() map[string]string {
 	return map[string]string{"SERVICE_NAME": "user", "DB_PRIMARY_DSN": "postgres://primary/user"}
 }
 
-func TestDefaults(t *testing.T) {
+func TestUnitDefaults(t *testing.T) {
 	get, list := env(base())
 	c, err := load(get, noFiles, list)
 	if err != nil {
@@ -40,7 +40,7 @@ func TestDefaults(t *testing.T) {
 	}
 }
 
-func TestSecretFromFile(t *testing.T) {
+func TestUnitSecretFromFile(t *testing.T) {
 	vars := base()
 	delete(vars, "DB_PRIMARY_DSN")
 	vars["DB_PRIMARY_DSN_FILE"] = "/run/credentials/user/db"
@@ -60,7 +60,7 @@ func TestSecretFromFile(t *testing.T) {
 	}
 }
 
-func TestSecretBothSetIsRejected(t *testing.T) {
+func TestUnitSecretBothSetIsRejected(t *testing.T) {
 	vars := base()
 	vars["DB_PRIMARY_DSN_FILE"] = "/x"
 	get, list := env(vars)
@@ -69,7 +69,7 @@ func TestSecretBothSetIsRejected(t *testing.T) {
 	}
 }
 
-func TestSecretFileErrorDoesNotLeakContent(t *testing.T) {
+func TestUnitSecretFileErrorDoesNotLeakContent(t *testing.T) {
 	vars := base()
 	delete(vars, "DB_PRIMARY_DSN")
 	vars["DB_PRIMARY_DSN_FILE"] = "/missing"
@@ -80,7 +80,7 @@ func TestSecretFileErrorDoesNotLeakContent(t *testing.T) {
 	}
 }
 
-func TestInsecureDevOnlyInDev(t *testing.T) {
+func TestUnitInsecureDevOnlyInDev(t *testing.T) {
 	for _, e := range []string{"stage", "prod"} {
 		vars := base()
 		vars["ENV"], vars["AUTH_MODE"] = e, "insecure-dev"
@@ -98,7 +98,7 @@ func TestInsecureDevOnlyInDev(t *testing.T) {
 	}
 }
 
-func TestServiceAuthenticationMode(t *testing.T) {
+func TestUnitServiceAuthenticationMode(t *testing.T) {
 	for _, tt := range []struct {
 		env, mode string
 		valid     bool
@@ -115,7 +115,7 @@ func TestServiceAuthenticationMode(t *testing.T) {
 	}
 }
 
-func TestPeers(t *testing.T) {
+func TestUnitPeers(t *testing.T) {
 	vars := base()
 	vars["PEER_BANK_STATEMENT_DATA_ADDR"] = "dns:///bank-statement-data.finassist.svc.cluster.local:9090"
 	vars["PEER_ANALYTICS_ADDR"] = "127.0.0.1:9093"
@@ -129,7 +129,7 @@ func TestPeers(t *testing.T) {
 	}
 }
 
-func TestErrorsAreJoined(t *testing.T) {
+func TestUnitErrorsAreJoined(t *testing.T) {
 	get, list := env(map[string]string{"ENV": "qa", "DB_MAX_CONNS": "x", "SHUTDOWN_DELAY": "-1s"})
 	_, err := load(get, noFiles, list)
 	for _, want := range []string{"SERVICE_NAME", "ENV=", "DB_MAX_CONNS", "SHUTDOWN_DELAY", "DB_PRIMARY_DSN"} {

@@ -16,7 +16,7 @@ import (
 	"github.com/fin-assist/user/internal/verification"
 )
 
-func TestCallbackPoolRollsBackWithStartAndReportsLifecycle(t *testing.T) {
+func TestIntegrationCallbackPoolRollsBackWithStartAndReportsLifecycle(t *testing.T) {
 	db, _, repo, now := phoneState(t)
 	id := seedPendingPhone(t, db, "pool-secret", "+79001234567", now)
 	pool := []string{"+74951234567", "+74957654321"}
@@ -91,7 +91,7 @@ func TestCallbackPoolRollsBackWithStartAndReportsLifecycle(t *testing.T) {
 	}
 }
 
-func TestZvonokAPIGateIsSharedByKeyAndHonorsCancellation(t *testing.T) {
+func TestIntegrationZvonokAPIGateIsSharedByKeyAndHonorsCancellation(t *testing.T) {
 	db, _, _, _ := phoneState(t)
 	a, b := NewZvonokGate(db, "account-key"), NewZvonokGate(db, "account-key")
 	if a.subject != b.subject || a.subject == "account-key" {
@@ -122,7 +122,7 @@ func TestZvonokAPIGateIsSharedByKeyAndHonorsCancellation(t *testing.T) {
 	}
 }
 
-func TestZvonokConcurrentGatesCannotMultiplyAccountAllowance(t *testing.T) {
+func TestIntegrationZvonokConcurrentGatesCannotMultiplyAccountAllowance(t *testing.T) {
 	db, _, _, _ := phoneState(t)
 	a, b := NewZvonokGate(db, "shared-key"), NewZvonokGate(db, "shared-key")
 	ctx, cancel := context.WithTimeout(t.Context(), 6*time.Second)

@@ -12,7 +12,7 @@ import (
 	"github.com/fin-assist/user/internal/verification"
 )
 
-func TestCallbackOutcomeDetailsHaveIndependentLimit(t *testing.T) {
+func TestIntegrationCallbackOutcomeDetailsHaveIndependentLimit(t *testing.T) {
 	const detailLimit = 1024 // The documented maximum number of detail groups per report.
 	for _, tt := range []struct {
 		name             string

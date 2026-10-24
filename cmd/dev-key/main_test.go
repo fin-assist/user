@@ -14,7 +14,7 @@ import (
 	"github.com/fin-assist/user/internal/signing"
 )
 
-func TestGenerateDoesNotReplaceExistingKey(t *testing.T) {
+func TestUnitGenerateDoesNotReplaceExistingKey(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "key.pem")
 	if err := generate(path); err != nil {
 		t.Fatal(err)
@@ -41,7 +41,7 @@ func TestGenerateDoesNotReplaceExistingKey(t *testing.T) {
 	}
 }
 
-func TestAESKeyIsPrivateAndNeverReplaced(t *testing.T) {
+func TestUnitAESKeyIsPrivateAndNeverReplaced(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "auth.key")
 	if err := generateAES(path); err != nil {
 		t.Fatal(err)
@@ -63,7 +63,7 @@ func TestAESKeyIsPrivateAndNeverReplaced(t *testing.T) {
 	}
 }
 
-func TestDevKeyCLI(t *testing.T) {
+func TestUnitDevKeyCLI(t *testing.T) {
 	if os.Getenv("FINASSIST_TEST_DEV_KEY") == "1" {
 		var args []string
 		if err := json.Unmarshal([]byte(os.Getenv("FINASSIST_TEST_ARGS")), &args); err != nil {
@@ -89,7 +89,7 @@ func TestDevKeyCLI(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		cmd := exec.CommandContext(t.Context(), binary, "-test.run=^TestDevKeyCLI$")
+		cmd := exec.CommandContext(t.Context(), binary, "-test.run=^TestUnitDevKeyCLI$")
 		cmd.Env = append(os.Environ(), "FINASSIST_TEST_DEV_KEY=1", "FINASSIST_TEST_ARGS="+string(args))
 		if err := cmd.Run(); err != nil {
 			var exit *exec.ExitError

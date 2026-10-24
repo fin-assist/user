@@ -33,7 +33,7 @@ func cfg(dsn string) migrate.Config {
 	return c
 }
 
-func TestValidate(t *testing.T) {
+func TestUnitValidate(t *testing.T) {
 	file := func(s string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(s)} }
 	cases := []struct {
 		name  string
@@ -63,7 +63,7 @@ func TestValidate(t *testing.T) {
 	}
 }
 
-func TestSourcesMustNotShareTable(t *testing.T) {
+func TestUnitSourcesMustNotShareTable(t *testing.T) {
 	a := migrate.Source{Name: "a", Table: "schema_migrations", FS: fstest.MapFS{}}
 	b := migrate.Source{Name: "b", Table: "schema_migrations", FS: fstest.MapFS{}}
 	err := migrate.Up(context.Background(), cfg("postgres://unused"), []migrate.Source{a, b})
@@ -72,7 +72,7 @@ func TestSourcesMustNotShareTable(t *testing.T) {
 	}
 }
 
-func TestTestdataUpDownUp(t *testing.T) {
+func TestIntegrationTestdataUpDownUp(t *testing.T) {
 	for _, dir := range []string{"service", "library"} {
 		t.Run(dir, func(t *testing.T) {
 			migratetest.CheckUpDownUp(t, migrate.Source{Name: dir, Table: dir + "_schema_migrations", FS: sub(t, dir)})
@@ -80,7 +80,7 @@ func TestTestdataUpDownUp(t *testing.T) {
 	}
 }
 
-func TestUpAppliesLibrariesThenServiceWithSeparateVersions(t *testing.T) {
+func TestIntegrationUpAppliesLibrariesThenServiceWithSeparateVersions(t *testing.T) {
 	dsn := migratetest.DSN(t)
 	srcs := []migrate.Source{
 		{Name: "outbox", Table: "outbox_schema_migrations", FS: sub(t, "library")},
@@ -111,7 +111,7 @@ func TestUpAppliesLibrariesThenServiceWithSeparateVersions(t *testing.T) {
 	}
 }
 
-func TestEmptySourceIsSkipped(t *testing.T) {
+func TestIntegrationEmptySourceIsSkipped(t *testing.T) {
 	dsn := migratetest.DSN(t)
 	srcs := []migrate.Source{{Name: "service", Table: "schema_migrations", FS: fstest.MapFS{"README.md": {Data: []byte("x")}}}}
 	if err := migrate.Up(context.Background(), cfg(dsn), srcs); err != nil {
@@ -126,7 +126,7 @@ func TestEmptySourceIsSkipped(t *testing.T) {
 // Two runs at once (two Jobs, or a Job and a deploy script): the second waits for the
 // first even though lock_timeout is far shorter than the migration, and nothing is
 // applied twice.
-func TestConcurrentRunsWaitForEachOther(t *testing.T) {
+func TestIntegrationConcurrentRunsWaitForEachOther(t *testing.T) {
 	dsn := migratetest.DSN(t)
 	slow := fstest.MapFS{
 		"000001_slow.up.sql":   {Data: []byte("SELECT pg_sleep(2); CREATE TABLE slow (id int);")},
@@ -153,7 +153,7 @@ func TestConcurrentRunsWaitForEachOther(t *testing.T) {
 	}
 }
 
-func TestWaitTimeout(t *testing.T) {
+func TestIntegrationWaitTimeout(t *testing.T) {
 	dsn := migratetest.DSN(t)
 	// Hold the queue lock of the source from outside, as a hung run would.
 	ctx := context.Background()
@@ -176,7 +176,7 @@ func TestWaitTimeout(t *testing.T) {
 // A failed migration leaves the source dirty at its version; statements of the failed
 // file before the error are rolled back (the file runs as one implicit transaction);
 // after checking the schema by hand, force sets the version back.
-func TestFailedMigrationIsDirtyUntilForced(t *testing.T) {
+func TestIntegrationFailedMigrationIsDirtyUntilForced(t *testing.T) {
 	dsn := migratetest.DSN(t)
 	src := migrate.Source{Name: "service", Table: "schema_migrations", FS: sub(t, "broken")}
 	ctx := context.Background()
@@ -207,7 +207,7 @@ func TestFailedMigrationIsDirtyUntilForced(t *testing.T) {
 	}
 }
 
-func TestDownRollsBackStepsAndRefusesIrreversible(t *testing.T) {
+func TestIntegrationDownRollsBackStepsAndRefusesIrreversible(t *testing.T) {
 	dsn := migratetest.DSN(t)
 	src := migrate.Source{Name: "service", Table: "schema_migrations", FS: sub(t, "service")}
 	ctx := context.Background()
@@ -230,7 +230,7 @@ func TestDownRollsBackStepsAndRefusesIrreversible(t *testing.T) {
 	}
 }
 
-func TestCancelledRunStops(t *testing.T) {
+func TestIntegrationCancelledRunStops(t *testing.T) {
 	dsn := migratetest.DSN(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -240,7 +240,7 @@ func TestCancelledRunStops(t *testing.T) {
 	}
 }
 
-func TestFind(t *testing.T) {
+func TestUnitFind(t *testing.T) {
 	srcs := []migrate.Source{{Name: "outbox"}, {Name: "service"}}
 	if s, err := migrate.Find(srcs, "service"); err != nil || s.Name != "service" {
 		t.Fatalf("got %v %v", s, err)

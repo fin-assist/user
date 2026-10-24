@@ -9,7 +9,7 @@ import (
 	"github.com/fin-assist/user/internal/verification"
 )
 
-func TestResultCipherAuthenticatedBindingAndKeySeparation(t *testing.T) {
+func TestUnitResultCipherAuthenticatedBindingAndKeySeparation(t *testing.T) {
 	c, err := New(bytes.Repeat([]byte{42}, 32), "v1")
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +50,7 @@ func TestResultCipherAuthenticatedBindingAndKeySeparation(t *testing.T) {
 		t.Fatal(got, err)
 	}
 }
-func TestResultCipherRejectsMalformedConfigurationAndEncodings(t *testing.T) {
+func TestUnitResultCipherRejectsMalformedConfigurationAndEncodings(t *testing.T) {
 	for _, key := range [][]byte{nil, make([]byte, 16), make([]byte, 33)} {
 		if _, err := New(key, "v1"); err == nil {
 			t.Fatal("bad key accepted")
@@ -75,7 +75,7 @@ func TestResultCipherRejectsMalformedConfigurationAndEncodings(t *testing.T) {
 	}
 }
 
-func TestResultCipherBoundsOutputSize(t *testing.T) {
+func TestUnitResultCipherBoundsOutputSize(t *testing.T) {
 	c, _ := New(make([]byte, 32), "v1")
 	if _, _, err := c.Seal(verification.Request{ID: 1, Hash: token.Sum("secret")}, verification.Outcome{RegistrationToken: string(bytes.Repeat([]byte{'x'}, 20000))}); err == nil {
 		t.Fatal("unbounded result accepted")

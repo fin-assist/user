@@ -17,7 +17,7 @@ type confirmFunc func(context.Context, Proof) (bool, error)
 
 func (f confirmFunc) Confirm(ctx context.Context, p Proof) (bool, error) { return f(ctx, p) }
 
-func TestCheckedProofNeverTrustsHintsAndCoalescesPolling(t *testing.T) {
+func TestUnitCheckedProofNeverTrustsHintsAndCoalescesPolling(t *testing.T) {
 	f := fixture(t)
 	f.r.r.Provider = "test"
 	f.r.r.CallID = "call-1"
@@ -66,7 +66,7 @@ func TestCheckedProofNeverTrustsHintsAndCoalescesPolling(t *testing.T) {
 	}
 }
 
-func TestProviderCheckNegativeProofsAndDependencies(t *testing.T) {
+func TestUnitProviderCheckNegativeProofsAndDependencies(t *testing.T) {
 	for _, tt := range []struct {
 		name                          string
 		state                         State
@@ -106,7 +106,7 @@ type checkingFunc func(context.Context, Request, bool) error
 
 func (f checkingFunc) Check(ctx context.Context, r Request, last bool) error { return f(ctx, r, last) }
 
-func TestWatchFallbackConfirmsAndFinalCheckPreservesExpiry(t *testing.T) {
+func TestUnitWatchFallbackConfirmsAndFinalCheckPreservesExpiry(t *testing.T) {
 	for _, final := range []bool{false, true} {
 		t.Run(map[bool]string{false: "confirmed", true: "expired"}[final], func(t *testing.T) {
 			f := fixture(t)
@@ -150,7 +150,7 @@ func TestWatchFallbackConfirmsAndFinalCheckPreservesExpiry(t *testing.T) {
 
 // NOTIFY already follows a committed proof. An unavailable provider must not
 // delay delivery of that verified database result by another HTTP timeout.
-func TestWatchNotifyDeliversCommittedResultWithoutProviderLookup(t *testing.T) {
+func TestUnitWatchNotifyDeliversCommittedResultWithoutProviderLookup(t *testing.T) {
 	f := fixture(t)
 	f.s.SetStatusChecker(checkingFunc(func(context.Context, Request, bool) error {
 		t.Fatal("provider called for committed notification")

@@ -10,7 +10,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-func TestProductionProofGuardRejectsBeforeEffectsAndRedacts(t *testing.T) {
+func TestUnitProductionProofGuardRejectsBeforeEffectsAndRedacts(t *testing.T) {
 	f := fixture(t)
 	var logs bytes.Buffer
 	reg := prometheus.NewRegistry()

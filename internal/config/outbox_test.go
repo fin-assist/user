@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func TestOutboxConfiguration(t *testing.T) {
+func TestUnitOutboxConfiguration(t *testing.T) {
 	get, list := env(base())
 	c, err := load(get, noFiles, list)
 	if err != nil || strings.Join(c.Outbox.TimezoneTargets, ",") != "bank-statement-data,assistant" || strings.Join(c.Outbox.DeletionTargets, ",") != "bank-statement-data,analytics,assistant" || c.Outbox.MaxConns != 8 || c.Outbox.PollInterval != 3*time.Second {
@@ -29,7 +29,7 @@ func TestOutboxConfiguration(t *testing.T) {
 	}
 }
 
-func TestOutboxCapacityUsesUnionOfTopics(t *testing.T) {
+func TestUnitOutboxCapacityUsesUnionOfTopics(t *testing.T) {
 	c := OutboxConfig{TimezoneTargets: []string{"assistant", "other"}, DeletionTargets: []string{"bank-statement-data", "analytics", "assistant", "other"}, MaxConns: 7, PollInterval: time.Second}
 	if err := c.Validate(); err != nil {
 		t.Fatal("shared recipients counted twice", err)

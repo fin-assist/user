@@ -37,7 +37,7 @@ func record() profile.Record {
 	return profile.Record{ID: "user", Phone: "+79001234567", Theme: "dark", Timezone: "UTC", CreatedAt: time.Date(2026, 10, 23, 0, 0, 0, 0, time.UTC), Consent: profile.Consent{Granted: true, Version: &v, CurrentVersion: "v1"}}
 }
 
-func TestHandlersIdentityMappingAndErrors(t *testing.T) {
+func TestUnitHandlersIdentityMappingAndErrors(t *testing.T) {
 	s := &service{}
 	h := &handler{service: s}
 	ctx := reqctx.WithUserID(t.Context(), "verified-sub")
@@ -88,7 +88,7 @@ func TestHandlersIdentityMappingAndErrors(t *testing.T) {
 	}
 }
 
-func TestThemeAndConsentMapping(t *testing.T) {
+func TestUnitThemeAndConsentMapping(t *testing.T) {
 	for theme, want := range map[userv1.Theme]string{userv1.Theme_THEME_SYSTEM: "system", userv1.Theme_THEME_LIGHT: "light", userv1.Theme_THEME_DARK: "dark", userv1.Theme_THEME_UNSPECIFIED: "", userv1.Theme(100): ""} {
 		if got := themeString(theme); got != want {
 			t.Fatalf("%v: %q", theme, got)

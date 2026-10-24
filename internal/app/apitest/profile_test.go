@@ -32,7 +32,7 @@ func seedProfiles(t *testing.T, env *apitest.Env) {
 	}
 }
 
-func TestProfileAPISettingsAndIsolation(t *testing.T) {
+func TestAPIProfileAPISettingsAndIsolation(t *testing.T) {
 	env := apitest.Start(t)
 	seedProfiles(t, env)
 	c := userv1.NewProfileServiceClient(env.Conn)
@@ -95,7 +95,7 @@ func TestProfileAPISettingsAndIsolation(t *testing.T) {
 	}
 }
 
-func TestProfileAPIConsentAndSystemCheck(t *testing.T) {
+func TestAPIProfileAPIConsentAndSystemCheck(t *testing.T) {
 	env := apitest.Start(t)
 	seedProfiles(t, env)
 	c := userv1.NewProfileServiceClient(env.Conn)
@@ -160,7 +160,7 @@ func TestProfileAPIConsentAndSystemCheck(t *testing.T) {
 	}
 }
 
-func TestProfileAPIAccessDeletionAndFailures(t *testing.T) {
+func TestAPIProfileAPIAccessDeletionAndFailures(t *testing.T) {
 	env := apitest.Start(t)
 	seedProfiles(t, env)
 	c := userv1.NewProfileServiceClient(env.Conn)
