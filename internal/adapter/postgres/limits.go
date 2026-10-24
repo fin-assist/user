@@ -62,6 +62,23 @@ func (r *Limits) Increment(ctx context.Context, windows []ratelimit.Window) erro
 	return nil
 }
 
+// Refund locks only existing original windows in the same order as Check. Old
+// windows removed by retention need no compensation and must not be recreated.
+func (r *Limits) Refund(ctx context.Context, windows []ratelimit.Window) error {
+	tx, ok := r.db.Tx(ctx)
+	if !ok {
+		return errors.New("rate limits: primary transaction required")
+	}
+	for _, w := range windows {
+		scope := string(w.Scope) + ":" + strconv.FormatInt(int64(w.End.Sub(w.Start)/time.Second), 10)
+		_, err := tx.Exec(ctx, `UPDATE rate_limit_window SET hits=hits-1 WHERE scope=$1 AND subject=$2 AND window_start=$3 AND hits>0`, scope, w.Subject, w.Start)
+		if err != nil {
+			return fmt.Errorf("refund rate-limit window: %w", err)
+		}
+	}
+	return nil
+}
+
 // Cleanup removes at most batch windows ending no later than before. Concurrent
 // workers skip each other's rows; active or retained windows remain untouched.
 func (r *Limits) Cleanup(ctx context.Context, before time.Time, batch int) (int64, error) {

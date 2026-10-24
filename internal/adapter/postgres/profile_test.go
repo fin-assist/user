@@ -10,6 +10,7 @@ import (
 
 	usersettingsv1 "github.com/fin-assist/contracts/gen/go/finassist/usersettings/v1"
 	"github.com/fin-assist/contracts/gen/go/finerr"
+	idempotency "github.com/fin-assist/go-idempotency"
 	outboxlib "github.com/fin-assist/go-outbox"
 	tombstone "github.com/fin-assist/go-tombstone"
 	"google.golang.org/protobuf/proto"
@@ -28,7 +29,7 @@ const otherProfileID = "019c7714-3b77-74d1-9866-e1f484aae2ac"
 func profileDB(t *testing.T) (*DB, *profile.Service, *Profiles) {
 	t.Helper()
 	primary, replica := migratetest.DSN(t), migratetest.DSN(t)
-	sources := []migrate.Source{{Name: outboxlib.MigrationsName, Table: outboxlib.MigrationsTable, FS: outboxlib.Migrations}, {Name: tombstone.MigrationsName, Table: tombstone.MigrationsTable, FS: tombstone.Migrations}, {Name: "service", Table: "schema_migrations", FS: migrations.FS}}
+	sources := []migrate.Source{{Name: idempotency.MigrationsName, Table: idempotency.MigrationsTable, FS: idempotency.Migrations}, {Name: outboxlib.MigrationsName, Table: outboxlib.MigrationsTable, FS: outboxlib.Migrations}, {Name: tombstone.MigrationsName, Table: tombstone.MigrationsTable, FS: tombstone.Migrations}, {Name: "service", Table: "schema_migrations", FS: migrations.FS}}
 	for _, dsn := range []string{primary, replica} {
 		if err := migrate.Up(t.Context(), migrate.DefaultConfig(dsn), sources); err != nil {
 			t.Fatal(err)

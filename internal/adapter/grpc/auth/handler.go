@@ -5,12 +5,14 @@ package auth
 import (
 	"context"
 	"errors"
+	"time"
 
 	userv1 "github.com/fin-assist/contracts/gen/go/finassist/user/v1"
 	"github.com/fin-assist/contracts/gen/go/finerr"
 	idempotency "github.com/fin-assist/go-idempotency"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	usecase "github.com/fin-assist/user/internal/auth"
 	"github.com/fin-assist/user/internal/ratelimit"
@@ -29,6 +31,11 @@ type Sessions interface {
 // Phone is the provider-independent streaming lifecycle.
 type Phone interface {
 	Watch(context.Context, string, func(verification.Outcome) error) error
+}
+
+// PhoneStart owns the multi-transaction external-effect protocol.
+type PhoneStart interface {
+	Start(context.Context, idempotency.Request, string, string) (verification.Started, error)
 }
 
 // Engine is the library surface used by this transport adapter.
@@ -63,11 +70,39 @@ type Handler struct {
 	state, attempts Transactions
 	limits          Limits
 	guard           Guard
+	start           PhoneStart
+	now             func() time.Time
 }
 
-// Register installs session and Watch RPCs. Phone creation arrives separately.
-func Register(server grpc.ServiceRegistrar, sessions Sessions, engine Engine, state, attempts Transactions, limits Limits, guard Guard, phone Phone) {
-	userv1.RegisterAuthServiceServer(server, &Handler{sessions: sessions, engine: engine, state: state, attempts: attempts, limits: limits, guard: guard, phone: phone})
+// Register installs the AuthService lifecycle and the phone creation coordinator.
+func Register(server grpc.ServiceRegistrar, sessions Sessions, engine Engine, state, attempts Transactions, limits Limits, guard Guard, phone Phone, starts ...PhoneStart) {
+	h := &Handler{sessions: sessions, engine: engine, state: state, attempts: attempts, limits: limits, guard: guard, phone: phone, now: time.Now}
+	if len(starts) > 0 {
+		h.start = starts[0]
+	}
+	userv1.RegisterAuthServiceServer(server, h)
+}
+
+func (h *Handler) StartPhoneVerification(ctx context.Context, in *userv1.StartPhoneVerificationRequest) (*userv1.StartPhoneVerificationResponse, error) {
+	var result verification.Started
+	_, err := h.engine.UnaryInterceptor(func(context.Context) (string, error) { return "", nil })(ctx, in, &grpc.UnaryServerInfo{FullMethod: userv1.AuthService_StartPhoneVerification_FullMethodName}, func(ctx context.Context, _ any) (any, error) {
+		request, ok := idempotency.FromContext(ctx)
+		if !ok || h.start == nil {
+			return nil, verification.ErrProviderUnavailable
+		}
+		var err error
+		request.Hash, err = idempotency.HashProto(in)
+		if err != nil {
+			return nil, err
+		}
+		result, err = h.start.Start(ctx, request, in.GetPhone(), reqctx.ClientIP(ctx))
+		return nil, err
+	})
+	if err != nil {
+		return nil, err
+	}
+	left := max(int32(0), int32(result.ExpiresAt.Sub(h.now())/time.Second))
+	return &userv1.StartPhoneVerificationResponse{VerificationToken: result.Token, CallbackNumber: result.CallbackNumber, ExpiresAt: timestamppb.New(result.ExpiresAt), ExpiresIn: &left}, nil
 }
 
 func (h *Handler) Register(ctx context.Context, in *userv1.RegisterRequest) (*userv1.RegisterResponse, error) {

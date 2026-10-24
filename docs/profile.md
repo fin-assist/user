@@ -1,7 +1,7 @@
 # Профиль, согласия и часовой пояс
 
 Этап FIN-219 добавляет GetProfile, UpdateProfile, GrantAssistantConsent,
-RevokeAssistantConsent и GetAssistantConsentStatus. Создание заявки остаётся следующим этапом;
+RevokeAssistantConsent и GetAssistantConsentStatus. Создание заявки,
 подтверждение и Watch — [verification.md](verification.md). Удаление описано
 в [deletion.md](deletion.md). API-тесты используют явно тестовые документы и пользователей;
 регистрация реальных пользователей требует утверждённых документов согласий.

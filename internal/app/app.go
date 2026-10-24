@@ -39,12 +39,14 @@ type App struct {
 	Limits     *ratelimit.Limiter
 	// Verifications accepts only provider-verified proofs from trusted Go adapters.
 	Verifications *verification.Service
+	phoneProvider verification.Provider
+	phoneSelector verification.NumberSelector
 
 	closers []func()
 }
 
 // New assembles the service from cfg. Close releases what it opened.
-func New(ctx context.Context, cfg config.Config, log *slog.Logger, reg prometheus.Registerer) (*App, error) {
+func New(ctx context.Context, cfg config.Config, log *slog.Logger, reg prometheus.Registerer, options ...Option) (*App, error) {
 	keys, err := signing.Load(signing.Options{PrivateKeyFile: cfg.Signing.PrivateKeyFile, PublicKeysFile: cfg.Signing.PublicKeysFile, KeyID: cfg.Signing.KeyID, Issuer: cfg.Signing.Issuer, Audience: cfg.Signing.Audience, Clock: time.Now})
 	if err != nil {
 		return nil, err
@@ -62,6 +64,9 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger, reg prometheu
 		return nil, err
 	}
 	a := &App{Cfg: cfg, Log: log, DB: db, Tokens: ids.tokens, Signing: keys, Users: ids.users, Jobs: ids.jobs, closers: []func(){ids.close, db.Close}}
+	for _, option := range options {
+		option(a)
+	}
 	fail := func(err error) (*App, error) { a.Close(); return nil, err }
 	a.Tombstones, err = tombstone.New(db, db.Primary(), time.Now)
 	if err != nil {
@@ -87,6 +92,16 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger, reg prometheu
 	a.Jobs = append(a.Jobs, jobs...)
 	a.closers = append(a.closers, closeWired)
 	return a, nil
+}
+
+// Option supplies trusted assembly dependencies before any handler is registered.
+type Option func(*App)
+
+// WithPhoneBackend installs the provider and transactional number selector. The
+// default executable supplies neither and safely refuses creation. FIN-122/139/216
+// own the concrete adapters and their environment guards; no public hook exists.
+func WithPhoneBackend(provider verification.Provider, selector verification.NumberSelector) Option {
+	return func(a *App) { a.phoneProvider, a.phoneSelector = provider, selector }
 }
 
 // Close releases what New opened, in reverse order.

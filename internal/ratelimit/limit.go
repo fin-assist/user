@@ -100,6 +100,7 @@ type Limiter struct {
 	store            CounterStore
 	now              func() time.Time
 	checks, consumed *prometheus.CounterVec
+	refunded         *prometheus.CounterVec
 	utilization      *prometheus.HistogramVec
 }
 
@@ -112,13 +113,14 @@ func New(rules Rules, store CounterStore, now func() time.Time, reg prometheus.R
 		return nil, errors.New("rate limits: store, clock and registry required")
 	}
 	l := &Limiter{rules: make(Rules, len(rules)), store: store, now: now,
+		refunded:    prometheus.NewCounterVec(prometheus.CounterOpts{Name: "finassist_rate_limit_refunded_total", Help: "Committed reservation refunds after definite provider rejection, by fixed scope."}, []string{"scope"}),
 		checks:      prometheus.NewCounterVec(prometheus.CounterOpts{Name: "finassist_rate_limit_checks_total", Help: "Rate-limit checks before transaction completion, by fixed scope and result."}, []string{"scope", "result"}),
 		consumed:    prometheus.NewCounterVec(prometheus.CounterOpts{Name: "finassist_rate_limit_consumed_total", Help: "Committed attempts consumed by fixed scope; excludes replays and rollbacks."}, []string{"scope"}),
 		utilization: prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "finassist_rate_limit_window_utilization_ratio", Help: "Window fill observed after committed attempts or committed denials, without subject labels.", Buckets: []float64{0, .25, .5, .75, .9, 1}}, []string{"scope"}),
 	}
 	limit := prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "finassist_rate_limit_configured_limit", Help: "Configured maximum attempts in a fixed window."}, []string{"scope"})
 	window := prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "finassist_rate_limit_window_seconds", Help: "Configured UTC fixed-window duration in seconds."}, []string{"scope"})
-	collectors := []prometheus.Collector{l.checks, l.consumed, l.utilization, limit, window}
+	collectors := []prometheus.Collector{l.checks, l.consumed, l.refunded, l.utilization, limit, window}
 	for i, c := range collectors {
 		if err := reg.Register(c); err != nil {
 			for _, registered := range collectors[:i] {
@@ -133,6 +135,7 @@ func New(rules Rules, store CounterStore, now func() time.Time, reg prometheus.R
 		limit.WithLabelValues(string(scope)).Set(float64(r.Limit))
 		window.WithLabelValues(string(scope)).Set(r.Window.Seconds())
 		l.consumed.WithLabelValues(string(scope))
+		l.refunded.WithLabelValues(string(scope))
 		for _, result := range []string{"allowed", "denied", "error"} {
 			l.checks.WithLabelValues(string(scope), result)
 		}
@@ -145,13 +148,14 @@ type sample struct {
 	hits, limit int
 }
 
-// Receipt contains no subject data. Call Committed once the enclosing transaction
-// commits; discard it on rollback. Copies share the same once guard.
+// Receipt is private bookkeeping, never logged or returned to an API. Call
+// Committed after commit; discard on rollback. Copies share the same once guard.
 type Receipt struct {
 	once    *sync.Once
 	limiter *Limiter
 	samples []sample
 	allowed bool
+	windows []Window
 }
 
 // Committed records consumption and observed utilization at most once. In particular,
@@ -234,7 +238,7 @@ func (l *Limiter) Check(ctx context.Context, op Operation, phone, ip string) (De
 		}
 		return Decision{}, Receipt{}, err
 	}
-	r := Receipt{once: &sync.Once{}, limiter: l, allowed: decision.Allowed}
+	r := Receipt{once: &sync.Once{}, limiter: l, allowed: decision.Allowed, windows: windows}
 	for i, w := range windows {
 		result := "allowed"
 		if !decision.Allowed && counts[i] >= w.Limit {
@@ -244,6 +248,46 @@ func (l *Limiter) Check(ctx context.Context, op Operation, phone, ip string) (De
 		r.samples = append(r.samples, sample{w.Scope, counts[i], w.Limit})
 	}
 	return decision, r, nil
+}
+
+// ReservedWindows returns a private durable snapshot for compensating a provider
+// rejection. The caller persists it atomically with consumption, then deletes that
+// record atomically with Refund. It contains phone/IP and must never be logged.
+func (r Receipt) ReservedWindows() []Window {
+	if !r.allowed {
+		return nil
+	}
+	return slices.Clone(r.windows)
+}
+
+// Refund returns the original slots even after configuration/window changes. The
+// caller must fence it with a durable attempt row, so it can commit only once.
+// Call the returned receipt AFTER the refund transaction commits.
+func (l *Limiter) Refund(ctx context.Context, windows []Window) (func(), error) {
+	s, ok := l.store.(interface {
+		Refund(context.Context, []Window) error
+	})
+	if !ok || len(windows) != 4 {
+		return nil, errors.New("rate limits: invalid refund")
+	}
+	expected, _ := operationScopes(Start)
+	slices.Sort(expected)
+	for i, w := range windows {
+		if w.Scope != expected[i] || w.Subject == "" || !w.End.After(w.Start) {
+			return nil, errors.New("rate limits: invalid refund")
+		}
+	}
+	if err := s.Refund(ctx, windows); err != nil {
+		return nil, err
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			for _, w := range windows {
+				l.refunded.WithLabelValues(string(w.Scope)).Inc()
+			}
+		})
+	}, nil
 }
 
 func operationScopes(op Operation) ([]Scope, error) {

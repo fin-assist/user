@@ -13,6 +13,7 @@ import (
 	"github.com/fin-assist/user/internal/auth"
 	"github.com/fin-assist/user/internal/config"
 	"github.com/fin-assist/user/internal/token"
+	"github.com/fin-assist/user/internal/verification"
 	"github.com/fin-assist/user/internal/worker"
 )
 
@@ -30,8 +31,9 @@ func wireSessions(ctx context.Context, a *App, events auth.Events, reg prometheu
 		return worker.Job{}, nil, err
 	}
 	engine, err := idempotency.New(pool, idempotency.Options{Clock: time.Now, Cipher: cipher, Registerer: reg, Methods: map[string]idempotency.Policy{
-		userv1.AuthService_Register_FullMethodName:      {Encrypt: true},
-		userv1.AuthService_RefreshTokens_FullMethodName: {Encrypt: true, TTL: time.Minute},
+		userv1.AuthService_StartPhoneVerification_FullMethodName: {Encrypt: true},
+		userv1.AuthService_Register_FullMethodName:               {Encrypt: true},
+		userv1.AuthService_RefreshTokens_FullMethodName:          {Encrypt: true, TTL: time.Minute},
 	}})
 	if err != nil {
 		pool.Close()
@@ -39,7 +41,12 @@ func wireSessions(ctx context.Context, a *App, events auth.Events, reg prometheu
 	}
 	repo := postgres.NewAuth(a.DB)
 	sessions := auth.New(pool, repo, a.Tombstones, a.Signing, events, time.Now, token.New, a.Cfg.Sessions.RefreshTTL)
-	authgrpc.Register(a.GRPC.GRPC(), sessions, engine, pool, a.DB, a.Limits, a.Tombstones, a.Verifications)
+	starts, err := verification.NewStarter(pool, postgres.NewVerificationStarts(a.DB), engine, a.Limits, repo, a.Tombstones, a.phoneProvider, a.phoneSelector, time.Now, token.New, a.Log, reg)
+	if err != nil {
+		pool.Close()
+		return worker.Job{}, nil, err
+	}
+	authgrpc.Register(a.GRPC.GRPC(), sessions, engine, pool, a.DB, a.Limits, a.Tombstones, a.Verifications, starts)
 	cleanup := worker.Every("auth-cleanup", time.Minute, a.Log, func(ctx context.Context) error {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()

@@ -36,6 +36,7 @@ import (
 	"github.com/fin-assist/user/internal/app"
 	"github.com/fin-assist/user/internal/config"
 	"github.com/fin-assist/user/internal/ratelimit"
+	"github.com/fin-assist/user/internal/verification"
 )
 
 // Env is a running service.
@@ -49,6 +50,15 @@ type Env struct {
 // Start runs the service for the test and stops it at the end. mutate, if given, adjusts
 // the configuration (peers, limits) before the assembly.
 func Start(t *testing.T, mutate ...func(*config.Config)) *Env {
+	return start(t, nil, mutate...)
+}
+
+// StartWithPhone assembles the same service with explicitly test-owned adapters.
+func StartWithPhone(t *testing.T, provider verification.Provider, selector verification.NumberSelector, mutate ...func(*config.Config)) *Env {
+	return start(t, []app.Option{app.WithPhoneBackend(provider, selector)}, mutate...)
+}
+
+func start(t *testing.T, options []app.Option, mutate ...func(*config.Config)) *Env {
 	t.Helper()
 	ctx := context.Background()
 	dsn := migratetest.DSN(t)
@@ -104,7 +114,7 @@ func Start(t *testing.T, mutate ...func(*config.Config)) *Env {
 		m(&cfg)
 	}
 	registry := prometheus.NewRegistry()
-	a, err := app.New(ctx, cfg, slog.New(slog.DiscardHandler), registry)
+	a, err := app.New(ctx, cfg, slog.New(slog.DiscardHandler), registry, options...)
 	if err != nil {
 		t.Fatalf("app: %v", err)
 	}

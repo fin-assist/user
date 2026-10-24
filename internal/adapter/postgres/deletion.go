@@ -41,6 +41,11 @@ func (r *Accounts) Remove(ctx context.Context, id string) error {
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("deletion: read account: %w", err)
 	}
+	if phone != "" {
+		if err = r.purgeStartKeys(ctx, phone); err != nil {
+			return err
+		}
+	}
 	// An absent local account without a tombstone still needs remote purges; a
 	// signed identity can outlive a partially restored database.
 	if _, err = tx.Exec(ctx, `DELETE FROM idempotency_keys WHERE scope=$1::uuid OR owner_id=$1::uuid`, id); err != nil {
@@ -58,6 +63,41 @@ func (r *Accounts) Remove(ctx context.Context, id string) error {
 	// row locks and may still finish; receivers fence delayed writes with tombstones.
 	if _, err = tx.Exec(ctx, `DELETE FROM outbox_events WHERE topic='user.timezone_changed' AND event_key=$1`, id); err != nil {
 		return fmt.Errorf("deletion: remove settings events: %w", err)
+	}
+	return nil
+}
+
+// Start keys may predate account creation and therefore have no OwnerID. The
+// library links every secret reply AND cached busy refusal to its request resource.
+func (r *Accounts) purgeStartKeys(ctx context.Context, phone string) error {
+	q := r.db.Writer(ctx)
+	// Lock parents before selecting keys. Busy claims take KEY SHARE, so a link
+	// cannot commit behind our key snapshot while we delete its request.
+	parents, err := q.Query(ctx, `SELECT id FROM phone_verification WHERE phone=$1 FOR UPDATE`, phone)
+	if err != nil {
+		return deletionError(err)
+	}
+	for parents.Next() {
+	}
+	err = parents.Err()
+	parents.Close()
+	if err != nil {
+		return deletionError(err)
+	}
+	rows, err := q.Query(ctx, `SELECT 1 FROM idempotency_keys k JOIN phone_verification v ON k.resource_type='phone_verification' AND k.resource_id=v.id::text WHERE v.phone=$1 AND k.scope='00000000-0000-0000-0000-000000000000'::uuid AND k.endpoint=$2 FOR UPDATE OF k NOWAIT`, phone, startPhoneVerificationEndpoint)
+	if err != nil {
+		return deletionError(err)
+	}
+	for rows.Next() {
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return deletionError(err)
+	}
+	_, err = q.Exec(ctx, `DELETE FROM idempotency_keys k USING phone_verification v WHERE k.resource_type='phone_verification' AND k.resource_id=v.id::text AND v.phone=$1 AND k.scope='00000000-0000-0000-0000-000000000000'::uuid AND k.endpoint=$2`, phone, startPhoneVerificationEndpoint)
+	if err != nil {
+		return deletionError(err)
 	}
 	return nil
 }
