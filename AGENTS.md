@@ -44,7 +44,12 @@ UpdateProfile, GrantAssistantConsent, RevokeAssistantConsent, Register, RefreshT
 Logout, DeleteAccount, WatchPhoneVerification and StartPhoneVerification (all 13 RPCs).
 The default executable disables phone creation. FIN-139/216 adds opt-in Zvonok V1
 for dev/stage, a transactional uniform number selector, a separate checked postback
-listener and a Watch fallback. Prod remains blocked until FIN-81; FIN-122 owns the fake.
+listener and a Watch fallback. Zvonok prod remains blocked until FIN-81.
+FIN-122 adds PHONE_PROVIDER=fake in dev/stage, restricted to synthetic +7000000xxxx.
+Creation completion, shared selector, common Confirm and replay commit atomically;
+fake recovery is stateless. Prod startup forbids fake; common Confirm rejects the
+synthetic namespace for every provider and emits a private-label-free counter/ERROR.
+The alert rule is prepared in deploy/prometheus; deployment activates it separately.
 Balance monitoring is deferred to FIN-233 and does not block FIN-139/216.
 Real campaign acceptance still awaits external evidence.
 Do not claim production phone sign-in is ready. go-identity v0.1.0 supplies only the verifiers
@@ -131,6 +136,7 @@ See docs/verification.md, including capacity/availability metrics and key retent
 | SQL migrations (embedded) and the tests of their keys, cascades and expected queries | `migrations/`; rules — `docs/migrations.md`; the schema, its keys, expected queries and the invariants kept by code — `docs/schema.md` |
 | Clients of other services, service token source | `internal/adapter/client/` |
 | Zvonok V1 client and checked HTTP postback | `internal/adapter/zvonok/`, `internal/verification/check.go`, `docs/zvonok.md` |
+| Runtime fake, synthetic namespace, production proof protection | `internal/adapter/fakephone/`, `internal/verification/test_phone.go`, `docs/fake-phone.md` |
 | Public callback pool, transactional selection and rolling outcomes | `internal/verification/numbers.go`, `internal/adapter/postgres/verification_numbers.go` |
 | Background jobs | `internal/worker/` |
 | Configuration: every variable with its default and description | `internal/config/vars.go` (`Vars`); generated tables — `docs/config.md` |

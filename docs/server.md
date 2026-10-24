@@ -168,3 +168,17 @@ max(finassist_phone_callback_overflow_requests_24h) > 0
 Собственный контроль баланса и соответствующие метрики/алерты отложены в
 [FIN-233](https://finassist.youtrack.cloud/issue/FIN-233); пока используются уведомления Zvonok.
 Платные запросы тестами не выполняются. FIN-81 остаётся условием включения prod.
+
+## Фейк и защита prod (FIN-122)
+
+`PHONE_PROVIDER=fake` работает только в dev/stage и использует общий Confirm.
+В prod перед любыми эффектами Confirm служебные телефоны +7000000xxxx отклоняются
+при любом провайдере. `finassist_phone_test_confirmation_rejected_total` — счётчик
+таких попыток без меток, включая откатившиеся; сопровождается ERROR без ПДн.
+Готовое правило `UserSyntheticPhoneConfirmationInProd`:
+[deploy/prometheus/phone.rules.yml](../deploy/prometheus/phone.rules.yml).
+Его загрузка в vmalert/Prometheus и маршрутизация Alertmanager выполняются при
+развёртывании; в текущем infra мониторинга пока нет.
+Правило `counter > 0` сохраняет сигнал до перезапуска процесса.
+Общие gauges пула также допускают два фиксированных синтетических номера fake.
+Локальный запуск и поведение клиента — [fake-phone.md](fake-phone.md).

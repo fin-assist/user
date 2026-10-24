@@ -246,6 +246,21 @@ func fixture(t *testing.T) *phoneFixture {
 	return f
 }
 func goodProof() Proof { return Proof{Provider: "test", CallID: "call-1", Phone: "+79001234567"} }
+
+func TestConfirmCreatedUsesPrelockedOwnerWithoutRediscovery(t *testing.T) {
+	for _, owner := range []string{"", "already-locked-user"} {
+		f := fixture(t)
+		f.a.id = "account-appeared-after-start-locked-request"
+		f.a.failure = "find-user" // A second lookup would violate the lock protocol.
+		changed, err := f.s.ConfirmCreated(t.Context(), goodProof(), owner)
+		if err != nil || !changed || f.g.calls != 0 || f.c.o.UserID != owner || f.c.o.IsNewUser != (owner == "") {
+			t.Fatal(owner, changed, f.c.o, err)
+		}
+		if (owner != "") != (f.a.created == 1) {
+			t.Fatal("session belongs to the wrong owner", owner, f.a.created)
+		}
+	}
+}
 func reason(err error) string {
 	r, ok := finerr.ToREST(err)
 	if ok {

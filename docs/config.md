@@ -29,7 +29,7 @@ PEER_<NAME>_ADDR; по умолчанию нужны PEER_BANK_STATEMENT_DATA_AD
 <!-- generated:config-serve:start (go test ./internal/config -run TestDocIsCurrent -update) -->
 | Переменная | По умолчанию | Что |
 |---|---|---|
-| `PHONE_PROVIDER` | `disabled` | `disabled` или `zvonok`; Zvonok разрешён в dev/stage, в prod ждёт FIN-81 |
+| `PHONE_PROVIDER` | `disabled` | `disabled`, `fake` или `zvonok`; fake/zvonok только dev/stage; prod Zvonok ждёт FIN-81 |
 | `ZVONOK_PUBLIC_KEY` / `_FILE` | — | ключ API V1; обязателен при PHONE_PROVIDER=zvonok, не выводится в лог |
 | `ZVONOK_CAMPAIGN_ID` | — | ID отдельной кампании pincode_incoming, управляемой только этим сервисом |
 | `ZVONOK_CALLBACK_ADDR` | `:9095` | отдельный HTTP-listener, только GET /callbacks/zvonok; ingress мимо bank-bff, без query в access-логах |

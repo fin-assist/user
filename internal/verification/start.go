@@ -75,7 +75,19 @@ type Starter struct {
 	newToken   func() (string, error)
 	log        *slog.Logger
 	duplicates prometheus.Counter
+	immediate  CreationConfirmation
 }
+
+// CreationConfirmation reuses the account identity already resolved and locked
+// by Start before it locks the request. Empty owner means no account existed then.
+type CreationConfirmation interface {
+	ConfirmCreated(context.Context, Proof, string) (bool, error)
+}
+
+// SetImmediateConfirmation enables an automatically verifying backend during
+// trusted assembly, before serving. Confirm must join the creation transaction
+// and perform only local effects; it must never contact an external provider.
+func (s *Starter) SetImmediateConfirmation(confirm CreationConfirmation) { s.immediate = confirm }
 
 // NewStarter accepts nil provider AND selector for the disabled runtime mode.
 func NewStarter(tx Transactions, repo Starts, engine StartEngine, limits StartLimits, accounts Accounts, guard Guard, provider Provider, selector NumberSelector, now func() time.Time, newToken func() (string, error), log *slog.Logger, reg prometheus.Registerer) (*Starter, error) {
@@ -89,7 +101,7 @@ func NewStarter(tx Transactions, repo Starts, engine StartEngine, limits StartLi
 	if err := reg.Register(c); err != nil {
 		return nil, err
 	}
-	return &Starter{tx, repo, engine, limits, accounts, guard, provider, selector, now, newToken, log, c}, nil
+	return &Starter{tx: tx, repo: repo, engine: engine, limits: limits, accounts: accounts, guard: guard, provider: provider, selector: selector, now: now, newToken: newToken, log: log, duplicates: c}, nil
 }
 
 // Start accepts a library-extracted key, whole-input hash and a trusted client IP.
@@ -268,6 +280,15 @@ func (s *Starter) Start(ctx context.Context, key idempotency.Request, phone, ip 
 			}
 			if !slices.Contains(call.Numbers, selected) || !callbackNumber(selected) {
 				return idempotency.Response{}, ErrProviderUnavailable
+			}
+			if s.immediate != nil {
+				changed, err := s.immediate.ConfirmCreated(effect, Proof{Provider: s.provider.Name(), CallID: call.ID, Phone: phone}, owner)
+				if err != nil {
+					return idempotency.Response{}, err
+				}
+				if !changed {
+					return idempotency.Response{}, ErrProviderUnavailable
+				}
 			}
 			body, err := json.Marshal(Started{raw, selected, call.StartedAt.Add(RequestTTL)})
 			return idempotency.Response{Body: body, OwnerID: owner}, err

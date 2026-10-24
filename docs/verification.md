@@ -5,7 +5,10 @@ FIN-219 реализует StartPhoneVerification, WatchPhoneVerification и о�
 постбэк с проверкой по API, fallback открытого Watch и сохранение выбранного номера.
 По умолчанию провайдер выключен: создание даёт INTERNAL без списания лимита.
 `PHONE_PROVIDER=zvonok` разрешён только в dev/stage до защиты бюджета FIN-81.
-[Zvonok и ограничения активации](zvonok.md). Фейк остаётся FIN-122.
+[Zvonok и ограничения активации](zvonok.md).
+Runtime-фейк FIN-122 использует этот же Confirm, шифрование, pg_notify и Watch.
+Его автоподтверждение входит в транзакцию завершения Start; настройки, тестовый
+диапазон, повторы и защита prod — в [fake-phone.md](fake-phone.md).
 
 ## Создание и восстановление
 

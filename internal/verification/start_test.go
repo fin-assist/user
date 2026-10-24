@@ -243,6 +243,42 @@ func (f *startFixtureData) unfinished() {
 	f.repo.record = &StartRecord{Key: f.key.Key, Hash: f.key.Hash, Request: Request{ID: 1, Phone: f.provider.call.Phone, Provider: "test", CreatedAt: f.now, ExpiresAt: f.now.Add(RequestTTL)}, Windows: make([]ratelimit.Window, 4)}
 }
 
+type createdConfirmFunc func(context.Context, Proof, string) (bool, error)
+
+func (f createdConfirmFunc) ConfirmCreated(ctx context.Context, p Proof, owner string) (bool, error) {
+	return f(ctx, p, owner)
+}
+
+func TestStartImmediateConfirmationJoinsCompletionAndSkipsReplay(t *testing.T) {
+	for _, mode := range []string{"confirmed", "unchanged", "error"} {
+		t.Run(mode, func(t *testing.T) {
+			f := startFixture(t)
+			calls := 0
+			f.s.SetImmediateConfirmation(createdConfirmFunc(func(_ context.Context, p Proof, owner string) (bool, error) {
+				calls++
+				if !f.tx.active || f.repo.completed != 1 || f.selector.calls != 1 || owner != "" || p != (Proof{"test", "call-1", "+79001234567"}) {
+					t.Fatal("confirmation must follow completion and selection inside the transaction", p)
+				}
+				if mode == "error" {
+					return false, errDependency
+				}
+				return mode == "confirmed", nil
+			}))
+			out, err := f.run(t.Context())
+			if mode != "confirmed" {
+				if err == nil || f.tx.rollbacks != 1 || f.engine.replay != nil {
+					t.Fatal("failed confirmation cached a successful creation", out, err)
+				}
+				return
+			}
+			replay, replayErr := f.run(t.Context())
+			if err != nil || replayErr != nil || replay != out || calls != 1 {
+				t.Fatal(out, replay, calls, err, replayErr)
+			}
+		})
+	}
+}
+
 func TestStartCommitReplayAndRecoveredOwnAttempt(t *testing.T) {
 	f := startFixture(t)
 	out, err := f.run(t.Context())
