@@ -2,7 +2,7 @@
 
 DeleteAccount реализует api.md 2.5 / grpc-api.md 7.1 в FIN-219. Создание, подтверждение
 и Watch — [verification.md](verification.md). Используются go-tombstone v0.1.0,
-go-outbox v0.1.0, владелец ответа go-idempotency с Resource (FIN-230) (FIN-226) и связь ключей
+go-outbox v0.1.0, владелец ответа go-idempotency (FIN-226) и связь ключей
 Start с заявкой через Resource библиотеки (FIN-230). Миграция 000002 хранит данные
 своей попытки непосредственно в phone_verification.
 

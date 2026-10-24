@@ -60,7 +60,9 @@ a dedicated primary pool and operator-configured recipients, with system credent
 Timezone defaults to bank-statement-data and assistant; deletion requires bank-statement-data,
 analytics and assistant. Pool capacity is at least the union of recipients + 3. Missing configured peer addresses fail startup. See docs/profile.md.
 
-Start, Register and RefreshTokens use go-idempotency with Resource (FIN-230) with encrypted no-user replies and result ownership (FIN-226).
+Start, Register and RefreshTokens use go-idempotency with encrypted no-user replies
+and result ownership (FIN-226). Start also binds reservations and cached replies,
+including busy refusals, to the verification request through Resource (FIN-230).
 Their key/effect transactions use a dedicated primary pool; IP attempts commit in
 the ordinary pool before token checks, even for rejected secrets. Reuse rolls the
 non-cacheable 401 back, then rechecks and commits revocation before returning it.
