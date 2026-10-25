@@ -59,6 +59,24 @@ func TestUnitIdentityAssemblyUsesStageFilesOrDefersKubernetesFetch(t *testing.T)
 	if sub, err := runtime.users.VerifyUser(t.Context(), access); err != nil || sub != "user-1" {
 		t.Fatalf("local user keys: %q %v", sub, err)
 	}
+	// Same trusted key and kid, but a foreign issuer or audience: refused.
+	for name, o := range map[string]signing.Options{
+		"foreign issuer":   {Issuer: "foreign-issuer", Audience: cfg.Signing.Audience},
+		"foreign audience": {Issuer: cfg.Signing.Issuer, Audience: "foreign-audience"},
+	} {
+		o.PrivateKeyFile, o.KeyID, o.Clock = cfg.Signing.PrivateKeyFile, cfg.Signing.KeyID, time.Now
+		other, err := signing.Load(o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		token, err := other.Sign(t.Context(), "user-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sub, err := runtime.users.VerifyUser(t.Context(), token); err == nil || sub != "" {
+			t.Fatalf("%s accepted: %q", name, sub)
+		}
+	}
 	if len(runtime.jobs) != 1 || runtime.jobs[0].Name != "identity-keys" {
 		t.Fatalf("key refresh job: %+v", runtime.jobs)
 	}
