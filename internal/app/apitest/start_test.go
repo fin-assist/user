@@ -195,7 +195,7 @@ func TestAPIStartAPIFullNewAndExistingSignInAndDeletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = c.Logout(authContext(t.Context(), authKey()), &userv1.LogoutRequest{RefreshToken: rotated.GetTokens().GetRefreshToken()}); err != nil {
+	if _, err = c.Logout(apitest.User(t.Context(), reg.GetUserId()), &userv1.LogoutRequest{RefreshToken: rotated.GetTokens().GetRefreshToken()}); err != nil {
 		t.Fatal(err)
 	}
 	// Let the previous provider lifetime elapse without a wall-clock sleep.

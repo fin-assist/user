@@ -507,7 +507,7 @@ func TestAPIAuthAPIRefreshReplayReuseAndLogout(t *testing.T) {
 		t.Fatal("401 rolled back revocation", err)
 	}
 	for range 2 {
-		if _, err := c.Logout(apitest.Caller(t.Context(), "bank-bff"), &userv1.LogoutRequest{RefreshToken: old}); err != nil {
+		if _, err := c.Logout(apitest.User(t.Context(), registered.GetUserId()), &userv1.LogoutRequest{RefreshToken: old}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -625,6 +625,10 @@ func TestAPIAuthAPIAccessTableErrorsAndDeletedReplay(t *testing.T) {
 		if _, err := c.Logout(ctx, &userv1.LogoutRequest{}); status.Code(err) != codes.Unauthenticated && status.Code(err) != codes.PermissionDenied {
 			t.Fatal(err)
 		}
+	}
+	// A user token from another caller does not open the bank-bff-only method.
+	if _, err := c.Logout(metadata.AppendToOutgoingContext(apitest.Caller(t.Context(), "assistant"), "authorization", "Bearer dev:"+r.GetUserId()), &userv1.LogoutRequest{RefreshToken: r.GetTokens().GetRefreshToken()}); status.Code(err) != codes.PermissionDenied || apitest.Reason(err) != "" {
+		t.Fatal(err)
 	}
 	if err := env.App.DB.Run(t.Context(), func(ctx context.Context) error {
 		return env.App.Tombstones.Purge(ctx, r.GetUserId(), func(context.Context, string) error { return nil })
@@ -812,5 +816,61 @@ func TestAPIAuthAPICachedOwnerIntegrityFailsClosed(t *testing.T) {
 	var links, registerHits, refreshHits int
 	if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM refresh_token),(SELECT hits FROM rate_limit_window WHERE scope='register_ip:60'),(SELECT hits FROM rate_limit_window WHERE scope='refresh_ip:60')`).Scan(&links, &registerHits, &refreshHits); err != nil || links != 2 || registerHits != 1 || refreshHits != 1 {
 		t.Fatal("corruption reran effects/limits", links, registerHits, refreshHits, err)
+	}
+}
+
+// Logout is a user call (api.md 1.5, grpc-api.md 3.3): the access token identifies
+// the owner, and a refresh secret alone never ends a session.
+func TestAPIAuthAPILogoutRequiresAccessTokenAndOwner(t *testing.T) {
+	env := apitest.Start(t)
+	seedDocuments(t, env)
+	c := userv1.NewAuthServiceClient(env.Conn)
+	owner, _ := registerAPI(t, env, "logout-owner", "+79001234567")
+	other, _ := registerAPI(t, env, "logout-other", "+79001234568")
+	sessions := func(user string) int {
+		t.Helper()
+		var n int
+		if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT count(*) FROM auth_session WHERE user_id=$1`, user).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	ownRefresh := &userv1.LogoutRequest{RefreshToken: owner.GetTokens().GetRefreshToken()}
+	// Without an access token Logout is refused and the session survives.
+	if _, err := c.Logout(apitest.Caller(t.Context(), "bank-bff"), ownRefresh); apitest.Reason(err) != "INVALID_TOKEN" {
+		t.Fatal(err)
+	}
+	if _, err := c.Logout(authContext(t.Context(), authKey()), ownRefresh); apitest.Reason(err) != "INVALID_TOKEN" {
+		t.Fatal(err)
+	}
+	// Another user's access token succeeds without revealing or ending the session.
+	if _, err := c.Logout(apitest.User(t.Context(), other.GetUserId()), ownRefresh); err != nil {
+		t.Fatal(err)
+	}
+	if sessions(owner.GetUserId()) != 1 || sessions(other.GetUserId()) != 1 {
+		t.Fatal("foreign logout changed sessions")
+	}
+	if _, err := c.RefreshTokens(authContext(t.Context(), authKey()), &userv1.RefreshTokensRequest{RefreshToken: owner.GetTokens().GetRefreshToken()}); err != nil {
+		t.Fatal("owner session lost after foreign logout", err)
+	}
+	// The owner ends the chain; unknown and repeated secrets stay successful.
+	var latest string
+	if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT count(*)::text FROM refresh_token r JOIN auth_session s ON s.id=r.session_id WHERE s.user_id=$1`, owner.GetUserId()).Scan(&latest); err != nil || latest != "2" {
+		t.Fatal(latest, err)
+	}
+	for _, raw := range []string{owner.GetTokens().GetRefreshToken(), owner.GetTokens().GetRefreshToken(), "unknown"} {
+		if _, err := c.Logout(apitest.User(t.Context(), owner.GetUserId()), &userv1.LogoutRequest{RefreshToken: raw}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if sessions(owner.GetUserId()) != 0 || sessions(other.GetUserId()) != 1 {
+		t.Fatal("owner logout did not end only its chain")
+	}
+	// A deleted user's still-valid access token is refused by the tombstone.
+	if _, err := userv1.NewProfileServiceClient(env.Conn).DeleteAccount(apitest.User(t.Context(), other.GetUserId()), &userv1.DeleteAccountRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Logout(apitest.User(t.Context(), other.GetUserId()), &userv1.LogoutRequest{RefreshToken: other.GetTokens().GetRefreshToken()}); apitest.Reason(err) != "TOKEN_REVOKED" {
+		t.Fatal(err)
 	}
 }

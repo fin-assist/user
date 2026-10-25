@@ -209,7 +209,7 @@ Start проверяется на трёх уровнях: валидация о
 | WatchPhoneVerification | verification_test.go: новый/существующий, повтор 15 мин, истечение, capacity, LISTEN/resync, rollback |
 | Register | auth_test.go: atomic replay, ошибки согласий, одноразовость, конкурентные заявки одного номера |
 | RefreshTokens | auth_test.go: replay/reuse, конкурентная ротация, лимит до секрета, удалённый владелец |
-| Logout | TestAuthAPIRefreshReplayReuseAndLogout, TestAuthAPIAccessTableErrorsAndDeletedReplay |
+| Logout | TestAPIAuthAPILogoutRequiresAccessTokenAndOwner (access-токен, чужой refresh, повтор, удалённый пользователь), TestAPILogoutSignedJWTRejectsForgedAndExpiredAccess (поддельный/просроченный JWT в AuthVerify), TestAPIAuthAPIRefreshReplayReuseAndLogout, TestAPIAuthAPIAccessTableErrorsAndDeletedReplay |
 | GetConsentDocument | TestDocumentAPI: тип/версия, публичный ПДн и защищённый assistant, отсутствие документа |
 | GetProfile | TestProfileAPISettingsAndIsolation, TestProfileAPIAccessDeletionAndFailures |
 | UpdateProfile | TestProfileAPISettingsAndIsolation: пустое/частичное, неверные значения, timezone/outbox/version |

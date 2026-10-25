@@ -38,6 +38,7 @@ type fakeRepo struct {
 	newHash           token.Hash
 	writeTime, expiry time.Time
 	newZone           string
+	logoutUser        string
 }
 
 func (r *fakeRepo) call(name string) error { r.calls = append(r.calls, name); return r.fail[name] }
@@ -57,7 +58,10 @@ func (r *fakeRepo) Revoke(_ context.Context, _ Link, now time.Time) error {
 	r.writeTime = now
 	return r.call("revoke")
 }
-func (r *fakeRepo) Logout(context.Context, token.Hash) error { return r.call("logout") }
+func (r *fakeRepo) Logout(_ context.Context, id string, _ token.Hash) error {
+	r.logoutUser = id
+	return r.call("logout")
+}
 func (r *fakeRepo) Registration(_ context.Context, _ token.Hash, lock bool) (Registration, error) {
 	if lock {
 		v := r.v
@@ -237,12 +241,17 @@ func TestUnitRefreshAndLogoutDependencyFailures(t *testing.T) {
 		}
 	}
 	f := newFixture()
-	if err := f.s.Logout(t.Context(), "unknown"); err != nil {
-		t.Fatal(err)
+	if err := f.s.Logout(t.Context(), "user", "unknown"); err != nil || f.r.logoutUser != "user" {
+		t.Fatal(f.r.logoutUser, err)
 	}
 	f.r.fail["logout"] = errDependency
-	if err := f.s.Logout(t.Context(), "old"); !errors.Is(err, errDependency) {
+	if err := f.s.Logout(t.Context(), "user", "old"); !errors.Is(err, errDependency) {
 		t.Fatal(err)
+	}
+	// Without a verified owner nothing is deleted.
+	calls := len(f.r.calls)
+	if err := f.s.Logout(t.Context(), "", "old"); reason(err) != "INVALID_TOKEN" || len(f.r.calls) != calls {
+		t.Fatal(err, f.r.calls)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()

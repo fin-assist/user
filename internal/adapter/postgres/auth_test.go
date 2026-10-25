@@ -63,7 +63,7 @@ func TestIntegrationAuthRepositoryPrimaryLocksAndConstraintTranslation(t *testin
 	}
 	for _, call := range []func() error{
 		func() error { _, e := repo.LockLink(ctx, token.Sum("x"), now); return e }, func() error { return repo.Rotate(ctx, token.Sum("x"), token.Sum("y"), auth.Link{}, now, now) },
-		func() error { return repo.Revoke(ctx, auth.Link{}, now) }, func() error { return repo.Logout(ctx, token.Sum("x")) },
+		func() error { return repo.Revoke(ctx, auth.Link{}, now) }, func() error { return repo.Logout(ctx, profileID, token.Sum("x")) },
 		func() error { _, e := repo.Registration(ctx, token.Sum("x"), true); return e }, func() error { _, _, e := repo.CreateUser(ctx, "+79000000001", "UTC", now); return e },
 		func() error { return repo.LockUser(ctx, profileID) }, func() error { return repo.GrantPD(ctx, profileID, "v1", now) },
 		func() error { return repo.CreateSession(ctx, profileID, 1, token.Sum("x"), now, now) }, func() error { return repo.CloseVerification(ctx, 1, profileID, now) },
@@ -176,5 +176,52 @@ func TestIntegrationAuthRepositoryCleanupKeepsLiveLinks(t *testing.T) {
 	var n int
 	if err := db.Primary().QueryRow(ctx, `SELECT count(*) FROM auth_session`).Scan(&n); err != nil || n != 0 {
 		t.Fatal("empty chain kept", n, err)
+	}
+}
+
+func TestIntegrationAuthRepositoryLogoutDeletesOnlyOwnChain(t *testing.T) {
+	db, _, _ := profileDB(t)
+	repo := NewAuth(db)
+	ctx := t.Context()
+	now := time.Now().UTC()
+	own, foreign := token.Sum("own"), token.Sum("foreign")
+	for _, s := range []struct {
+		user string
+		hash token.Hash
+	}{{profileID, own}, {otherProfileID, foreign}} {
+		if err := db.Run(ctx, func(ctx context.Context) error {
+			var session int32
+			if err := db.Writer(ctx).QueryRow(ctx, `INSERT INTO auth_session(user_id,created_at) VALUES($1,$2) RETURNING id`, s.user, now).Scan(&session); err != nil {
+				return err
+			}
+			_, err := db.Writer(ctx).Exec(ctx, `INSERT INTO refresh_token(token_hash,session_id,generation,issued_at,expires_at) VALUES($1,$2,1,$3,$4)`, s.hash[:], session, now, now.Add(time.Hour))
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sessions := func(user string) int {
+		t.Helper()
+		var n int
+		if err := db.Primary().QueryRow(ctx, `SELECT count(*) FROM auth_session WHERE user_id=$1`, user).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	// Another user's refresh hash is a successful no-op: the chain survives.
+	if err := db.Run(ctx, func(ctx context.Context) error { return repo.Logout(ctx, profileID, foreign) }); err != nil {
+		t.Fatal(err)
+	}
+	if sessions(otherProfileID) != 1 || sessions(profileID) != 1 {
+		t.Fatal("foreign chain deleted")
+	}
+	for range 2 {
+		if err := db.Run(ctx, func(ctx context.Context) error { return repo.Logout(ctx, profileID, own) }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var links int
+	if err := db.Primary().QueryRow(ctx, `SELECT count(*) FROM refresh_token WHERE token_hash=$1`, own[:]).Scan(&links); err != nil || links != 0 || sessions(profileID) != 0 || sessions(otherProfileID) != 1 {
+		t.Fatal("own chain not deleted", links, err)
 	}
 }

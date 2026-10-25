@@ -26,7 +26,7 @@ type Sessions interface {
 	Register(context.Context, usecase.RegisterInput) (usecase.Registered, error)
 	Refresh(context.Context, string) (usecase.Rotation, error)
 	CompleteReuse(context.Context, string) error
-	Logout(context.Context, string) error
+	Logout(context.Context, string, string) error
 }
 
 // Phone is the provider-independent streaming lifecycle.
@@ -124,8 +124,14 @@ func (h *Handler) RefreshTokens(ctx context.Context, in *userv1.RefreshTokensReq
 	return out, err
 }
 
+// Logout is a user call (grpc-api.md 3.3): the session owner comes from the verified
+// access token, never from the refresh secret alone.
 func (h *Handler) Logout(ctx context.Context, in *userv1.LogoutRequest) (*userv1.LogoutResponse, error) {
-	if err := h.sessions.Logout(ctx, in.GetRefreshToken()); err != nil {
+	id, ok := reqctx.UserID(ctx)
+	if !ok {
+		return nil, finerr.InvalidToken()
+	}
+	if err := h.sessions.Logout(ctx, id, in.GetRefreshToken()); err != nil {
 		return nil, err
 	}
 	return &userv1.LogoutResponse{}, nil

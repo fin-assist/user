@@ -83,6 +83,9 @@ type fakeSessions struct {
 	reused           bool
 	err, completeErr error
 	completed        bool
+	logoutUser       string
+	logoutToken      string
+	logouts          int
 }
 
 func (s *fakeSessions) Register(_ context.Context, in usecase.RegisterInput) (usecase.Registered, error) {
@@ -96,7 +99,11 @@ func (s *fakeSessions) CompleteReuse(context.Context, string) error {
 	s.completed = true
 	return s.completeErr
 }
-func (s *fakeSessions) Logout(context.Context, string) error { return s.err }
+func (s *fakeSessions) Logout(_ context.Context, id, raw string) error {
+	s.logoutUser, s.logoutToken = id, raw
+	s.logouts++
+	return s.err
+}
 
 type fakeLimits struct {
 	allowed bool
@@ -157,11 +164,17 @@ func TestUnitSessionHandlerMappingAndIndependentAttempts(t *testing.T) {
 	if err != nil || f.GetTokens().GetRefreshToken() != "new-refresh" {
 		t.Fatal(f, err)
 	}
-	if _, err := h.Logout(t.Context(), &userv1.LogoutRequest{}); err != nil {
+	user := reqctx.WithUserID(t.Context(), "user")
+	if _, err := h.Logout(user, &userv1.LogoutRequest{RefreshToken: "refresh"}); err != nil || s.logoutUser != "user" || s.logoutToken != "refresh" {
+		t.Fatal(s.logoutUser, s.logoutToken, err)
+	}
+	// The verified owner is required; the refresh secret alone deletes nothing.
+	logouts := s.logouts
+	if _, err := h.Logout(t.Context(), &userv1.LogoutRequest{RefreshToken: "refresh"}); grpcReason(err) != "INVALID_TOKEN" || s.logouts != logouts {
 		t.Fatal(err)
 	}
 	s.err = errDependency
-	if _, err := h.Logout(t.Context(), &userv1.LogoutRequest{}); !errors.Is(err, errDependency) {
+	if _, err := h.Logout(user, &userv1.LogoutRequest{}); !errors.Is(err, errDependency) {
 		t.Fatal(err)
 	}
 	server := grpc.NewServer()

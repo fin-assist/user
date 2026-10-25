@@ -96,13 +96,13 @@ func TestAPIRefreshRejectsCorruptedGenerationAndRollsBackUnavailableStorage(t *t
 	if _, err := env.App.DB.Primary().Exec(t.Context(), `ALTER TABLE refresh_token RENAME COLUMN session_id TO unavailable`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.Logout(apitest.Caller(t.Context(), "bank-bff"), &userv1.LogoutRequest{RefreshToken: refreshed.GetTokens().GetRefreshToken()}); status.Code(err) != codes.Internal {
+	if _, err := client.Logout(apitest.User(t.Context(), registered.GetUserId()), &userv1.LogoutRequest{RefreshToken: refreshed.GetTokens().GetRefreshToken()}); status.Code(err) != codes.Internal {
 		t.Fatal(err)
 	}
 	if _, err := env.App.DB.Primary().Exec(t.Context(), `ALTER TABLE refresh_token RENAME COLUMN unavailable TO session_id`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.Logout(apitest.Caller(t.Context(), "bank-bff"), &userv1.LogoutRequest{RefreshToken: refreshed.GetTokens().GetRefreshToken()}); err != nil {
+	if _, err := client.Logout(apitest.User(t.Context(), registered.GetUserId()), &userv1.LogoutRequest{RefreshToken: refreshed.GetTokens().GetRefreshToken()}); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -177,7 +177,7 @@ func TestIntegrationHandlersCommitCachedSessionsAndSettingsAtomically(t *testing
 	if _, err = a.RefreshTokens(incoming("integration-refresh-child"), &userv1.RefreshTokensRequest{RefreshToken: rotated.GetTokens().GetRefreshToken()}); apitest.Reason(err) != "TOKEN_REVOKED" {
 		t.Fatal(err)
 	}
-	if _, err = a.Logout(ctx, &userv1.LogoutRequest{RefreshToken: rotated.GetTokens().GetRefreshToken()}); err != nil {
+	if _, err = a.Logout(user, &userv1.LogoutRequest{RefreshToken: rotated.GetTokens().GetRefreshToken()}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = p.DeleteAccount(user, &userv1.DeleteAccountRequest{}); err != nil {

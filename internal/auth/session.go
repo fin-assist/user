@@ -43,7 +43,7 @@ type Repository interface {
 	LockLink(context.Context, token.Hash, time.Time) (Link, error)
 	Rotate(context.Context, token.Hash, token.Hash, Link, time.Time, time.Time) error
 	Revoke(context.Context, Link, time.Time) error
-	Logout(context.Context, token.Hash) error
+	Logout(context.Context, string, token.Hash) error
 	Registration(context.Context, token.Hash, bool) (Registration, error)
 	CurrentPD(context.Context) (string, error)
 	CreateUser(context.Context, string, string, time.Time) (string, bool, error)
@@ -232,8 +232,12 @@ func IssuePair(ctx context.Context, id string, signer Signer, newToken func() (s
 	return Pair{Access: access, Refresh: refresh}, nil
 }
 
-// Logout deletes the entire chain for this secret. Unknown and repeated secrets
-// are successful; access JWTs retain their original expiry.
-func (s *Service) Logout(ctx context.Context, raw string) error {
-	return s.tx.Run(ctx, func(ctx context.Context) error { return s.repo.Logout(ctx, token.Sum(raw)) })
+// Logout deletes the entire chain for this secret only when it belongs to the
+// verified user. Unknown, repeated and foreign secrets succeed without an effect,
+// so the reply never confirms another user's session; access JWTs keep their expiry.
+func (s *Service) Logout(ctx context.Context, userID, raw string) error {
+	if userID == "" {
+		return finerr.InvalidToken()
+	}
+	return s.tx.Run(ctx, func(ctx context.Context) error { return s.repo.Logout(ctx, userID, token.Sum(raw)) })
 }
