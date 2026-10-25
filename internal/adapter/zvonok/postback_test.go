@@ -85,6 +85,7 @@ func TestUnitPostbackForwardedChainSpansHeaderLines(t *testing.T) {
 		{"provider-in-last-line", []string{"203.0.113.9", "193.232.64.150"}, 200},
 		{"provider-behind-two-proxies", []string{"193.232.64.150", "10.0.0.2"}, 200},
 		{"bad-entry-in-earlier-line", []string{"invalid", "10.0.0.2"}, 403},
+		{"limit-boundary-across-lines", []string{"193.232.64.150", strings.Join(long[:15], ",")}, 200},
 		{"limit-across-lines", []string{"193.232.64.150", strings.Join(long, ",")}, 403},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
