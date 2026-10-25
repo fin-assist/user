@@ -11,7 +11,7 @@ func TestUnitZvonokConfigurationAndProdBoundary(t *testing.T) {
 	vars["PHONE_PROVIDER"] = "zvonok"
 	vars["ZVONOK_PUBLIC_KEY"] = "private-test-key"
 	vars["ZVONOK_CAMPAIGN_ID"] = "123"
-	vars["ENV"] = "dev"
+	vars["ENV"], vars["AUTH_MODE"] = "dev", "insecure-dev"
 	vars["ZVONOK_TRUSTED_PROXY_CIDRS"] = "10.0.0.0/24, 192.168.1.0/24"
 	g, l := env(vars)
 	cfg, err := load(g, noFiles, l)

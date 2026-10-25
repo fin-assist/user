@@ -37,12 +37,12 @@ PEER_<NAME>_ADDR; по умолчанию нужны PEER_BANK_STATEMENT_DATA_AD
 | `ZVONOK_POLL_INTERVAL` | `30s` | минимальный интервал запасной проверки одной pending-заявки в Watch (1s–1m); общий API-бюджет 20 запросов/с на ключ в PostgreSQL |
 | `SERVICE_NAME` | — (обязательна) | имя сервиса: логи, `application_name`, токен в dev |
 | `ENV` | `prod` | `dev`, `stage` или `prod`. Reflection включён только при `dev` |
-| `AUTH_MODE` | `verify` | `verify` — проверка JWT и сервисных токенов через go-identity; `insecure-dev` — токены `dev:<имя>` без проверки, только при `ENV=dev` |
+| `AUTH_MODE` | `verify` | `verify` — проверка JWT и сервисных токенов через go-identity `NewAssembly`: при `ENV=prod` — ServiceAccount Kubernetes, при `ENV=stage` — JWT из файлов ключей, при `ENV=dev` не запускается; `insecure-dev` — токены `dev:<имя>` без проверки, только при `ENV=dev` |
 | `JWT_SIGNING_KEY_FILE` | — | PKCS#8 PEM Ed25519, приватный ключ access JWT; файл 0600, обязателен при старте |
 | `JWT_PUBLIC_KEYS_FILE` | — | необязательный публичный JWKS Ed25519 для перекрытия ключей при ротации |
 | `JWT_KEY_ID` | — | kid активного ключа access JWT, обязателен при старте |
-| `JWT_ISSUER` | — | iss access JWT, обязателен; одинаков у всех потребителей |
-| `JWT_AUDIENCE` | — | aud access JWT, обязателен; одинаков у всех потребителей |
+| `JWT_ISSUER` | — | iss access JWT, обязателен; одинаков у всех потребителей (у них — `AUTH_USER_ISSUER`); этот же iss user проверяет у входящих access-токенов |
+| `JWT_AUDIENCE` | — | aud access JWT, обязателен; одинаков у всех потребителей (у них — `AUTH_USER_AUDIENCE`); эту же aud user проверяет у входящих access-токенов |
 | `AUTH_IDEMPOTENCY_KEY_FILE` | — | файл 0600 с 32 raw-байтами AES-256 для шифрования ответов Register/Refresh; обязателен, общий для реплик; сохранять ключ не менее 24 ч после последней записи |
 | `PHONE_RESULT_KEY_FILE` | — | файл 0600 с 32 raw-байтами AES-256 для результата подтверждения; обязателен, общий для реплик, отличается от AUTH_IDEMPOTENCY_KEY_FILE; хранить до истечения всех 15-минутных результатов |
 | `PHONE_RESULT_KEY_ID` | `primary` | ID ключа результата: 1–64 символа A-Z/a-z/0-9/._-; сохраняется вместе с ciphertext |
@@ -50,14 +50,15 @@ PEER_<NAME>_ADDR; по умолчанию нужны PEER_BANK_STATEMENT_DATA_AD
 | `PHONE_WATCH_RESYNC_INTERVAL` | `5s` | повторное чтение primary открытым Watch в дополнение к NOTIFY; положительный интервал не больше 30 с |
 | `AUTH_DB_MAX_CONNS` | `8` | отдельный primary pool транзакций авторизации; лимиты используют обычный pool, чтобы ошибки токена не откатывали учёт попыток |
 | `REFRESH_TOKEN_TTL` | `1440h` | скользящий срок refresh-токена; по умолчанию 60 суток, продлевается каждой ротацией |
-| `SERVICE_AUTH_MODE` | `kubernetes` | kubernetes — ServiceAccount; stage — подписанные JWT сервисов, только dev/stage |
-| `SERVICE_TOKEN_ISSUER` | — | iss сервисных токенов; для kubernetes — issuer кластера, для stage — общий issuer стенда |
-| `STAGE_SIGNING_KEY_FILE` | — | приватный PKCS#8 Ed25519 ключ этого сервиса для SERVICE_AUTH_MODE=stage |
-| `STAGE_PUBLIC_KEYS_FILE` | — | публичный JWKS сервисов стенда; kid — имя сервиса; отдельный от ключей пользователей |
-| `KUBERNETES_JWKS_URL` | `https://kubernetes.default.svc/openid/v1/jwks` | доверенный HTTPS endpoint JWKS API-сервера |
-| `KUBERNETES_CA_FILE` | `/var/run/secrets/kubernetes.io/serviceaccount/ca.crt` | доверенный CA API-сервера, TLS-проверка обязательна |
-| `KUBERNETES_TOKEN_FILE` | `/var/run/secrets/kubernetes.io/serviceaccount/token` | штатный API-server-audience токен пода для чтения JWKS; не finassist-internal |
-| `SERVICE_TOKEN_FILE` | — | файл с токеном ServiceAccount этого сервиса для исходящих вызовов (FIN-119) |
+| `AUTH_KUBERNETES_ISSUER` | `https://kubernetes.default.svc.cluster.local` | issuer токенов ServiceAccount при `ENV=prod`; сверить с настройкой кластера (было `SERVICE_TOKEN_ISSUER`) |
+| `AUTH_KUBERNETES_JWKS_URL` | `https://kubernetes.default.svc/openid/v1/jwks` | HTTPS-адрес ключей ServiceAccount при `ENV=prod` (было `KUBERNETES_JWKS_URL`) |
+| `AUTH_KUBERNETES_CA_FILE` | `/var/run/secrets/kubernetes.io/serviceaccount/ca.crt` | CA Kubernetes API, TLS-проверка обязательна (было `KUBERNETES_CA_FILE`) |
+| `AUTH_KUBERNETES_API_TOKEN_FILE` | `/var/run/secrets/kubernetes.io/serviceaccount/token` | API-server-audience токен пода для чтения JWKS; отдельный от finassist-internal (было `KUBERNETES_TOKEN_FILE`) |
+| `AUTH_KUBERNETES_NAMESPACE` | `finassist` | доверенный namespace ServiceAccount вызывающих при `ENV=prod` |
+| `AUTH_STAGE_ISSUER` | — | общий issuer сервисных JWT стенда; обязателен при `ENV=stage`, запрещён при `ENV=prod` (было `SERVICE_TOKEN_ISSUER`) |
+| `AUTH_STAGE_SIGNING_KEY_FILE` | — | приватный PKCS#8 Ed25519 ключ этого сервиса для исходящих JWT стенда; обязателен при `ENV=stage` (было `STAGE_SIGNING_KEY_FILE`) |
+| `AUTH_STAGE_PUBLIC_KEYS_FILE` | — | публичный JWKS сервисов стенда, kid — имя сервиса, отдельный от ключей пользователей; обязателен при `ENV=stage` (было `STAGE_PUBLIC_KEYS_FILE`) |
+| `SERVICE_TOKEN_FILE` | — | projected-токен ServiceAccount этого сервиса с audience finassist-internal для исходящих вызовов; обязателен при `ENV=prod`, отличается от `AUTH_KUBERNETES_API_TOKEN_FILE` |
 | `DB_PRIMARY_DSN` / `_FILE` | — (обязательна) | DSN primary (`-rw`) |
 | `DB_REPLICA_DSN` / `_FILE` | — | DSN реплик (`-ro`); пусто — чтение тоже с primary. На стенде оба указывают на один PostgreSQL |
 | `DB_MAX_CONNS` | `10` | размер каждого пула |
@@ -139,15 +140,42 @@ go-identity. В закреплённой сейчас v0.1.0 отказ исто
 
 ## Проверка сервисных токенов
 
-При AUTH_MODE=verify требуется SERVICE_TOKEN_ISSUER. В kubernetes также нужны
-SERVICE_TOKEN_FILE (projected audience finassist-internal), KUBERNETES_TOKEN_FILE
-(штатный audience API-сервера), CA и HTTPS JWKS URL. TLS не отключается и redirects
-не принимаются. Ключи пользователя обновляются из локального снимка, кластерные —
-заданием кэша go-identity. Внешняя загрузка ключей ограничена библиотекой пятью секундами.
+Идентичность собирает go-identity `NewAssembly` (v0.2.0, FIN-325); режим выбирает `ENV`,
+`AUTH_MODE=verify` при `ENV=dev` не запускается (в dev — только `insecure-dev`).
 
-В stage: ENV=stage, SERVICE_AUTH_MODE=stage, отдельный STAGE_SIGNING_KEY_FILE этого
-сервиса и STAGE_PUBLIC_KEYS_FILE с публичными ключами всех разрешённых сервисов (kid —
-имя вызывающего). JWT_ISSUER/JWT_AUDIENCE относятся к пользователю, SERVICE_TOKEN_ISSUER
-— к сервисам; это разные границы доверия. Для смены stage-ключей нужен согласованный
-перезапуск источников и проверяющих сервисов; ротация сервиса с двумя ключами одного
-имени библиотекой пока не поддерживается.
+В prod (`ENV=prod`) нужны `SERVICE_TOKEN_FILE` (projected audience finassist-internal) и
+отдельный файл `AUTH_KUBERNETES_API_TOKEN_FILE` (штатный audience API-сервера), CA
+`AUTH_KUBERNETES_CA_FILE` и HTTPS `AUTH_KUBERNETES_JWKS_URL`; issuer и namespace —
+`AUTH_KUBERNETES_ISSUER`, `AUTH_KUBERNETES_NAMESPACE` (значения по умолчанию как в
+assistant). TLS не отключается и redirects не принимаются. `AUTH_STAGE_*` в prod —
+ошибка запуска. Ключи пользователя обновляются из локального снимка, кластерные —
+заданием `identity-keys`. Внешняя загрузка ключей ограничена библиотекой пятью секундами.
+
+В stage (`ENV=stage`): общий issuer `AUTH_STAGE_ISSUER`, отдельный
+`AUTH_STAGE_SIGNING_KEY_FILE` этого сервиса и `AUTH_STAGE_PUBLIC_KEYS_FILE` с публичными
+ключами всех разрешённых сервисов (kid — имя вызывающего). `JWT_ISSUER`/`JWT_AUDIENCE`
+относятся к пользователю, `AUTH_STAGE_ISSUER` и `AUTH_KUBERNETES_ISSUER` — к сервисам;
+это разные границы доверия. Для смены stage-ключей нужен согласованный перезапуск
+источников и проверяющих сервисов; ротация сервиса с двумя ключами одного имени
+библиотекой пока не поддерживается.
+
+Issuer и audience входящих access-токенов — `JWT_ISSUER`/`JWT_AUDIENCE`: user сам
+подписывает эти токены, отдельные `AUTH_USER_ISSUER`/`AUTH_USER_AUDIENCE` (как у
+потребителей) здесь не заводятся, чтобы подпись и проверка не могли разойтись.
+
+### Переход на AUTH_* (FIN-325)
+
+Переименование одновременное: образ с FIN-325 и окружение стенда выкатываются вместе
+(`deploy/systemd/user.service` уже на новых именах). Старое имя с непустым значением —
+ошибка запуска с именем замены, а не молчаливое значение по умолчанию.
+
+| Было | Стало |
+|---|---|
+| `SERVICE_AUTH_MODE` | удалена: `ENV=prod` — Kubernetes, `ENV=stage` — ключи из файлов |
+| `SERVICE_TOKEN_ISSUER` | `AUTH_KUBERNETES_ISSUER` (prod) или `AUTH_STAGE_ISSUER` (stage) |
+| `STAGE_SIGNING_KEY_FILE` | `AUTH_STAGE_SIGNING_KEY_FILE` |
+| `STAGE_PUBLIC_KEYS_FILE` | `AUTH_STAGE_PUBLIC_KEYS_FILE` |
+| `KUBERNETES_JWKS_URL` | `AUTH_KUBERNETES_JWKS_URL` |
+| `KUBERNETES_CA_FILE` | `AUTH_KUBERNETES_CA_FILE` |
+| `KUBERNETES_TOKEN_FILE` | `AUTH_KUBERNETES_API_TOKEN_FILE` |
+| — | `AUTH_KUBERNETES_NAMESPACE` (по умолчанию `finassist`, как было зашито в коде) |

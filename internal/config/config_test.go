@@ -98,20 +98,51 @@ func TestUnitInsecureDevOnlyInDev(t *testing.T) {
 	}
 }
 
-func TestUnitServiceAuthenticationMode(t *testing.T) {
+func TestUnitServiceAuthenticationFollowsEnvironment(t *testing.T) {
 	for _, tt := range []struct {
-		env, mode string
-		valid     bool
+		name  string
+		vars  map[string]string
+		valid bool
 	}{
-		{"prod", "stage", false}, {"stage", "stage", true}, {"dev", "stage", true}, {"prod", "kubernetes", true}, {"prod", "other", false},
+		{"prod defaults", map[string]string{"ENV": "prod"}, true},
+		{"stage", map[string]string{"ENV": "stage", "AUTH_STAGE_ISSUER": "stage"}, true},
+		{"verify in dev", map[string]string{"ENV": "dev"}, false},
+		{"stage keys in prod", map[string]string{"ENV": "prod", "AUTH_STAGE_PUBLIC_KEYS_FILE": "/stage.jwks"}, false},
 	} {
 		vars := base()
-		vars["ENV"], vars["SERVICE_AUTH_MODE"] = tt.env, tt.mode
-		get, list := env(vars)
-		_, err := load(get, noFiles, list)
-		if (err == nil) != tt.valid {
-			t.Fatalf("env=%s mode=%s: %v", tt.env, tt.mode, err)
+		for k, v := range tt.vars {
+			vars[k] = v
 		}
+		get, list := env(vars)
+		c, err := load(get, noFiles, list)
+		if (err == nil) != tt.valid {
+			t.Fatalf("%s: %v", tt.name, err)
+		}
+		if tt.name == "prod defaults" {
+			want := KubernetesAuthConfig{Issuer: "https://kubernetes.default.svc.cluster.local", JWKSURL: "https://kubernetes.default.svc/openid/v1/jwks", CAFile: "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt", APITokenFile: "/var/run/secrets/kubernetes.io/serviceaccount/token", Namespace: "finassist"}
+			if c.Auth.Kubernetes != want {
+				t.Fatalf("kubernetes defaults: %+v", c.Auth.Kubernetes)
+			}
+		}
+	}
+}
+
+// FIN-325: a deployment that still sets a renamed variable fails at startup and is
+// told the replacement, instead of silently running on the new variable's default.
+func TestUnitRenamedIdentityVariablesAreRefused(t *testing.T) {
+	for _, v := range renamedVars {
+		vars := base()
+		vars[v.old] = "legacy"
+		get, list := env(vars)
+		if _, err := load(get, noFiles, list); err == nil || !strings.Contains(err.Error(), v.old+" is no longer read: use "+v.replacement) {
+			t.Fatalf("%s: %v", v.old, err)
+		}
+	}
+	vars := base()
+	vars["KUBERNETES_JWKS_URL"] = ""
+	get, list := env(vars)
+	if _, err := load(get, noFiles, list); err != nil {
+		t.Fatalf("an empty legacy variable is not a setting: %v", err)
 	}
 }
 
@@ -136,5 +167,24 @@ func TestUnitErrorsAreJoined(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("error %v, want it to mention %s", err, want)
 		}
+	}
+}
+
+// A pool size beyond int32 used to wrap around (4294967297 became 1) and pass the
+// positivity check; it is a configuration error instead.
+func TestUnitMaxConnsOutsideInt32IsRejected(t *testing.T) {
+	for _, v := range []string{"4294967297", "2147483648", "-2147483649", "99999999999999999999"} {
+		vars := base()
+		vars["DB_MAX_CONNS"] = v
+		get, list := env(vars)
+		if c, err := load(get, noFiles, list); err == nil || !strings.Contains(err.Error(), "DB_MAX_CONNS") {
+			t.Fatalf("DB_MAX_CONNS=%s accepted as %d: %v", v, c.DB.MaxConns, err)
+		}
+	}
+	vars := base()
+	vars["DB_MAX_CONNS"] = "2147483647"
+	get, list := env(vars)
+	if c, err := load(get, noFiles, list); err != nil || c.DB.MaxConns != 2147483647 {
+		t.Fatalf("max int32: %d %v", c.DB.MaxConns, err)
 	}
 }

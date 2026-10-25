@@ -59,7 +59,7 @@ func TestAPIKubernetesIdentityUsesTLSKeysAndSeparatesCallersAndUsers(t *testing.
 	}
 	env := apitest.Start(t, func(c *config.Config) {
 		c.Env = config.EnvProd
-		c.Auth = config.AuthConfig{Mode: config.AuthVerify, ServiceMode: "kubernetes", ServiceIssuer: "local-cluster", ServiceTokenFile: serviceToken, KubernetesTokenFile: apiToken, KubernetesCAFile: ca, KubernetesJWKSURL: endpoint.URL}
+		c.Auth = config.AuthConfig{Mode: config.AuthVerify, ServiceTokenFile: serviceToken, Kubernetes: config.KubernetesAuthConfig{Issuer: "local-cluster", APITokenFile: apiToken, CAFile: ca, JWKSURL: endpoint.URL}}
 		c.Signing.PublicKeysFile = retainedPath
 	})
 	seedDocuments(t, env)

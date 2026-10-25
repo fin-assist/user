@@ -32,7 +32,7 @@ func TestAPIDeleteAccountSignedJWTStillVerifiesRetries(t *testing.T) {
 	}
 	env := apitest.Start(t, func(c *config.Config) {
 		c.Env = config.EnvStage
-		c.Auth = config.AuthConfig{Mode: config.AuthVerify, ServiceMode: "stage", ServiceIssuer: "stage-services", StageKeyFile: userKey, StagePublicKeysFile: path}
+		c.Auth = config.AuthConfig{Mode: config.AuthVerify, Stage: config.StageAuthConfig{Issuer: "stage-services", SigningKeyFile: userKey, PublicKeysFile: path}}
 	})
 	seedDocuments(t, env)
 	seedRegistration(t, env, "signed-register", "+79001234567", time.Now().UTC())
@@ -60,8 +60,22 @@ func TestAPIDeleteAccountSignedJWTStillVerifiesRetries(t *testing.T) {
 	}
 	forged := strings.Split(registered.GetTokens().GetAccessToken(), ".")
 	forged[2] = strings.Repeat("A", len(forged[2]))
+	// FIN-325: a token signed by the trusted user key but naming another issuer or
+	// audience must not pass the NewAssembly verifier bound to JWT_ISSUER/JWT_AUDIENCE.
+	foreign := func(issuer, audience string) string {
+		t.Helper()
+		signer, err := signing.Load(signing.Options{PrivateKeyFile: cfg.PrivateKeyFile, KeyID: cfg.KeyID, Issuer: issuer, Audience: audience, Clock: time.Now})
+		if err != nil {
+			t.Fatal(err)
+		}
+		token, err := signer.Sign(t.Context(), registered.GetUserId())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return token
+	}
 	profiles := userv1.NewProfileServiceClient(env.Conn)
-	for _, jwt := range []string{expired, strings.Join(forged, ".")} {
+	for _, jwt := range []string{expired, strings.Join(forged, "."), foreign("foreign-issuer", cfg.Audience), foreign(cfg.Issuer, "foreign-audience")} {
 		if _, err = profiles.DeleteAccount(metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+jwt), &userv1.DeleteAccountRequest{}); apitest.Reason(err) != "INVALID_TOKEN" {
 			t.Fatal("invalid JWT authorized deletion", err)
 		}
@@ -99,7 +113,7 @@ func TestAPILogoutSignedJWTRejectsForgedAndExpiredAccess(t *testing.T) {
 	}
 	env := apitest.Start(t, func(c *config.Config) {
 		c.Env = config.EnvStage
-		c.Auth = config.AuthConfig{Mode: config.AuthVerify, ServiceMode: "stage", ServiceIssuer: "stage-services", StageKeyFile: userKey, StagePublicKeysFile: path}
+		c.Auth = config.AuthConfig{Mode: config.AuthVerify, Stage: config.StageAuthConfig{Issuer: "stage-services", SigningKeyFile: userKey, PublicKeysFile: path}}
 	})
 	seedDocuments(t, env)
 	seedRegistration(t, env, "signed-logout", "+79001234567", time.Now().UTC())

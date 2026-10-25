@@ -46,6 +46,9 @@ type Env struct {
 	Conn     *grpc.ClientConn
 	DSN      string               // the test database, for arranging and checking rows directly
 	Registry *prometheus.Registry // the same collectors served by the operational endpoint
+	// LimitNow is the pinned instant of the rate limiter: every attempt of one test
+	// lands in the same fixed UTC window of each scope, whatever the wall clock does.
+	LimitNow time.Time
 }
 
 // Start runs the service for the test and stops it at the end. mutate, if given, adjusts
@@ -120,6 +123,10 @@ func start(t *testing.T, options []app.Option, mutate ...func(*config.Config)) *
 		m(&cfg)
 	}
 	registry := prometheus.NewRegistry()
+	// A scenario that counts or exhausts a limit must not straddle a window boundary
+	// (FIN-313): pin the limiter clock; explicit options may still replace it.
+	limitNow := time.Now().UTC()
+	options = append([]app.Option{app.WithLimitClock(func() time.Time { return limitNow })}, options...)
 	a, err := app.New(ctx, cfg, slog.New(slog.DiscardHandler), registry, options...)
 	if err != nil {
 		t.Fatalf("app: %v", err)
@@ -146,7 +153,7 @@ func start(t *testing.T, options []app.Option, mutate ...func(*config.Config)) *
 		a.GRPC.Shutdown(sctx, 0)
 		a.Close()
 	})
-	return &Env{App: a, Conn: conn, DSN: dsn, Registry: registry}
+	return &Env{App: a, Conn: conn, DSN: dsn, Registry: registry, LimitNow: limitNow}
 }
 
 // User returns ctx for a user call made by bank-bff on behalf of userID.

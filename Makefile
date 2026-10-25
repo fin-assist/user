@@ -24,10 +24,12 @@ release-check: ## VERSION=vX.Y.Z: validate the CHANGELOG section before tagging
 	python3 scripts/changelog.py check
 	test "$$(python3 scripts/changelog.py latest)" = "$(VERSION)"
 
-test-names: ## reject tests accidentally omitted from the three selectors
-	go test -race -list '^Test' -timeout=8m ./... > test-names.txt
-	@if grep -E '^Test' test-names.txt | grep -Ev '^Test(Unit|Integration|API).+'; then \
-	  echo 'Name every test TestUnit..., TestIntegration... or TestAPI...' >&2; exit 1; fi
+test-names: ## reject tests, fuzz targets and examples omitted from the three selectors
+	go test -race -list '^(Test|Fuzz|Example)' -timeout=8m ./... > test-names.txt
+	@if grep -E '^(Test|Fuzz)' test-names.txt | grep -Ev '^(Test|Fuzz)(Unit|Integration|API).+'; then \
+	  echo 'Name every test TestUnit..., TestIntegration... or TestAPI... and every fuzz target FuzzUnit..., FuzzIntegration... or FuzzAPI...' >&2; exit 1; fi
+	@if grep -E '^Example' test-names.txt; then \
+	  echo 'Examples run outside the three suites; a service has no public Go API: write a TestUnit/TestIntegration/TestAPI instead' >&2; exit 1; fi
 
 # All suites instrument the same whole module. No production files are excluded.
 # Ordinary packages without tests may be reported as skipped; skipped Test events fail.
@@ -35,7 +37,7 @@ collect-unit collect-integration collect-api: test-names
 	@set -euo pipefail; level='$(@:collect-%=%)'; case "$$level" in unit) prefix=Unit;; integration) prefix=Integration;; api) prefix=API;; esac; \
 	rm -f "$$level.out" "$$level.jsonl"; \
 	CI=true go test -json -race -count=1 -timeout=8m -coverpkg=./... \
-	  -coverprofile="$$level.out" -run "^Test$$prefix" ./... | tee "$$level.jsonl"; \
+	  -coverprofile="$$level.out" -run "^(Test|Fuzz)$$prefix" ./... | tee "$$level.jsonl"; \
 	bash scripts/check-suite.sh "$$level.jsonl" "$$level.out"
 
 check-unit check-integration check-api:

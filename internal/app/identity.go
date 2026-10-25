@@ -1,11 +1,7 @@
 package app
 
 import (
-	"crypto/tls"
-	"crypto/x509"
 	"errors"
-	"net/http"
-	"os"
 	"time"
 
 	goidentity "github.com/fin-assist/go-identity"
@@ -27,8 +23,12 @@ type identityRuntime struct {
 	close    func()
 }
 
-// Keep the service's existing ACL/context chain; only its cryptographic verifiers
-// come from go-identity. Installing a second identity interceptor loses reqctx.
+// buildIdentity keeps the service's existing ACL/context chain; only its verifiers
+// and outgoing token come from go-identity NewAssembly (FIN-325). Installing a
+// second identity interceptor would lose reqctx. ENV selects the service identity:
+// prod — Kubernetes ServiceAccount tokens, stage — JWTs signed with file keys.
+// User access tokens are checked against this service's own signing keys through
+// the local JWKS provider, never through a call to its own GetSigningKeys.
 func buildIdentity(cfg config.Config, keys *signing.Keys, reg prometheus.Registerer) (identityRuntime, error) {
 	r := identityRuntime{close: func() {}}
 	if cfg.Auth.Mode == config.AuthInsecureDev {
@@ -41,70 +41,27 @@ func buildIdentity(cfg config.Config, keys *signing.Keys, reg prometheus.Registe
 	if cfg.Auth.Mode != config.AuthVerify || keys == nil {
 		return r, errors.New("identity: verify mode and signing keys required")
 	}
-	metrics, err := goidentity.NewMetrics(reg)
+	k, s := cfg.Auth.Kubernetes, cfg.Auth.Stage
+	assembly, err := goidentity.NewAssembly(goidentity.AssemblyOptions{
+		Env:     string(cfg.Env),
+		Service: cfg.Service,
+		// One source of truth: the issuer/audience this service signs is the one it accepts.
+		UserIssuer:   cfg.Signing.Issuer,
+		UserAudience: cfg.Signing.Audience,
+		UserKeys:     keys,
+		Kubernetes: goidentity.KubernetesOptions{
+			TokenFile: cfg.Auth.ServiceTokenFile, Issuer: k.Issuer, JWKSURL: k.JWKSURL,
+			CAFile: k.CAFile, APITokenFile: k.APITokenFile, Namespace: k.Namespace,
+		},
+		Stage:      goidentity.StageKeyFiles{Issuer: s.Issuer, SigningKeyFile: s.SigningKeyFile, PublicKeysFile: s.PublicKeysFile},
+		Clock:      time.Now,
+		Registerer: reg,
+	})
 	if err != nil {
 		return r, err
 	}
-	cache, err := goidentity.NewKeyCache(keys, time.Now, 10*time.Minute)
-	if err != nil {
-		return r, err
-	}
-	r.users, err = goidentity.NewUserVerifier(cache, goidentity.VerifyOptions{Issuer: cfg.Signing.Issuer, Audience: cfg.Signing.Audience, Clock: time.Now, Observer: metrics})
-	if err != nil {
-		return r, err
-	}
-	r.jobs = append(r.jobs, worker.Job{Name: "identity-user-keys", Run: cache.Run})
-	opts := goidentity.VerifyOptions{Issuer: cfg.Auth.ServiceIssuer, Audience: "finassist-internal", Clock: time.Now, Observer: metrics}
-	switch cfg.Auth.ServiceMode {
-	case "stage":
-		public, err := signing.StagePublicKeys(cfg.Auth.StagePublicKeysFile)
-		if err != nil {
-			return r, err
-		}
-		r.services, err = goidentity.NewStageVerifier(string(cfg.Env), opts, public)
-		if err != nil {
-			return r, err
-		}
-		r.tokens, err = goidentity.NewStageSource(string(cfg.Env), goidentity.StageOptions{KeyFile: cfg.Auth.StageKeyFile, Caller: cfg.Service, Issuer: cfg.Auth.ServiceIssuer, Clock: time.Now})
-		return r, err
-	case "kubernetes":
-		tokens, err := goidentity.NewProjectedSource(cfg.Auth.ServiceTokenFile)
-		if err != nil {
-			return r, err
-		}
-		apiToken, err := goidentity.NewProjectedSource(cfg.Auth.KubernetesTokenFile)
-		if err != nil {
-			return r, err
-		}
-		ca, err := os.ReadFile(cfg.Auth.KubernetesCAFile)
-		if err != nil {
-			return r, errors.New("identity: Kubernetes CA unavailable")
-		}
-		roots := x509.NewCertPool()
-		if !roots.AppendCertsFromPEM(ca) {
-			return r, errors.New("identity: invalid Kubernetes CA")
-		}
-		transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}, TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: 5 * time.Second}
-		r.close = transport.CloseIdleConnections
-		provider, err := goidentity.NewHTTPKeys(&http.Client{Transport: transport, Timeout: 5 * time.Second}, cfg.Auth.KubernetesJWKSURL, apiToken)
-		if err != nil {
-			r.close()
-			return r, err
-		}
-		cache, err := goidentity.NewKeyCache(provider, time.Now, time.Hour)
-		if err != nil {
-			r.close()
-			return r, err
-		}
-		r.services, err = goidentity.NewKubernetesVerifier(cache, opts, "finassist")
-		if err != nil {
-			r.close()
-			return r, err
-		}
-		r.tokens = tokens
-		r.jobs = append(r.jobs, worker.Job{Name: "identity-kubernetes-keys", Run: cache.Run})
-		return r, nil
-	default:
-		return r, errors.New("identity: unsupported service auth mode")
-	}
+	r.services, r.users, r.tokens = assembly, assembly, assembly
+	r.jobs = []worker.Job{{Name: "identity-keys", Run: assembly.Run}}
+	r.close = func() { _ = assembly.Close() }
+	return r, nil
 }

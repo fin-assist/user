@@ -137,7 +137,7 @@ func TestAPIStageSignedIdentityAPI(t *testing.T) {
 	}
 	env := apitest.Start(t, func(c *config.Config) {
 		c.Env = config.EnvStage
-		c.Auth = config.AuthConfig{Mode: config.AuthVerify, ServiceMode: "stage", ServiceIssuer: "stage-services", StageKeyFile: userKey, StagePublicKeysFile: pubFile}
+		c.Auth = config.AuthConfig{Mode: config.AuthVerify, Stage: config.StageAuthConfig{Issuer: "stage-services", SigningKeyFile: userKey, PublicKeysFile: pubFile}}
 	})
 	seedDocuments(t, env)
 	bff, err := goidentity.NewStageSource("stage", goidentity.StageOptions{KeyFile: bffKey, Caller: "bank-bff", Issuer: "stage-services", Clock: time.Now})

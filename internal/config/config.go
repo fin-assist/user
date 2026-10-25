@@ -91,14 +91,43 @@ type SigningConfig struct {
 	Issuer, Audience                      string
 }
 
-// AuthConfig configures identity checks.
+// AuthConfig configures identity checks. With AUTH_MODE=verify go-identity
+// NewAssembly selects the service identity by ENV: Kubernetes in prod, file keys
+// in stage. User access tokens are checked against Signing.Issuer/Audience.
 type AuthConfig struct {
-	Mode                                                     AuthMode
-	ServiceMode, ServiceIssuer                               string
-	StageKeyFile, StagePublicKeysFile                        string
-	KubernetesJWKSURL, KubernetesCAFile, KubernetesTokenFile string
-	// ServiceTokenFile holds this service's ServiceAccount token, presented on outgoing calls.
+	Mode AuthMode
+	// ServiceTokenFile holds this service's projected ServiceAccount token
+	// (audience finassist-internal), presented on outgoing calls in prod.
 	ServiceTokenFile string
+	Kubernetes       KubernetesAuthConfig
+	Stage            StageAuthConfig
+}
+
+// KubernetesAuthConfig are the AUTH_KUBERNETES_* settings used in prod.
+type KubernetesAuthConfig struct {
+	Issuer, JWKSURL, CAFile, APITokenFile, Namespace string
+}
+
+// StageAuthConfig are the AUTH_STAGE_* settings used in stage.
+type StageAuthConfig struct {
+	Issuer, SigningKeyFile, PublicKeysFile string
+}
+
+func (s StageAuthConfig) empty() bool {
+	return s.Issuer == "" && s.SigningKeyFile == "" && s.PublicKeysFile == ""
+}
+
+// renamedVars are the variables replaced by the standard AUTH_* set (FIN-325).
+// A deployment that still sets one fails at startup instead of silently taking
+// the new variable's default.
+var renamedVars = []struct{ old, replacement string }{
+	{"SERVICE_AUTH_MODE", "ENV (prod: Kubernetes, stage: file keys)"},
+	{"SERVICE_TOKEN_ISSUER", "AUTH_KUBERNETES_ISSUER or AUTH_STAGE_ISSUER"},
+	{"STAGE_SIGNING_KEY_FILE", "AUTH_STAGE_SIGNING_KEY_FILE"},
+	{"STAGE_PUBLIC_KEYS_FILE", "AUTH_STAGE_PUBLIC_KEYS_FILE"},
+	{"KUBERNETES_JWKS_URL", "AUTH_KUBERNETES_JWKS_URL"},
+	{"KUBERNETES_CA_FILE", "AUTH_KUBERNETES_CA_FILE"},
+	{"KUBERNETES_TOKEN_FILE", "AUTH_KUBERNETES_API_TOKEN_FILE"},
 }
 
 // Load reads the configuration from the process environment.
@@ -152,15 +181,20 @@ func load(getenv func(string) string, readFile func(string) ([]byte, error), env
 		DB: DBConfig{
 			PrimaryDSN: r.secret("DB_PRIMARY_DSN"),
 			ReplicaDSN: r.secret("DB_REPLICA_DSN"),
-			MaxConns:   int32(r.int("DB_MAX_CONNS")),
+			MaxConns:   r.int32("DB_MAX_CONNS"),
 		},
 		Auth: AuthConfig{
-			Mode:        AuthMode(r.str("AUTH_MODE")),
-			ServiceMode: r.str("SERVICE_AUTH_MODE"), ServiceIssuer: r.str("SERVICE_TOKEN_ISSUER"),
-			StageKeyFile: r.str("STAGE_SIGNING_KEY_FILE"), StagePublicKeysFile: r.str("STAGE_PUBLIC_KEYS_FILE"),
-			KubernetesJWKSURL: r.str("KUBERNETES_JWKS_URL"), KubernetesCAFile: r.str("KUBERNETES_CA_FILE"),
-			KubernetesTokenFile: r.str("KUBERNETES_TOKEN_FILE"),
-			ServiceTokenFile:    r.str("SERVICE_TOKEN_FILE"),
+			Mode:             AuthMode(r.str("AUTH_MODE")),
+			ServiceTokenFile: r.str("SERVICE_TOKEN_FILE"),
+			Kubernetes: KubernetesAuthConfig{
+				Issuer: r.str("AUTH_KUBERNETES_ISSUER"), JWKSURL: r.str("AUTH_KUBERNETES_JWKS_URL"),
+				CAFile: r.str("AUTH_KUBERNETES_CA_FILE"), APITokenFile: r.str("AUTH_KUBERNETES_API_TOKEN_FILE"),
+				Namespace: r.str("AUTH_KUBERNETES_NAMESPACE"),
+			},
+			Stage: StageAuthConfig{
+				Issuer: r.str("AUTH_STAGE_ISSUER"), SigningKeyFile: r.str("AUTH_STAGE_SIGNING_KEY_FILE"),
+				PublicKeysFile: r.str("AUTH_STAGE_PUBLIC_KEYS_FILE"),
+			},
 		},
 		Signing: SigningConfig{
 			PrivateKeyFile: r.str("JWT_SIGNING_KEY_FILE"), PublicKeysFile: r.str("JWT_PUBLIC_KEYS_FILE"),
@@ -180,6 +214,11 @@ func load(getenv func(string) string, readFile func(string) ([]byte, error), env
 	r.decl("PEER_<NAME>_ADDR", false)
 	for _, kv := range environ() {
 		name, value, _ := strings.Cut(kv, "=")
+		for _, v := range renamedVars {
+			if name == v.old && value != "" {
+				r.errs = append(r.errs, fmt.Errorf("%s is no longer read: use %s (FIN-325)", v.old, v.replacement))
+			}
+		}
 		if m := peerVar.FindStringSubmatch(name); m != nil && value != "" {
 			c.Peers[strings.ReplaceAll(strings.ToLower(m[1]), "_", "-")] = value
 		}
@@ -216,11 +255,13 @@ func (c Config) validate() []error {
 	}
 	switch c.Auth.Mode {
 	case AuthVerify:
-		if c.Auth.ServiceMode != "kubernetes" && c.Auth.ServiceMode != "stage" {
-			errs = append(errs, errors.New("SERVICE_AUTH_MODE must be kubernetes or stage"))
+		// go-identity NewAssembly builds verified identities only for stage and prod;
+		// dev uses the explicit insecure-dev verifiers.
+		if c.Env == EnvDev {
+			errs = append(errs, errors.New("AUTH_MODE=verify requires ENV=stage or prod; ENV=dev uses AUTH_MODE=insecure-dev"))
 		}
-		if c.Auth.ServiceMode == "stage" && c.Env != EnvDev && c.Env != EnvStage {
-			errs = append(errs, errors.New("SERVICE_AUTH_MODE=stage is allowed only with ENV=dev or stage"))
+		if c.Env == EnvProd && !c.Auth.Stage.empty() {
+			errs = append(errs, errors.New("AUTH_STAGE_* variables are not allowed with ENV=prod"))
 		}
 	case AuthInsecureDev:
 		if c.Env != EnvDev {
@@ -297,6 +338,17 @@ func (r *reader) int(name string) int {
 		r.errs = append(r.errs, fmt.Errorf("%s=%q: not an integer", name, v))
 	}
 	return n
+}
+
+// int32 parses name within the int32 range, so a pool size never wraps around: an
+// out-of-range value is an error, not a silently truncated small number.
+func (r *reader) int32(name string) int32 {
+	v := r.str(name)
+	n, err := strconv.ParseInt(v, 10, 32)
+	if err != nil {
+		r.errs = append(r.errs, fmt.Errorf("%s=%q: not an integer in the range of int32", name, v))
+	}
+	return int32(n)
 }
 
 func (r *reader) duration(name string) time.Duration {

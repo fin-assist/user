@@ -26,7 +26,7 @@ FIN-255 подключает `go-grpc v0.1.0` (server/client/reqctx), `go-migrat
 
 ## Реализованная часть FIN-219
 
-Первый этап: проверка сервисных и пользовательских токенов через go-identity v0.1.0,
+Первый этап: проверка сервисных и пользовательских токенов через `identity.NewAssembly` go-identity v0.2.0 (FIN-325: режим по `ENV`, переменные `AUTH_*`),
 Ed25519-подпись access JWT на 15 минут, GetSigningKeys и GetConsentDocument; tombstone
 через go-tombstone v0.1.0 и его миграции. Для документа assistant требуется валидный
 пользовательский токен и отсутствие tombstone. Документы читаются с primary.
@@ -177,7 +177,7 @@ make lint
 
 ### Покрытие statements (FIN-238)
 
-`make test-names` проверяет, что существующие Test-функции не выпали из трёх селекторов.
+Имена проверяет `make test-names` до прогонов: каждый тест — `TestUnit…`/`TestIntegration…`/`TestAPI…`, каждая fuzz-цель — `FuzzUnit…`/`FuzzIntegration…`/`FuzzAPI…` (её seed-корпус выполняется в своём наборе, FIN-290). `Example…` в сервисе отклоняется: публичного Go API у сервиса нет, а префикс набора в имени примера невозможен, и он выполнялся бы вне всех трёх наборов.
 Нужны Go, `jq` и PostgreSQL 18 (Docker для testcontainers либо `TEST_DATABASE_URL`).
 `make cover-unit`, `make cover-integration`, `make cover-api` запускают отдельные наборы
 с `-race -count=1 -timeout=8m`, `-coverpkg=./...` и профилями `unit.out`, `integration.out`,

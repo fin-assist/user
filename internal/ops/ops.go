@@ -8,6 +8,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -23,11 +24,29 @@ func NewRegistry() *prometheus.Registry {
 	return reg
 }
 
-// Readiness keeps the last result of the readiness check.
-type Readiness struct{ ready atomic.Bool }
+// Readiness keeps the last result of the readiness check. Once Drain is called the
+// process is shutting down and stays not ready for good, whatever the check says.
+type Readiness struct {
+	ready atomic.Bool
+	// mu orders Drain against publishing a result (ready and onChange), so that no
+	// onChange(true) runs after Drain has returned.
+	mu       sync.Mutex
+	draining bool
+}
 
-// Ready reports the last result.
+// Ready reports the last result; false after Drain.
 func (r *Readiness) Ready() bool { return r.ready.Load() }
+
+// Drain marks the process as shutting down: /readyz answers 503 from now on, so
+// balancers stop sending new requests during SHUTDOWN_DELAY. It is irreversible. It
+// waits for a result being published, so the caller's next state change (gRPC health
+// NOT_SERVING) is never overwritten by a late onChange(true).
+func (r *Readiness) Drain() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.draining = true
+	r.ready.Store(false)
+}
 
 // Watch runs check every interval until ctx ends and calls onChange when the result flips.
 func (r *Readiness) Watch(ctx context.Context, interval time.Duration, log *slog.Logger, check func(context.Context) error, onChange func(bool)) {
@@ -40,20 +59,28 @@ func (r *Readiness) Watch(ctx context.Context, interval time.Duration, log *slog
 		if ctx.Err() != nil {
 			return
 		}
-		ok := err == nil
-		if r.ready.Swap(ok) != ok || first {
-			if !ok {
-				log.WarnContext(ctx, "not ready", "error", err)
-			} else {
-				log.InfoContext(ctx, "ready")
-			}
-			onChange(ok)
-		}
+		r.publish(ctx, log, err, first, onChange)
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
 		}
+	}
+}
+
+// publish records the result of one check and reports a change; under mu, so it is
+// ordered against Drain as a whole.
+func (r *Readiness) publish(ctx context.Context, log *slog.Logger, err error, first bool, onChange func(bool)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ok := err == nil && !r.draining
+	if r.ready.Swap(ok) != ok || first {
+		if !ok {
+			log.WarnContext(ctx, "not ready", "error", err)
+		} else {
+			log.InfoContext(ctx, "ready")
+		}
+		onChange(ok)
 	}
 }
 

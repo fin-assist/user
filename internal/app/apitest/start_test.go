@@ -420,7 +420,7 @@ func TestAPIStartAPIValidationDisabledAndLimitPriority(t *testing.T) {
 	if _, err := startCall(t, env, authKey(), "+79001234567"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := startCall(t, env, authKey(), "+79001234567"); apitest.Reason(err) != "RATE_LIMITED" || !startRetryAt(t, err).Equal(time.Now().UTC().Truncate(24*time.Hour).Add(24*time.Hour)) {
+	if _, err := startCall(t, env, authKey(), "+79001234567"); apitest.Reason(err) != "RATE_LIMITED" || !startRetryAt(t, err).Equal(env.LimitNow.Truncate(24*time.Hour).Add(24*time.Hour)) {
 		t.Fatal("limit must precede busy phone", err)
 	}
 	if creates, _ := p.counts(); creates != 1 {

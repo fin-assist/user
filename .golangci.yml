@@ -76,9 +76,6 @@ linters:
               desc: write fakes of the consumer-side interfaces
             - pkg: go.uber.org/mock
               desc: write fakes of the consumer-side interfaces
-    gosec:
-      excludes:
-        - G115 # integer conversions of config values are bounds-checked in config
   exclusions:
     rules:
       # Tests build statuses to play a failing peer.
