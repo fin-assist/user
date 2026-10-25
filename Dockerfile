@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Image of the service: a static binary on distroless (no shell, no package manager,
 # user nonroot). The same binary runs "serve" in the Deployment and "migrate up" in the Job.
-FROM golang:1.26-bookworm AS build
+FROM golang:1.27-bookworm AS build
 WORKDIR /src
 ENV CGO_ENABLED=0 GOFLAGS=-trimpath GOPRIVATE=github.com/fin-assist/*
 COPY go.mod go.sum ./
