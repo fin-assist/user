@@ -1,6 +1,6 @@
 # Миграции и работа с БД
 
-Runner — опубликованный `github.com/fin-assist/go-migrate v0.1.0`; источники и CLI остаются в сервисе. Тесты используют публичный `go-migrate/migratetest` с PostgreSQL 18, выбранной `internal/testdb`.
+Runner — опубликованный `github.com/fin-assist/go-migrate v0.1.1`; источники и CLI остаются в сервисе. Тесты используют публичный `go-migrate/migratetest` с PostgreSQL 18, выбранной `internal/testdb`.
 
 Решение — [FIN-115](https://finassist.youtrack.cloud/issue/FIN-115), Confluence «Архитектура» → «Миграции и доступ к БД».
 

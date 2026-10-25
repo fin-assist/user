@@ -7,7 +7,7 @@ require (
 	github.com/fin-assist/go-grpc v0.1.0
 	github.com/fin-assist/go-idempotency v0.4.1
 	github.com/fin-assist/go-identity v0.1.0
-	github.com/fin-assist/go-migrate v0.1.0
+	github.com/fin-assist/go-migrate v0.1.1
 	github.com/fin-assist/go-outbox v0.1.0
 	github.com/fin-assist/go-postgres v0.2.0
 	github.com/fin-assist/go-tombstone v0.1.0
