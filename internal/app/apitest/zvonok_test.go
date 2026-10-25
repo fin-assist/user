@@ -140,7 +140,7 @@ func zvonokEnv(t *testing.T, mode string) (*apitest.Env, *zvonokHTTP) {
 	})
 	return env, p
 }
-func callbackHTTP(t *testing.T, env *apitest.Env, id int64, ip string) int {
+func callbackHTTP(t *testing.T, env *apitest.Env, id int64, ips ...string) int {
 	t.Helper()
 	srv := httptest.NewServer(env.App.PhoneCallback)
 	defer srv.Close()
@@ -148,7 +148,10 @@ func callbackHTTP(t *testing.T, env *apitest.Env, id int64, ip string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header.Set("X-Forwarded-For", ip)
+	// Each value is a separate header line, as a proxy may append its own.
+	for _, ip := range ips {
+		req.Header.Add("X-Forwarded-For", ip)
+	}
 	r, err := srv.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -286,6 +289,10 @@ func TestAPIZvonokAPIPostbackCheckedProofRepeatAndLateEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := mockCall(p, phone, "")
+	// FIN-306: a spoofed first header line cannot hide the proxy-appended hop.
+	if code := callbackHTTP(t, env, c.ID, "193.232.64.150", "203.0.113.1"); code != 403 {
+		t.Fatal(code)
+	}
 	if code := callbackHTTP(t, env, c.ID, "203.0.113.1"); code != 403 {
 		t.Fatal(code)
 	}

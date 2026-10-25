@@ -191,6 +191,26 @@ func TestIntegrationCheckedProviderProofCommitsLocalVerification(t *testing.T) {
 			t.Fatal(tc, reply.Code)
 		}
 	}
+	// FIN-306: a proxy-appended header line holds the rightmost hop; a spoofed
+	// first line must not make a foreign client look like the provider.
+	for _, tc := range []struct {
+		lines []string
+		code  int
+	}{
+		{[]string{"193.232.64.150", "198.51.100.9"}, http.StatusForbidden},
+		{[]string{"198.51.100.9", "193.232.64.150"}, http.StatusOK},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/callbacks/zvonok?ct_call_id="+call.ID, nil)
+		req.RemoteAddr = "10.0.0.1:80"
+		for _, line := range tc.lines {
+			req.Header.Add("X-Forwarded-For", line)
+		}
+		reply := httptest.NewRecorder()
+		postback.ServeHTTP(reply, req)
+		if reply.Code != tc.code {
+			t.Fatal(tc.lines, reply.Code)
+		}
+	}
 	// Local ownership mismatch must fail without confirming a second request.
 	foreign = request
 	foreign.Phone = "+79007654321"

@@ -61,7 +61,9 @@ func (h *Postback) source(r *http.Request) netip.Addr {
 	if !h.trusted(ip) {
 		return ip
 	}
-	chain := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+	// Repeated header lines form one list (RFC 9110, 5.3): a proxy may append its
+	// entry as a new line, so the rightmost hop is in the last line, not the first.
+	chain := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
 	if len(chain) > 16 {
 		return netip.Addr{}
 	}
