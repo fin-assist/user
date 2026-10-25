@@ -178,7 +178,7 @@ func TestUnitAuthenticationRepositoryMapsFailuresAndLocksIdentity(t *testing.T) 
 		if err := r.Revoke(ctx, auth.Link{SessionID: 3, UserID: "00000000-0000-0000-0000-000000000001"}, now); err != nil {
 			t.Fatal(err)
 		}
-		if err := r.Logout(ctx, token.Sum("old")); err != nil {
+		if err := r.Logout(ctx, "00000000-0000-0000-0000-000000000001", token.Sum("old")); err != nil {
 			t.Fatal(err)
 		}
 		tx.exec = func(string, []any) (pgconn.CommandTag, error) { return pgconn.NewCommandTag("DELETE 2"), nil }
@@ -186,12 +186,12 @@ func TestUnitAuthenticationRepositoryMapsFailuresAndLocksIdentity(t *testing.T) 
 			t.Fatalf("cleanup: %d %v", n, err)
 		}
 		tx.exec = func(string, []any) (pgconn.CommandTag, error) { return pgconn.CommandTag{}, errUnitStorage }
-		for _, call := range []func() error{func() error { return r.Revoke(ctx, auth.Link{}, now) }, func() error { return r.Logout(ctx, token.Hash{}) }, func() error { return r.Rotate(ctx, token.Hash{}, token.Hash{}, auth.Link{}, now, now) }, func() error { return r.GrantPD(ctx, "00000000-0000-0000-0000-000000000001", "v1", now) }, func() error { return r.CloseVerification(ctx, 7, "00000000-0000-0000-0000-000000000001", now) }, func() error { _, e := r.CleanupSessions(ctx, now, 10); return e }} {
+		for _, call := range []func() error{func() error { return r.Revoke(ctx, auth.Link{}, now) }, func() error { return r.Logout(ctx, "u", token.Hash{}) }, func() error { return r.Rotate(ctx, token.Hash{}, token.Hash{}, auth.Link{}, now, now) }, func() error { return r.GrantPD(ctx, "00000000-0000-0000-0000-000000000001", "v1", now) }, func() error { return r.CloseVerification(ctx, 7, "00000000-0000-0000-0000-000000000001", now) }, func() error { _, e := r.CleanupSessions(ctx, now, 10); return e }} {
 			if err := call(); err == nil {
 				t.Fatal("write failure hidden")
 			}
 		}
-		for _, call := range []func() error{func() error { _, e := r.LockLink(t.Context(), token.Hash{}, now); return e }, func() error { return r.Revoke(t.Context(), auth.Link{}, now) }, func() error { return r.Logout(t.Context(), token.Hash{}) }, func() error { return r.Rotate(t.Context(), token.Hash{}, token.Hash{}, auth.Link{}, now, now) }, func() error { return r.LockUser(t.Context(), "u") }, func() error { return r.GrantPD(t.Context(), "u", "v1", now) }, func() error { return r.CloseVerification(t.Context(), 7, "u", now) }, func() error { _, e := r.CleanupSessions(t.Context(), now, 10); return e }, func() error { return r.CreateSession(t.Context(), "u", 7, token.Hash{}, now, now) }} {
+		for _, call := range []func() error{func() error { _, e := r.LockLink(t.Context(), token.Hash{}, now); return e }, func() error { return r.Revoke(t.Context(), auth.Link{}, now) }, func() error { return r.Logout(t.Context(), "u", token.Hash{}) }, func() error { return r.Rotate(t.Context(), token.Hash{}, token.Hash{}, auth.Link{}, now, now) }, func() error { return r.LockUser(t.Context(), "u") }, func() error { return r.GrantPD(t.Context(), "u", "v1", now) }, func() error { return r.CloseVerification(t.Context(), 7, "u", now) }, func() error { _, e := r.CleanupSessions(t.Context(), now, 10); return e }, func() error { return r.CreateSession(t.Context(), "u", 7, token.Hash{}, now, now) }} {
 			if err := call(); err == nil {
 				t.Fatal("write accepted outside transaction")
 			}

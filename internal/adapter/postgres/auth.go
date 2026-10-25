@@ -72,12 +72,13 @@ func (r *Auth) Revoke(ctx context.Context, l auth.Link, now time.Time) error {
 	return authError(err)
 }
 
-// Logout deletes a chain selected by an unguessable refresh hash, including old links.
-func (r *Auth) Logout(ctx context.Context, hash token.Hash) error {
+// Logout deletes the chain of a refresh hash, including old links, only when the
+// chain belongs to the verified user; another user's chain is left untouched.
+func (r *Auth) Logout(ctx context.Context, userID string, hash token.Hash) error {
 	if _, ok := Tx(ctx); !ok {
 		return errAuthTx
 	}
-	_, err := r.db.Writer(ctx).Exec(ctx, `DELETE FROM auth_session WHERE id=(SELECT session_id FROM refresh_token WHERE token_hash=$1)`, hash[:])
+	_, err := r.db.Writer(ctx).Exec(ctx, `DELETE FROM auth_session WHERE id=(SELECT session_id FROM refresh_token WHERE token_hash=$1) AND user_id=$2`, hash[:], userID)
 	return authError(err)
 }
 
