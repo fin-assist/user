@@ -2,5 +2,248 @@
   "baseBranchPatterns": [
     "main"
   ],
-  "packageRules": []
+  "packageRules": [
+    {
+      "description": "FIN-211: recovery of an automatically failed dependency family",
+      "matchPackageNames": [
+        "actions/checkout"
+      ],
+      "matchDatasources": [
+        "github-tags"
+      ],
+      "recreateWhen": "always",
+      "matchJsonata": [
+        "newMajor = 7"
+      ]
+    },
+    {
+      "description": "FIN-211: recovery of an automatically failed dependency family",
+      "matchPackageNames": [
+        "actions/setup-go"
+      ],
+      "matchDatasources": [
+        "github-tags"
+      ],
+      "recreateWhen": "always",
+      "matchJsonata": [
+        "newMajor = 7"
+      ]
+    },
+    {
+      "description": "FIN-211: recovery of an automatically failed dependency family",
+      "matchPackageNames": [
+        "actions/setup-node"
+      ],
+      "matchDatasources": [
+        "github-tags"
+      ],
+      "recreateWhen": "always",
+      "matchJsonata": [
+        "newMajor = 7"
+      ]
+    },
+    {
+      "description": "FIN-211: recovery of an automatically failed dependency family",
+      "matchPackageNames": [
+        "actions/setup-python"
+      ],
+      "matchDatasources": [
+        "github-tags"
+      ],
+      "recreateWhen": "always",
+      "matchJsonata": [
+        "newMajor = 7"
+      ]
+    },
+    {
+      "description": "FIN-211: recovery of an automatically failed dependency family",
+      "matchPackageNames": [
+        "actions/upload-artifact"
+      ],
+      "matchDatasources": [
+        "github-tags"
+      ],
+      "recreateWhen": "always",
+      "matchJsonata": [
+        "newMajor = 7"
+      ]
+    },
+    {
+      "description": "FIN-211: recovery of an automatically failed dependency family",
+      "matchPackageNames": [
+        "golangci/golangci-lint-action"
+      ],
+      "matchDatasources": [
+        "github-tags"
+      ],
+      "recreateWhen": "always",
+      "matchJsonata": [
+        "newMajor = 9"
+      ]
+    },
+    {
+      "description": "FIN-211: recovery of an automatically failed dependency family",
+      "matchPackageNames": [
+        "actions/node-versions"
+      ],
+      "matchDatasources": [
+        "github-releases"
+      ],
+      "recreateWhen": "always",
+      "matchJsonata": [
+        "newMajor = 24"
+      ]
+    },
+    {
+      "description": "FIN-211: failed twice; retry explicitly in Dependency Dashboard",
+      "matchPackageNames": [
+        "actions/checkout"
+      ],
+      "matchDatasources": [
+        "github-tags"
+      ],
+      "dependencyDashboardApproval": true,
+      "recreateWhen": "never",
+      "groupName": null,
+      "additionalBranchPrefix": "fin211-retry-32-",
+      "matchJsonata": [
+        "newDigest = \"3d3c42e5aac5ba805825da76410c181273ba90b1\""
+      ]
+    },
+    {
+      "description": "FIN-211: failed twice; retry explicitly in Dependency Dashboard",
+      "matchPackageNames": [
+        "actions/checkout"
+      ],
+      "matchDatasources": [
+        "github-tags"
+      ],
+      "dependencyDashboardApproval": true,
+      "recreateWhen": "never",
+      "groupName": null,
+      "additionalBranchPrefix": "fin211-retry-32-",
+      "matchNewValue": "/^v7$/",
+      "matchJsonata": [
+        "$not($exists(newDigest)) or newDigest = null"
+      ]
+    },
+    {
+      "description": "FIN-211: failed twice; retry explicitly in Dependency Dashboard",
+      "matchPackageNames": [
+        "actions/setup-go"
+      ],
+      "matchDatasources": [
+        "github-tags"
+      ],
+      "dependencyDashboardApproval": true,
+      "recreateWhen": "never",
+      "groupName": null,
+      "additionalBranchPrefix": "fin211-retry-32-",
+      "matchNewValue": "/^v7$/",
+      "matchJsonata": [
+        "$not($exists(newDigest)) or newDigest = null"
+      ]
+    },
+    {
+      "description": "FIN-211: failed twice; retry explicitly in Dependency Dashboard",
+      "matchPackageNames": [
+        "actions/setup-node"
+      ],
+      "matchDatasources": [
+        "github-tags"
+      ],
+      "dependencyDashboardApproval": true,
+      "recreateWhen": "never",
+      "groupName": null,
+      "additionalBranchPrefix": "fin211-retry-32-",
+      "matchNewValue": "/^v7$/",
+      "matchJsonata": [
+        "$not($exists(newDigest)) or newDigest = null"
+      ]
+    },
+    {
+      "description": "FIN-211: failed twice; retry explicitly in Dependency Dashboard",
+      "matchPackageNames": [
+        "actions/setup-python"
+      ],
+      "matchDatasources": [
+        "github-tags"
+      ],
+      "dependencyDashboardApproval": true,
+      "recreateWhen": "never",
+      "groupName": null,
+      "additionalBranchPrefix": "fin211-retry-32-",
+      "matchJsonata": [
+        "newDigest = \"6d4fd22b20465ccc0f7354476588e8df7c9ca0e0\""
+      ]
+    },
+    {
+      "description": "FIN-211: failed twice; retry explicitly in Dependency Dashboard",
+      "matchPackageNames": [
+        "actions/setup-python"
+      ],
+      "matchDatasources": [
+        "github-tags"
+      ],
+      "dependencyDashboardApproval": true,
+      "recreateWhen": "never",
+      "groupName": null,
+      "additionalBranchPrefix": "fin211-retry-32-",
+      "matchNewValue": "/^v7$/",
+      "matchJsonata": [
+        "$not($exists(newDigest)) or newDigest = null"
+      ]
+    },
+    {
+      "description": "FIN-211: failed twice; retry explicitly in Dependency Dashboard",
+      "matchPackageNames": [
+        "actions/upload-artifact"
+      ],
+      "matchDatasources": [
+        "github-tags"
+      ],
+      "dependencyDashboardApproval": true,
+      "recreateWhen": "never",
+      "groupName": null,
+      "additionalBranchPrefix": "fin211-retry-32-",
+      "matchNewValue": "/^v7$/",
+      "matchJsonata": [
+        "$not($exists(newDigest)) or newDigest = null"
+      ]
+    },
+    {
+      "description": "FIN-211: failed twice; retry explicitly in Dependency Dashboard",
+      "matchPackageNames": [
+        "golangci/golangci-lint-action"
+      ],
+      "matchDatasources": [
+        "github-tags"
+      ],
+      "dependencyDashboardApproval": true,
+      "recreateWhen": "never",
+      "groupName": null,
+      "additionalBranchPrefix": "fin211-retry-32-",
+      "matchNewValue": "/^v9$/",
+      "matchJsonata": [
+        "$not($exists(newDigest)) or newDigest = null"
+      ]
+    },
+    {
+      "description": "FIN-211: failed twice; retry explicitly in Dependency Dashboard",
+      "matchPackageNames": [
+        "actions/node-versions"
+      ],
+      "matchDatasources": [
+        "github-releases"
+      ],
+      "dependencyDashboardApproval": true,
+      "recreateWhen": "never",
+      "groupName": null,
+      "additionalBranchPrefix": "fin211-retry-32-",
+      "matchNewValue": "/^24$/",
+      "matchJsonata": [
+        "$not($exists(newDigest)) or newDigest = null"
+      ]
+    }
+  ]
 }
