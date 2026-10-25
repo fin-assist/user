@@ -28,6 +28,7 @@ import (
 func AccessPolicy() server.Policy {
 	return server.Policy{
 		"/finassist.user.v1.AuthService/*":                                  {Callers: []string{"bank-bff"}, Model: server.ModelNoUser},
+		userv1.AuthService_Logout_FullMethodName:                            {Callers: []string{"bank-bff"}, Model: server.ModelUser},
 		userv1.ProfileService_DeleteAccount_FullMethodName:                  {Callers: []string{"bank-bff"}, Model: server.ModelUser, AllowDeleted: true},
 		"/finassist.user.v1.ProfileService/*":                               {Callers: []string{"bank-bff"}, Model: server.ModelUser},
 		userv1.ConsentDocumentService_GetConsentDocument_FullMethodName:     {Callers: []string{"bank-bff"}, Model: server.ModelNoUser},

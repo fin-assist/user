@@ -84,7 +84,7 @@ func TestIntegrationAccountLifecycleUsesOneTransactionForConsentSessionAndEvents
 	if _, err = sessions.Refresh(t.Context(), rotated.Pair.Refresh); apitest.Reason(err) != "TOKEN_REVOKED" {
 		t.Fatalf("chain not revoked: %v", err)
 	}
-	if err = sessions.Logout(t.Context(), rotated.Pair.Refresh); err != nil {
+	if err = sessions.Logout(t.Context(), registered.UserID, rotated.Pair.Refresh); err != nil {
 		t.Fatal(err)
 	}
 	accounts := deletion.New(env.App.DB, env.App.Tombstones, postgres.NewAccounts(env.App.DB), events)

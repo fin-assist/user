@@ -79,7 +79,9 @@ non-cacheable 401 back, then rechecks and commits revocation before returning it
 Response.OwnerID binds cached secrets to the actual account in idempotency_keys:
 replay requires an owner and takes its tombstone guard; deletion purges scope OR owner_id.
 Two distinct confirmed registration tokens for one phone create separate sessions
-without overwriting an existing account (owner decision, FIN-219). See docs/auth.md.
+without overwriting an existing account (owner decision, FIN-219). Logout has its own
+exact ModelUser rule (grpc-api.md 3.3) and deletes only the token owner's chain (FIN-285).
+See docs/auth.md.
 
 DeleteAccount uses the exact ModelUser AllowDeleted rule so a verified old access token
 can repeat deletion; other calls still reject tombstoned identities. Purge atomically removes
