@@ -3,21 +3,28 @@ module github.com/fin-assist/user
 go 1.26.0
 
 require (
-	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.12-20260825204119-511051f7f437.2
-	buf.build/go/protovalidate v1.4.0
 	github.com/fin-assist/contracts/gen/go v0.4.0
+	github.com/fin-assist/go-grpc v0.1.0
 	github.com/fin-assist/go-idempotency v0.4.1
 	github.com/fin-assist/go-identity v0.1.0
+	github.com/fin-assist/go-migrate v0.1.1
 	github.com/fin-assist/go-outbox v0.1.0
+	github.com/fin-assist/go-postgres v0.2.0
 	github.com/fin-assist/go-tombstone v0.1.0
+	github.com/fin-assist/go-worker v0.1.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
-	github.com/golang-migrate/migrate/v4 v4.20.1
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/prometheus/client_golang v1.25.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261019180522-ce908d29299b
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12
+)
+
+require (
+	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.12-20260825204119-511051f7f437.2 // indirect
+	buf.build/go/protovalidate v1.4.0 // indirect
+	github.com/golang-migrate/migrate/v4 v4.20.1 // indirect
 )
 
 require (
@@ -40,7 +47,6 @@ require (
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/ebitengine/purego v0.10.1 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
-	github.com/fin-assist/go-postgres v0.2.0
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect

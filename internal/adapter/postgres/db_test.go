@@ -6,14 +6,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/fin-assist/go-grpc/reqctx"
+
 	"github.com/fin-assist/user/internal/adapter/postgres"
-	"github.com/fin-assist/user/internal/adapter/postgres/migrate/migratetest"
-	"github.com/fin-assist/user/internal/reqctx"
+	"github.com/fin-assist/user/internal/testdb"
 )
 
 func open(t *testing.T) *postgres.DB {
 	t.Helper()
-	dsn := migratetest.DSN(t)
+	dsn := testdb.DSN(t)
 	db, err := postgres.Open(context.Background(), postgres.Options{PrimaryDSN: dsn, AppName: "test"})
 	if err != nil {
 		t.Fatal(err)
@@ -136,5 +137,35 @@ func TestIntegrationOpenDoesNotLeakDSN(t *testing.T) {
 	_, err := postgres.Open(context.Background(), postgres.Options{PrimaryDSN: "postgres://u:secret@%zz/db"})
 	if err == nil || strings.Contains(err.Error(), "secret") {
 		t.Fatalf("error %v must not contain the password", err)
+	}
+}
+
+func TestIntegrationSharedPoolLifecyclePreservesServiceOptions(t *testing.T) {
+	ctx := t.Context()
+	primary, replica := testdb.DSN(t), testdb.DSN(t)
+	db, err := postgres.Open(ctx, postgres.Options{PrimaryDSN: primary, ReplicaDSN: replica, MaxConns: 2, AppName: "fin255-user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(db.Close)
+	if db.Primary().Config().MaxConns != 2 {
+		t.Fatal("pool capacity changed")
+	}
+	for _, q := range []postgres.Querier{db.Writer(ctx), db.Reader(ctx)} {
+		var name string
+		if err := q.QueryRow(ctx, `SELECT current_setting('application_name')`).Scan(&name); err != nil || name != "fin255-user" {
+			t.Fatalf("pool application name: %q %v", name, err)
+		}
+	}
+	if db.Reader(ctx) == db.Writer(ctx) || db.Reader(reqctx.WithReadPrimary(ctx)) != db.Writer(ctx) {
+		t.Fatal("replica/read-primary routing changed")
+	}
+	if err := db.Ping(ctx); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	db.Close()
+	if err := db.Ping(ctx); err == nil {
+		t.Fatal("owned pool remained usable after close")
 	}
 }

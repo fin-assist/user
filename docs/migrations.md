@@ -1,5 +1,7 @@
 # Миграции и работа с БД
 
+Runner — опубликованный `github.com/fin-assist/go-migrate v0.1.1`; источники и CLI остаются в сервисе. Тесты используют публичный `go-migrate/migratetest` с PostgreSQL 18, выбранной `internal/testdb`.
+
 Решение — [FIN-115](https://finassist.youtrack.cloud/issue/FIN-115), Confluence «Архитектура» → «Миграции и доступ к БД».
 
 - Миграции — [golang-migrate](https://github.com/golang-migrate/migrate), драйвер `pgx/v5`.
@@ -123,7 +125,7 @@ go test ./...
 
 ## Общий менеджер транзакций (FIN-240)
 
-`postgres.DB` использует `go-postgres v0.1.1`: Run/RunWith и RunMapped, COMMIT/ROLLBACK и ограниченный cleanup после отмены контекста находятся в библиотеке. Пулы, primary/replica и read-primary hint остаются в сервисе. Контекст другого Manager отклоняется: Writer/Reader не переходят к своему пулу с autocommit. Вложенный Run присоединяется без раннего COMMIT; вложенный обработчик запрещён.
+`postgres.DB` использует `go-postgres v0.2.0`: Run/RunWith и RunMapped, COMMIT/ROLLBACK и ограниченный cleanup после отмены контекста находятся в библиотеке. Lifecycle пулов принадлежит go-postgres.OpenPools; параметры, маршрутизация primary/replica и read-primary hint остаются в сервисе. Контекст другого Manager отклоняется: Writer/Reader не переходят к своему пулу с autocommit. Вложенный Run присоединяется без раннего COMMIT; вложенный обработчик запрещён.
 
 Адаптер `SessionTransactions` выбирает соответствие по доверенному endpoint контекста идемпотентности: Register и RefreshTokens имеют разные ожидаемые ограничения. Именно внешний handler Run охватывает effect, запись идемпотентности и COMMIT; внутренние usecase используют обычный Run. Неизвестная ошибка effect сохраняется через границу go-idempotency для перевода/диагностики, а ErrNotStored и контрактные ошибки библиотеки сохраняют прежний путь. Доменные отказы превращаются в finerr после фактического завершения внешней транзакции.
 

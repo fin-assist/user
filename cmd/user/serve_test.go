@@ -14,9 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fin-assist/user/internal/adapter/postgres/migrate"
-	"github.com/fin-assist/user/internal/adapter/postgres/migrate/migratetest"
+	"github.com/fin-assist/go-migrate"
+
 	"github.com/fin-assist/user/internal/app"
+	"github.com/fin-assist/user/internal/testdb"
 )
 
 func TestUnitServeFailsBeforeConnectingWithoutSigningKey(t *testing.T) {
@@ -43,7 +44,7 @@ func serveAndStop(t *testing.T, provider string) {
 	t.Setenv("PEER_ASSISTANT_ADDR", "passthrough:///127.0.0.1:1")
 	setSigningKey(t)
 	setPhoneKey(t)
-	dsn := migratetest.DSN(t)
+	dsn := testdb.DSN(t)
 	if err := migrate.Up(t.Context(), migrate.DefaultConfig(dsn), app.MigrationSources()); err != nil {
 		t.Fatal(err)
 	}
@@ -114,8 +115,8 @@ func TestIntegrationServeFailsOnBadInput(t *testing.T) {
 	cases := map[string]map[string]string{
 		"config":   {"DB_PRIMARY_DSN": ""},
 		"database": {"DB_PRIMARY_DSN": "postgres://nobody@127.0.0.1:1/db?connect_timeout=1"},
-		"listen":   {"DB_PRIMARY_DSN": migratetest.DSN(t), "GRPC_ADDR": "256.0.0.1:1"},
-		"outbox":   {"DB_PRIMARY_DSN": migratetest.DSN(t), "PEER_ASSISTANT_ADDR": ""},
+		"listen":   {"DB_PRIMARY_DSN": testdb.DSN(t), "GRPC_ADDR": "256.0.0.1:1"},
+		"outbox":   {"DB_PRIMARY_DSN": testdb.DSN(t), "PEER_ASSISTANT_ADDR": ""},
 	}
 	for name, extra := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -4,18 +4,19 @@ import (
 	"context"
 	"testing"
 
-	"github.com/fin-assist/user/internal/adapter/grpc/server"
-	"github.com/fin-assist/user/internal/adapter/postgres/migrate"
-	"github.com/fin-assist/user/internal/adapter/postgres/migrate/migratetest"
+	"github.com/fin-assist/go-grpc/server"
+	"github.com/fin-assist/go-migrate"
+
+	"github.com/fin-assist/user/internal/testdb"
 	"github.com/fin-assist/user/migrations"
 )
 
 func TestIntegrationConsentDocumentsPrimaryAndVersionSwitch(t *testing.T) {
-	dsn := migratetest.DSN(t)
+	dsn := testdb.DSN(t)
 	if err := migrate.Up(t.Context(), migrate.DefaultConfig(dsn), []migrate.Source{{Name: "service", Table: "schema_migrations", FS: migrations.FS}}); err != nil {
 		t.Fatal(err)
 	}
-	db, err := Open(t.Context(), Options{PrimaryDSN: dsn, ReplicaDSN: migratetest.DSN(t), MaxConns: 2})
+	db, err := Open(t.Context(), Options{PrimaryDSN: dsn, ReplicaDSN: testdb.DSN(t), MaxConns: 2})
 	if err != nil {
 		t.Fatal(err)
 	}

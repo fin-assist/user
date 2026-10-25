@@ -15,13 +15,13 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/fin-assist/user/internal/adapter/postgres/migrate/migratetest"
+	"github.com/fin-assist/user/internal/testdb"
 )
 
 func TestAPIDeploymentRebuildsBoundedCallbackMetricsFromStoredOutcomes(t *testing.T) {
 	setSigningKey(t)
 	setPhoneKey(t)
-	dsn := migratetest.DSN(t)
+	dsn := testdb.DSN(t)
 	reserve := func() string {
 		t.Helper()
 		listener, err := net.Listen("tcp", "127.0.0.1:0")

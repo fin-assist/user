@@ -14,10 +14,11 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/fin-assist/user/internal/adapter/client"
+	"github.com/fin-assist/go-grpc/client"
+	"github.com/fin-assist/go-worker"
+
 	events "github.com/fin-assist/user/internal/adapter/outbox"
 	"github.com/fin-assist/user/internal/adapter/postgres"
-	"github.com/fin-assist/user/internal/worker"
 )
 
 func wireOutbox(ctx context.Context, a *App, reg prometheus.Registerer) (*events.Events, worker.Job, func(), error) {

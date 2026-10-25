@@ -10,16 +10,17 @@ import (
 	tombstone "github.com/fin-assist/go-tombstone"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/fin-assist/go-grpc/server"
+	"github.com/fin-assist/go-migrate"
+	"github.com/fin-assist/go-worker"
+
 	consentgrpc "github.com/fin-assist/user/internal/adapter/grpc/consent"
 	profilegrpc "github.com/fin-assist/user/internal/adapter/grpc/profile"
-	"github.com/fin-assist/user/internal/adapter/grpc/server"
 	signinggrpc "github.com/fin-assist/user/internal/adapter/grpc/signing"
 	"github.com/fin-assist/user/internal/adapter/postgres"
-	"github.com/fin-assist/user/internal/adapter/postgres/migrate"
 	"github.com/fin-assist/user/internal/consent"
 	"github.com/fin-assist/user/internal/deletion"
 	"github.com/fin-assist/user/internal/profile"
-	"github.com/fin-assist/user/internal/worker"
 	"github.com/fin-assist/user/migrations"
 )
 
@@ -67,11 +68,16 @@ func wire(ctx context.Context, a *App, reg prometheus.Registerer) (jobs []worker
 	consentgrpc.Register(a.GRPC.GRPC(), documents, a.Users, a.Tombstones)
 	signinggrpc.Register(a.GRPC.GRPC(), a.Signing, profiles)
 	limits := postgres.NewLimits(a.DB)
-	cleanup := worker.Every("rate-limit-cleanup", time.Minute, a.Log, func(ctx context.Context) error {
+	cleanup, err := worker.Every("rate-limit-cleanup", time.Minute, a.Log, worker.SystemClock{}, func(ctx context.Context) error {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		_, err := limits.Cleanup(ctx, time.Now().Add(-time.Hour), 1000)
 		return err
 	})
+	if err != nil {
+		closeAuth()
+		closeOutbox()
+		return nil, nil, err
+	}
 	return append([]worker.Job{cleanup, dispatch}, authJobs...), func() { closeAuth(); closeOutbox() }, nil
 }

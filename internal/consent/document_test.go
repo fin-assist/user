@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/fin-assist/user/internal/adapter/grpc/server"
+	"github.com/fin-assist/go-grpc/server"
 )
 
 type documents struct {

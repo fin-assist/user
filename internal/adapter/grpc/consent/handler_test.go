@@ -9,7 +9,8 @@ import (
 	"github.com/fin-assist/contracts/gen/go/finerr"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/fin-assist/user/internal/adapter/grpc/server"
+	"github.com/fin-assist/go-grpc/server"
+
 	"github.com/fin-assist/user/internal/consent"
 )
 

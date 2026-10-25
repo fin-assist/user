@@ -14,9 +14,10 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/fin-assist/go-grpc/reqctx"
+
 	usecase "github.com/fin-assist/user/internal/auth"
 	"github.com/fin-assist/user/internal/ratelimit"
-	"github.com/fin-assist/user/internal/reqctx"
 	"github.com/fin-assist/user/internal/verification"
 )
 

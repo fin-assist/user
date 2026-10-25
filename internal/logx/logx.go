@@ -7,7 +7,7 @@ import (
 	"io"
 	"log/slog"
 
-	"github.com/fin-assist/user/internal/reqctx"
+	"github.com/fin-assist/go-grpc/reqctx"
 )
 
 // New returns a logger writing to w. service is added to every line.

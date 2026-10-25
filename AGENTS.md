@@ -25,7 +25,7 @@ updates them in the same PR. A service made from the template rewrites the first
   never defines its own `.proto`, error codes or REST fields: a change goes to `contracts` first (its own FIN issue
   and PR), then the service bumps the module.
 - Shared code: Go libraries made from `fin-assist/go-library-template` (FIN-118) — `go-identity`, `go-idempotency`,
-  `go-outbox`, `go-tombstone`, `go-postgres` (v0.1.1, FIN-240). The service imports them at tagged versions and wires them in `internal/app` by the
+  `go-outbox`, `go-tombstone`, `go-postgres` (v0.2.0, FIN-253), `go-grpc`, `go-worker` (v0.1.0, FIN-250/252), `go-migrate` (v0.1.1, FIN-251/262). The service imports them at tagged versions and wires them in `internal/app` by the
   «Внедрение» section of their README; versions and compatibility — `docs/releasing.md` of the library template.
   Code that more than one service needs goes into a library (its own FIN issue), not into a copy here.
 - Architecture, MVP scope, product decisions: Confluence PF (https://finassist.atlassian.net/wiki/spaces/PF),
@@ -36,6 +36,8 @@ updates them in the same PR. A service made from the template rewrites the first
   contracts and the owner's latest decision, say so in the PR, and propose (not impose) engineering changes; keep them
   non-radical. The owner writes backend code himself and is strong in PostgreSQL: schemas and queries are proposed
   with arguments, not decided for him.
+
+FIN-255 uses go-grpc v0.1.0 server/client/reqctx, go-migrate v0.1.1 and go-worker v0.1.0 directly; no local transport/context/runner copies. go-postgres v0.2.0 owns pool lifecycle; routing and business transaction mapping remain service-owned. Workers receive the logger, SystemClock and explicit five-second restart delay. Shared tests belong to the libraries; service identity, ACL, SQL and RPC scenarios remain here.
 
 ## Current implementation (FIN-219)
 
@@ -129,18 +131,18 @@ See docs/verification.md, including capacity/availability metrics and key retent
 | Timezone/deletion events and dispatcher assembly | `internal/adapter/outbox/`, `internal/app/outbox.go` |
 | Entities and invariants (no pgx, gRPC or generated code) | `internal/domain/` |
 | Usecases and the interfaces of repositories and clients they need | `internal/<feature>/` |
-| gRPC server, interceptors, access table types, identity and tombstone interfaces | `internal/adapter/grpc/server/`; rules — `docs/server.md` |
+| gRPC server, interceptors, access table types, identity and tombstone interfaces | `github.com/fin-assist/go-grpc/server`; rules — `docs/server.md` |
 | gRPC handlers (messages ↔ usecases) | `internal/adapter/grpc/<feature>/` |
 | Pools, transaction manager, repositories | `internal/adapter/postgres/`; rules — `docs/migrations.md`, «Запросы на pgx» |
-| Migration runner and the PostgreSQL for tests | `internal/adapter/postgres/migrate/`, `migratetest/` |
+| Migration runner and the PostgreSQL for tests | `github.com/fin-assist/go-migrate`, public `go-migrate/migratetest`, local server selection `internal/testdb/` |
 | SQL migrations (embedded) and the tests of their keys, cascades and expected queries | `migrations/`; rules — `docs/migrations.md`; the schema, its keys, expected queries and the invariants kept by code — `docs/schema.md` |
-| Clients of other services, service token source | `internal/adapter/client/` |
+| Clients of other services, service token source | `github.com/fin-assist/go-grpc/client` |
 | Zvonok V1 client and checked HTTP postback | `internal/adapter/zvonok/`, `internal/verification/check.go`, `docs/zvonok.md` |
 | Runtime fake, synthetic namespace, production proof protection | `internal/adapter/fakephone/`, `internal/verification/test_phone.go`, `docs/fake-phone.md` |
 | Public callback pool, transactional selection and rolling outcomes | `internal/verification/numbers.go`, `internal/adapter/postgres/verification_numbers.go` |
-| Background jobs | `internal/worker/` |
+| Background jobs | `github.com/fin-assist/go-worker` |
 | Configuration: every variable with its default and description | `internal/config/vars.go` (`Vars`); generated tables — `docs/config.md` |
-| Request-scoped values (request ID, caller, user, bank-bff hints) | `internal/reqctx/` |
+| Request-scoped values (request ID, caller, user, bank-bff hints) | `github.com/fin-assist/go-grpc/reqctx` |
 | Authentication limits, fixed windows and commit-aware metrics; integration rules | `internal/ratelimit/`, `internal/adapter/postgres/limits.go`, `docs/limits.md` |
 | Logger, metrics endpoint, readiness | `internal/logx/`, `internal/ops/` |
 | Image, local run, stand | `Dockerfile`, `compose.yaml`, `Makefile`, `deploy/systemd/` |
@@ -211,10 +213,9 @@ Priorities when they pull apart, in this order:
   never imports an adapter, pgx or gRPC; a handler converts messages and calls a usecase; `wire()` connects them.
 - Errors to callers: only `finerr` constructors (`finerr.NotFound()`, `finerr.LimitExceeded(resetsAt)`).
   `status.Error`, `status.New`, `errdetails.ErrorInfo` are forbidden by the linter; an internal refusal is a bare
-  code through `bare()` in the server package. A new client reaction needs a new code in `contracts` first. A
+  code through `bare()` in go-grpc/server. A new client reaction needs a new code in `contracts` first. A
   handler may return a `finerr` error wrapped with `%w` or any other error: the interceptor sends the caller the
-  unwrapped status or a bare `INTERNAL` (`CANCELLED` / `DEADLINE_EXCEEDED` for context errors) and logs the
-  original, so no text of a wrapped error leaves the process (`docs/server.md`, step 10).
+  unwrapped status or a bare `INTERNAL` (`CANCELLED` / `DEADLINE_EXCEEDED` for context errors) and records only safe event/code/reason, omitting raw errors and panic payloads (`docs/server.md`, step 10).
 - Identity: the user of a user call is `reqctx.UserID(ctx)` (the verified `sub`), never a request field; a system
   call takes `user_id` from the request. Every new method gets its row in `AccessPolicy()`, copied from
   grpc-api.md 3.3; the server does not start without it.
@@ -267,7 +268,7 @@ Every change comes with its automated tests in the same PR — not in a follow-u
   mappers, validation, config, helpers, interceptors) has unit tests in its package: no database, no network, fakes
   of the interfaces the code declares; the main path and every branch and error the code handles.
 - **Integration tests — all new functionality.** Every new or changed behaviour is tested against its real
-  dependencies: repositories, migrations, transactions and locks against PostgreSQL (`migratetest.DSN`), not mocks of
+  dependencies: repositories, migrations, transactions and locks against PostgreSQL (`testdb.DSN`), not mocks of
   pgx — the SQL itself is what is tested; clients of other services against a fake gRPC server on bufconn
   (retries, deadlines, metadata); jobs and the outbox through a real run. Every migration passes up → down → up
   (`migrations/migrations_test.go`).

@@ -16,7 +16,9 @@
 - [docs/fake-phone.md](docs/fake-phone.md) — вход без звонка в dev/stage, тестовые телефоны и защита prod.
 - [AGENTS.md](AGENTS.md) — карта и правила для агентов, Code Review Rules.
 
-Транзакции выполняет `go-postgres v0.1.1` ([FIN-240](https://finassist.youtrack.cloud/issue/FIN-240)). Сервис сохраняет настройку пулов и primary/replica; каждый участник auth-транзакции явно привязан к выделенному auth-пулу. Нарушения ограничений переводятся в доменные ошибки адаптерами конкретной операции, включая фактический COMMIT; usecase/transport не разбирают PostgreSQL-ошибки. См. [docs/migrations.md](docs/migrations.md).
+FIN-255 подключает `go-grpc v0.1.0` (server/client/reqctx), `go-migrate v0.1.1` и `go-worker v0.1.0` вместо локальных копий. Identity, AccessPolicy, tombstones, прикладные jobs и SQL остаются в `internal/app` и адаптерах сервиса. Перезапуск jobs явно ограничен прежними 5 секундами; расписания используют переданные logger и clock. Тестовые базы и up → down → up обслуживает публичный `go-migrate/migratetest`, выбор PostgreSQL 18 — `internal/testdb`.
+
+Транзакции выполняет `go-postgres v0.2.0` ([FIN-240](https://finassist.youtrack.cloud/issue/FIN-240)). Lifecycle пулов передан `go-postgres.OpenPools`; сервис задаёт параметры и сохраняет маршрутизацию primary/replica; каждый участник auth-транзакции явно привязан к выделенному auth-пулу. Нарушения ограничений переводятся в доменные ошибки адаптерами конкретной операции, включая фактический COMMIT; usecase/transport не разбирают PostgreSQL-ошибки. См. [docs/migrations.md](docs/migrations.md).
 
 ## Автоматизация обновлений зависимостей
 
@@ -98,19 +100,17 @@ internal/adapter/outbox/            timezone and deletion event encoding
 internal/ratelimit/                authentication limit policies and commit-aware metrics
 internal/domain/                   entities and invariants, no infrastructure imports
 internal/<feature>/                usecases; interfaces of repositories and clients they need
-internal/adapter/grpc/server/      gRPC server, interceptors, access table types, identity interfaces
 internal/adapter/grpc/<feature>/   gRPC handlers: messages <-> usecases
 internal/adapter/postgres/         pools, transaction manager, repositories on pgx
-internal/adapter/postgres/migrate/ migration runner (migratetest: PostgreSQL for tests)
-internal/adapter/client/           clients of other services, service token source
-internal/worker/                   background jobs: outbox dispatcher, scheduled jobs
 internal/config/                   configuration from the environment
-internal/reqctx/                   request-scoped values: request ID, caller, user, hints
+internal/testdb/                   PostgreSQL server selection for the public migration test harness
 internal/logx/                     slog with values from the context
 internal/ops/                      /metrics, /healthz, /readyz, readiness
 migrations/                        SQL migrations, embedded into the binary
 deploy/systemd/                    example unit for the stand
 ```
+
+Общая инфраструктура импортируется напрямую: `go-grpc/server`, `go-grpc/client`, `go-grpc/reqctx`, `go-migrate` и `go-worker`. Прикладные фоновые задания и настройки клиентов собирает `internal/app`.
 
 Раскладка — по руководству go.dev «Organizing a Go module» (серверный проект), слои и интерфейсы на стороне потребителя — по go-clean-arch v4: сценарий в `internal/<feature>` объявляет интерфейсы нужных ему репозиториев и клиентов, адаптеры их реализуют, связывает всё `wire()`.
 
@@ -205,6 +205,8 @@ RPC не становятся API только из-за расположени�
 красным, при этом остальные наборы продолжают сбор отчётов. Права записи в PR не нужны,
 в том числе для fork: отчёты видны в сводке Actions и артефакте `coverage`
 (профили, JSON-логи, штатные текстовые отчёты и breakdown).
+
+FIN-255 добавляет integration-сценарии записи настоящего log-файла с общим `go-grpc/reqctx` и файлового развёртывания/ротации signing keys. Они проверяют сохранение identity в логах, отсутствие её переноса в фоновые записи, совместимость старых/новых токенов и отказ небезопасного key deployment. Исправление FIN-262 убирает ошибки up/down/up у трёхзначных миграций; отдельный дефицит integration-покрытия после удаления общих копий закрывается этими сценариями. Проверки используют опубликованный `go-migrate v0.1.1`: поддержка трёхзначных миграций проверяется штатным `make test` и тремя независимыми CI-профилями, без временного modfile или replace.
 
 Актуальные значения каждого уровня находятся в сводке Actions и артефакте `coverage` текущего коммита.
 Локальная версия Go может считать statements иначе, чем версия из `go.mod` в CI: приёмка требует

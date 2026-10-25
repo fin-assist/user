@@ -25,7 +25,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/fin-assist/user/internal/adapter/postgres/migrate/migratetest"
+	"github.com/fin-assist/user/internal/testdb"
 )
 
 // Exercise the deployed entrypoint and its public endpoint across failed restarts.
@@ -33,7 +33,7 @@ import (
 func TestAPIDeploymentRejectsUnsafeRestartsBeforeExposingSigningKeys(t *testing.T) {
 	setSigningKey(t)
 	setPhoneKey(t)
-	dsn := migratetest.DSN(t)
+	dsn := testdb.DSN(t)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

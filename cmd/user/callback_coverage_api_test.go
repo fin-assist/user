@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/fin-assist/user/internal/adapter/postgres/migrate/migratetest"
+	"github.com/fin-assist/user/internal/testdb"
 )
 
 func TestAPIDeploymentExposesGuardedCallbackListenerAndStopsIt(t *testing.T) {
@@ -31,7 +31,7 @@ func TestAPIDeploymentExposesGuardedCallbackListenerAndStopsIt(t *testing.T) {
 	grpcAddr, callbackAddr := address(), address()
 	for key, value := range map[string]string{
 		"SERVICE_NAME": "user", "ENV": "dev", "AUTH_MODE": "insecure-dev", "LOG_LEVEL": "error",
-		"DB_PRIMARY_DSN": migratetest.DSN(t), "DB_PRIMARY_DSN_FILE": "", "GRPC_ADDR": grpcAddr, "HTTP_ADDR": "127.0.0.1:0",
+		"DB_PRIMARY_DSN": testdb.DSN(t), "DB_PRIMARY_DSN_FILE": "", "GRPC_ADDR": grpcAddr, "HTTP_ADDR": "127.0.0.1:0",
 		"SHUTDOWN_DELAY": "0s", "SHUTDOWN_TIMEOUT": "3s", "PHONE_PROVIDER": "zvonok", "ZVONOK_PUBLIC_KEY": "test-private-key", "ZVONOK_CAMPAIGN_ID": "123", "ZVONOK_CALLBACK_ADDR": callbackAddr, "ZVONOK_TRUSTED_PROXY_CIDRS": "",
 		"PEER_BANK_STATEMENT_DATA_ADDR": "passthrough:///127.0.0.1:1", "PEER_ANALYTICS_ADDR": "passthrough:///127.0.0.1:1", "PEER_ASSISTANT_ADDR": "passthrough:///127.0.0.1:1",
 	} {
