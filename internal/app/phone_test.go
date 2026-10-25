@@ -15,16 +15,17 @@ import (
 	idempotency "github.com/fin-assist/go-idempotency"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/fin-assist/user/internal/adapter/client"
+	"github.com/fin-assist/go-grpc/client"
+
 	"github.com/fin-assist/user/internal/adapter/fakephone"
 	"github.com/fin-assist/user/internal/adapter/postgres"
-	"github.com/fin-assist/user/internal/adapter/postgres/migrate/migratetest"
 	"github.com/fin-assist/user/internal/config"
+	"github.com/fin-assist/user/internal/testdb"
 	"github.com/fin-assist/user/internal/verification"
 )
 
 func TestIntegrationPhoneAssemblyKeySeparationAndFailureCleanup(t *testing.T) {
-	dsn := migratetest.DSN(t)
+	dsn := testdb.DSN(t)
 	db, err := postgres.Open(t.Context(), postgres.Options{PrimaryDSN: dsn, MaxConns: 2})
 	if err != nil {
 		t.Fatal(err)

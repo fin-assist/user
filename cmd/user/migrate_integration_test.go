@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fin-assist/user/internal/adapter/postgres/migrate/migratetest"
+	"github.com/fin-assist/user/internal/testdb"
 )
 
 func TestIntegrationMigrationCLIReportsAndRepairsVersionWithoutCrossSourceRollback(t *testing.T) {
-	dsn := migratetest.DSN(t)
+	dsn := testdb.DSN(t)
 	t.Setenv("DB_PRIMARY_DSN", dsn)
 	var out bytes.Buffer
 	invoke := func(args ...string) {

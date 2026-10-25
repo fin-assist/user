@@ -8,8 +8,9 @@ import (
 
 	userv1 "github.com/fin-assist/contracts/gen/go/finassist/user/v1"
 
+	"github.com/fin-assist/go-grpc/reqctx"
+
 	"github.com/fin-assist/user/internal/profile"
-	"github.com/fin-assist/user/internal/reqctx"
 )
 
 type service struct {

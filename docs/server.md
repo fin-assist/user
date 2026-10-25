@@ -8,7 +8,7 @@
 
 1. **`x-request-id`** — из metadata или новый; значение неожиданной формы (не `[A-Za-z0-9._-]{1,128}`) заменяется.
 2. **Логи и метрики** — после обработчика (см. «Наблюдаемость»).
-3. **Перехват паники** — голый `INTERNAL`, стек в лог.
+3. **Перехват паники** — голый `INTERNAL`, в журнале безопасное событие без payload и стека (go-grpc v0.1.0).
 4. **Сервисный токен** `x-service-authorization` → имя вызывающего. Нет или неверный — голый `UNAUTHENTICATED`.
 5. **Таблица доступа** (`AccessPolicy()` в `internal/app/wire.go`, копия таблицы grpc-api.md 3.3). Метода нет в таблице или вызывающего нет в правиле — голый `PERMISSION_DENIED`, строка в лог уровня `ERROR` и метрика `finassist_grpc_denied_total{cause="caller_not_allowed"}` (на неё — алерт). Сервер **не стартует**, если у зарегистрированного метода нет правила.
 6. **Подсказки `bank-bff`** — `x-client-ip`, `x-client-version`, `x-read-primary` берутся только от `bank-bff`; от других вызывающих игнорируются.
@@ -25,9 +25,9 @@
 8. **Tombstone** — удалённый пользователь в вызове от его имени получает `TOKEN_REVOKED`. Исключение — точное правило `DeleteAccount` с `AllowDeleted`: повтор разрешён с проверенным пользовательским токеном и сервисным ACL; wildcard и модели кроме `ModelUser` с этим флагом запрещены при старте. Сбой проверки — голый `UNAVAILABLE` (обработчик ещё не выполнялся, повтор безопасен). Системные вызовы для удалённого пользователя обрабатывает сам обработчик: OK без действий (grpc-api.md 6.1).
 9. **protovalidate** — нарушения аннотаций `.proto` → `VALIDATION_ERROR` с `BadRequest` по полям; `reason` нарушения: `required` → `REQUIRED`, формат (`pattern`, `email`, `uuid`, `prefix`, `defined_only`, …) → `INVALID_FORMAT`, остальное (длины, диапазоны, размеры, CEL) → `OUT_OF_RANGE`. В потоках проверяется каждое входящее сообщение.
 
-10. **Нормализация ошибки обработчика** — вызывающему уходит только статус: обёрнутый `fmt.Errorf("…: %w", finerr.NotFound())` разворачивается до самого статуса (текст обёртки не уходит), ошибка без статуса (`pgx`, `io`, своя) становится голым `INTERNAL`, `context.Canceled` / `DeadlineExceeded` — голыми `CANCELLED` / `DEADLINE_EXCEEDED`. Без этого grpc-go отправил бы `UNKNOWN` с `err.Error()` в `status.message`. Исходная ошибка — в строке лога вызова (`error`).
+10. **Нормализация ошибки обработчика** — вызывающему уходит только статус: обёрнутый `fmt.Errorf("…: %w", finerr.NotFound())` разворачивается до самого статуса (текст обёртки не уходит), ошибка без статуса (`pgx`, `io`, своя) становится голым `INTERNAL`, `context.Canceled` / `DeadlineExceeded` — голыми `CANCELLED` / `DEADLINE_EXCEEDED`. Без этого grpc-go отправил бы `UNKNOWN` с `err.Error()` в `status.message`. Исходная ошибка не попадает в журнал: go-grpc оставляет безопасные code/reason/event без raw error, DSN и секретов.
 
-Голые коды без `ErrorInfo` (шаги 3–5, 8, 10) — внутренние отказы, `bank-bff` отдаёт по ним 500 (grpc-api.md 5.1, правило 3). Строит их только `bare()` в `internal/adapter/grpc/server/status.go`; остальные ошибки — конструкторы `finerr`, обход запрещён линтером (`forbidigo`, `.golangci.yml`).
+Голые коды без `ErrorInfo` (шаги 3–5, 8, 10) — внутренние отказы, `bank-bff` отдаёт по ним 500 (grpc-api.md 5.1, правило 3). Строит их только `bare()` в `go-grpc/server/status.go`; остальные ошибки — конструкторы `finerr`, обход запрещён линтером (`forbidigo`, `.golangci.yml`).
 
 Health (`grpc.health.v1`) и reflection (только `ENV=dev`) открыты без токенов.
 
@@ -63,7 +63,7 @@ GetConsentDocument проходит сервисный ACL как NoUser. Для
 
 ## Клиенты других сервисов
 
-`client.Dial(cfg.Peers["<name>"], client.Options{...})` (`internal/adapter/client`):
+`client.Dial(cfg.Peers["<name>"], client.Options{...})` (`github.com/fin-assist/go-grpc/client`):
 
 - `round_robin` по всем адресам цели: в k3s сервисы headless (`dns:///<svc>.finassist.svc.cluster.local:9090`), на стенде — адрес процесса.
 - Ретраи — только `UNAVAILABLE`, до 3 попыток с джиттером, только для методов из `Options.Retry`: чтения и идемпотентные по конструкции (grpc-api.md 6). Методы с `idempotency-key` ретраит приложение.
@@ -87,7 +87,7 @@ key_unavailable/forbidden/user_id. ACL выполняет сервер, поэт
 в finassist_grpc_denied_total. Идентификаторы пользователей, ключи и токены в метки не идут.
 
 
-- **Логи** — `slog`, JSON (text в dev), в каждой строке `service`, `request_id`, `caller`, `user_id` из контекста (методы `*Context`). Строка на вызов: `method`, `code`, `reason`, `duration_ms`, `error` (исходная ошибка обработчика — только здесь, клиенту не уходит). На `debug` — metadata и запрос: `authorization`, `x-service-authorization`, `idempotency-key`, ключи и поля с `token` в имени маскируются, поля `bytes` (файл выписки, ключ) очищаются независимо от имени.
+- **Логи** — `slog`, JSON (text в dev), в каждой строке `service`, `request_id`, `caller`, `user_id` из контекста (методы `*Context`). Строка на вызов: `method`, `code`, `reason`, `duration_ms`, безопасное событие без текста исходной ошибки обработчика. На `debug` — metadata и запрос: `authorization`, `x-service-authorization`, `idempotency-key`, ключи и поля с `token` в имени маскируются, поля `bytes` (файл выписки, ключ) очищаются независимо от имени.
 - **Метрики** (`/metrics` на `HTTP_ADDR`): `grpc_server_handled_total{method,code,reason}`, `grpc_server_handling_seconds{method}`, `finassist_grpc_denied_total{method,caller,cause}`, `grpc_client_handled_total{peer,method,code}`, `grpc_client_handling_seconds{peer,method}`, метрики Go и процесса. **Без `user_id` и других неограниченных значений в метках.**
 
 Лимиты FIN-219: `finassist_rate_limit_configured_limit{scope}`,
@@ -128,7 +128,7 @@ endpoint — два полных имени RPC, outcome — new/replay/conflict
 становятся. Рост conflict/in_progress и ошибки auth-cleanup отслеживаются внешними
 правилами мониторинга; параметры порога задаются в infra. Детали — [auth.md](auth.md).
 
-`internal/worker`: `worker.Run(ctx, log, jobs...)` — задание с ошибкой или паникой перезапускается через 5 с; `worker.Every(name, interval, log, fn)` — периодическое. Задания работают в каждом поде; единственность — блокировкой или `FOR UPDATE SKIP LOCKED`, как в outbox. Задания возвращает `wire()`.
+`github.com/fin-assist/go-worker`: `worker.Run(ctx, worker.Options{Logger: log, Clock: worker.SystemClock{}, RestartDelay: 5*time.Second}, jobs...)` — задание с ошибкой или паникой перезапускается через 5 с; `worker.Every(name, interval, log, worker.SystemClock{}, fn)` — периодическое. Задания работают в каждом поде; единственность — блокировкой или `FOR UPDATE SKIP LOCKED`, как в outbox. Задания возвращает `wire()`.
 
 ## Zvonok и номера пула (FIN-139/216)
 

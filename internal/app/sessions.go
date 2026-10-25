@@ -10,6 +10,8 @@ import (
 	tombstone "github.com/fin-assist/go-tombstone"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/fin-assist/go-worker"
+
 	authgrpc "github.com/fin-assist/user/internal/adapter/grpc/auth"
 	eventsadapter "github.com/fin-assist/user/internal/adapter/outbox"
 	"github.com/fin-assist/user/internal/adapter/postgres"
@@ -17,7 +19,6 @@ import (
 	"github.com/fin-assist/user/internal/config"
 	"github.com/fin-assist/user/internal/token"
 	"github.com/fin-assist/user/internal/verification"
-	"github.com/fin-assist/user/internal/worker"
 )
 
 func wireSessions(ctx context.Context, a *App, reg prometheus.Registerer) ([]worker.Job, func(), error) {
@@ -70,7 +71,7 @@ func wireSessions(ctx context.Context, a *App, reg prometheus.Registerer) ([]wor
 		starts.SetImmediateConfirmation(a.authConfirmation)
 	}
 	authgrpc.Register(a.GRPC.GRPC(), sessions, engine, postgres.NewSessionTransactions(pool), a.DB, a.Limits, guard, a.Verifications, starts)
-	cleanup := worker.Every("auth-cleanup", time.Minute, a.Log, func(ctx context.Context) error {
+	cleanup, err := worker.Every("auth-cleanup", time.Minute, a.Log, worker.SystemClock{}, func(ctx context.Context) error {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		for {
@@ -93,5 +94,9 @@ func wireSessions(ctx context.Context, a *App, reg prometheus.Registerer) ([]wor
 			}
 		}
 	})
+	if err != nil {
+		closeAll()
+		return nil, nil, err
+	}
 	return append(phoneJobs, cleanup), closeAll, nil
 }

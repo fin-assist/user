@@ -9,6 +9,8 @@ import (
 	tombstone "github.com/fin-assist/go-tombstone"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/fin-assist/go-worker"
+
 	"github.com/fin-assist/user/internal/adapter/fakephone"
 	"github.com/fin-assist/user/internal/adapter/postgres"
 	"github.com/fin-assist/user/internal/adapter/verificationcrypto"
@@ -16,7 +18,6 @@ import (
 	"github.com/fin-assist/user/internal/config"
 	"github.com/fin-assist/user/internal/token"
 	"github.com/fin-assist/user/internal/verification"
-	"github.com/fin-assist/user/internal/worker"
 )
 
 func wirePhone(ctx context.Context, a *App, authDB *postgres.DB, authGuard *tombstone.Store, reg prometheus.Registerer) ([]worker.Job, func(), error) {
@@ -57,7 +58,7 @@ func wirePhone(ctx context.Context, a *App, authDB *postgres.DB, authGuard *tomb
 		}
 		a.Verifications.SetProofGuard(guard)
 	}
-	cleanup := worker.Every("phone-cleanup", time.Minute, a.Log, func(ctx context.Context) error {
+	cleanup, err := worker.Every("phone-cleanup", time.Minute, a.Log, worker.SystemClock{}, func(ctx context.Context) error {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		for {
@@ -70,6 +71,10 @@ func wirePhone(ctx context.Context, a *App, authDB *postgres.DB, authGuard *tomb
 			}
 		}
 	})
+	if err != nil {
+		notifications.Close()
+		return nil, nil, err
+	}
 	jobs := []worker.Job{{Name: "phone-notifications", Run: notifications.Run}, cleanup}
 	closeBackend := func() {}
 	if a.Cfg.Zvonok.Provider == "fake" {
@@ -83,7 +88,13 @@ func wirePhone(ctx context.Context, a *App, authDB *postgres.DB, authGuard *tomb
 			return nil, nil, err
 		}
 		a.phoneProvider, a.phoneSelector = fakephone.New(), numbers
-		jobs = append(jobs, callbackOutcomesJob(a, numbers))
+		outcomes, err := callbackOutcomesJob(a, numbers)
+		if err != nil {
+			closeBackend()
+			notifications.Close()
+			return nil, nil, err
+		}
+		jobs = append(jobs, outcomes)
 	}
 	if a.Cfg.Zvonok.Provider == "zvonok" {
 		fail := func(err error) ([]worker.Job, func(), error) {
@@ -118,13 +129,19 @@ func wirePhone(ctx context.Context, a *App, authDB *postgres.DB, authGuard *tomb
 		a.phoneProvider, a.phoneSelector = provider, numbers
 		a.PhoneCallback = handler
 		a.Verifications.SetStatusChecker(checker)
-		jobs = append(jobs, callbackOutcomesJob(a, numbers))
+		outcomes, err := callbackOutcomesJob(a, numbers)
+		if err != nil {
+			closeBackend()
+			notifications.Close()
+			return nil, nil, err
+		}
+		jobs = append(jobs, outcomes)
 	}
 	return jobs, func() { closeBackend(); notifications.Close() }, nil
 }
 
-func callbackOutcomesJob(a *App, numbers *verification.Numbers) worker.Job {
-	return worker.Every("phone-callback-outcomes", time.Minute, a.Log, func(ctx context.Context) error {
+func callbackOutcomesJob(a *App, numbers *verification.Numbers) (worker.Job, error) {
+	return worker.Every("phone-callback-outcomes", time.Minute, a.Log, worker.SystemClock{}, func(ctx context.Context) error {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		return numbers.Report(ctx)

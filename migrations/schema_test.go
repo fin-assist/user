@@ -17,8 +17,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/fin-assist/user/internal/adapter/postgres/migrate"
-	"github.com/fin-assist/user/internal/adapter/postgres/migrate/migratetest"
+	"github.com/fin-assist/go-migrate"
+
+	"github.com/fin-assist/user/internal/testdb"
 	"github.com/fin-assist/user/migrations"
 )
 
@@ -47,7 +48,7 @@ func config(dsn string) migrate.Config {
 
 func schema(t *testing.T) (*pgxpool.Pool, string) {
 	t.Helper()
-	dsn := migratetest.DSN(t)
+	dsn := testdb.DSN(t)
 	if err := migrate.Up(context.Background(), config(dsn), []migrate.Source{source()}); err != nil {
 		t.Fatal(err)
 	}

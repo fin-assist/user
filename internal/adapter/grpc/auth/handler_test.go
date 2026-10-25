@@ -15,9 +15,10 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/fin-assist/go-grpc/reqctx"
+
 	usecase "github.com/fin-assist/user/internal/auth"
 	"github.com/fin-assist/user/internal/ratelimit"
-	"github.com/fin-assist/user/internal/reqctx"
 )
 
 var errDependency = errors.New("test dependency")

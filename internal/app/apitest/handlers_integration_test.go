@@ -14,6 +14,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/fin-assist/go-grpc/reqctx"
+
 	authgrpc "github.com/fin-assist/user/internal/adapter/grpc/auth"
 	consentgrpc "github.com/fin-assist/user/internal/adapter/grpc/consent"
 	profilegrpc "github.com/fin-assist/user/internal/adapter/grpc/profile"
@@ -26,7 +28,6 @@ import (
 	"github.com/fin-assist/user/internal/consent"
 	"github.com/fin-assist/user/internal/deletion"
 	"github.com/fin-assist/user/internal/profile"
-	"github.com/fin-assist/user/internal/reqctx"
 	"github.com/fin-assist/user/internal/token"
 	"github.com/fin-assist/user/internal/verification"
 )

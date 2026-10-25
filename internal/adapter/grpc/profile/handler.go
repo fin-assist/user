@@ -9,8 +9,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/fin-assist/go-grpc/reqctx"
+
 	"github.com/fin-assist/user/internal/profile"
-	"github.com/fin-assist/user/internal/reqctx"
 )
 
 // Usecases is the profile handler's consumer-owned application interface.

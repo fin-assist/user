@@ -5,8 +5,6 @@ package postgres
 
 import (
 	"context"
-	"errors"
-	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -14,7 +12,7 @@ import (
 
 	pgstore "github.com/fin-assist/go-postgres"
 
-	"github.com/fin-assist/user/internal/reqctx"
+	"github.com/fin-assist/go-grpc/reqctx"
 )
 
 // Querier is what a repository needs: implemented by a pool and by a transaction.
@@ -25,18 +23,13 @@ type Querier interface {
 	SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResults
 }
 
-// Options configures Open.
-type Options struct {
-	PrimaryDSN string
-	ReplicaDSN string // empty: reads use the primary pool
-	MaxConns   int32
-	// AppName is application_name of the connections (pg_stat_activity, logs).
-	AppName string
-}
+// Options configures the shared pool lifecycle.
+type Options = pgstore.PoolOptions
 
 // DB holds the pool on the primary (-rw) and the pool on the replicas (-ro). On the stand
 // both DSNs point to one PostgreSQL; with an empty replica DSN one pool serves both.
 type DB struct {
+	pools        *pgstore.Pools
 	primary      *pgxpool.Pool
 	replica      *pgxpool.Pool
 	transactions *pgstore.Manager
@@ -44,49 +37,18 @@ type DB struct {
 
 // Open creates the pools and checks that the primary answers.
 func Open(ctx context.Context, o Options) (*DB, error) {
-	primary, err := newPool(ctx, o.PrimaryDSN, o)
+	pools, err := pgstore.OpenPools(ctx, o)
 	if err != nil {
-		return nil, fmt.Errorf("primary pool: %w", err)
+		return nil, err
 	}
-	db := &DB{primary: primary, replica: primary, transactions: pgstore.New(primary)}
-	if o.ReplicaDSN != "" && o.ReplicaDSN != o.PrimaryDSN {
-		if db.replica, err = newPool(ctx, o.ReplicaDSN, o); err != nil {
-			primary.Close()
-			return nil, fmt.Errorf("replica pool: %w", err)
-		}
-	}
-	if err := primary.Ping(ctx); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("primary: %w", err)
-	}
-	return db, nil
+	return &DB{pools: pools, primary: pools.Primary(), replica: pools.Replica(), transactions: pgstore.New(pools.Primary())}, nil
 }
 
-func newPool(ctx context.Context, dsn string, o Options) (*pgxpool.Pool, error) {
-	cfg, err := pgxpool.ParseConfig(dsn)
-	if err != nil {
-		// pgx errors here may quote the DSN with its password: never wrap them.
-		return nil, errors.New("invalid DSN")
-	}
-	if o.MaxConns > 0 {
-		cfg.MaxConns = o.MaxConns
-	}
-	if o.AppName != "" {
-		cfg.ConnConfig.RuntimeParams["application_name"] = o.AppName
-	}
-	return pgxpool.NewWithConfig(ctx, cfg)
-}
-
-// Close closes the pools.
-func (db *DB) Close() {
-	if db.replica != db.primary {
-		db.replica.Close()
-	}
-	db.primary.Close()
-}
+// Close closes the pools owned by the shared lifecycle.
+func (db *DB) Close() { db.pools.Close() }
 
 // Ping checks the primary; readiness uses it.
-func (db *DB) Ping(ctx context.Context) error { return db.primary.Ping(ctx) }
+func (db *DB) Ping(ctx context.Context) error { return db.pools.Ping(ctx) }
 
 // Run executes fn in a transaction using go-postgres. Nested calls join the outer
 // transaction. Callbacks must propagate errors and must not call remote services.

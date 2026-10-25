@@ -15,15 +15,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fin-assist/go-migrate/migratetest"
+
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/prometheus/client_golang/prometheus"
 
 	tombstone "github.com/fin-assist/go-tombstone"
 
 	"github.com/fin-assist/user/internal/adapter/postgres"
-	"github.com/fin-assist/user/internal/adapter/postgres/migrate/migratetest"
 	"github.com/fin-assist/user/internal/config"
 	"github.com/fin-assist/user/internal/signing"
+	"github.com/fin-assist/user/internal/testdb"
 )
 
 func signingConfig(t *testing.T) config.SigningConfig {
@@ -135,7 +137,7 @@ func TestUnitNewRequiresSigningKey(t *testing.T) {
 
 func TestIntegrationLibraryMigrationSources(t *testing.T) {
 	for _, source := range MigrationSources() {
-		t.Run(source.Name, func(t *testing.T) { migratetest.CheckUpDownUp(t, source) })
+		t.Run(source.Name, func(t *testing.T) { migratetest.CheckUpDownUp(t, testdb.DSN(t), source) })
 	}
 }
 
@@ -160,7 +162,7 @@ func TestUnitStageVerifierCannotStartInProd(t *testing.T) {
 }
 
 func TestIntegrationTombstoneServerAdapter(t *testing.T) {
-	db, err := postgres.Open(t.Context(), postgres.Options{PrimaryDSN: migratetest.DSN(t), MaxConns: 1})
+	db, err := postgres.Open(t.Context(), postgres.Options{PrimaryDSN: testdb.DSN(t), MaxConns: 1})
 	if err != nil {
 		t.Fatal(err)
 	}

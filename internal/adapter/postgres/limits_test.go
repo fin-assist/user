@@ -11,19 +11,20 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/fin-assist/user/internal/adapter/postgres/migrate"
-	"github.com/fin-assist/user/internal/adapter/postgres/migrate/migratetest"
+	"github.com/fin-assist/go-migrate"
+
 	"github.com/fin-assist/user/internal/ratelimit"
+	"github.com/fin-assist/user/internal/testdb"
 	"github.com/fin-assist/user/migrations"
 )
 
 func limitsDB(t *testing.T) *DB {
 	t.Helper()
-	dsn := migratetest.DSN(t)
+	dsn := testdb.DSN(t)
 	if err := migrate.Up(t.Context(), migrate.DefaultConfig(dsn), []migrate.Source{{Name: "service", Table: "schema_migrations", FS: migrations.FS}}); err != nil {
 		t.Fatal(err)
 	}
-	db, err := Open(t.Context(), Options{PrimaryDSN: dsn, ReplicaDSN: migratetest.DSN(t), MaxConns: 8})
+	db, err := Open(t.Context(), Options{PrimaryDSN: dsn, ReplicaDSN: testdb.DSN(t), MaxConns: 8})
 	if err != nil {
 		t.Fatal(err)
 	}

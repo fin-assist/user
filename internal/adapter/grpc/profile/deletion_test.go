@@ -8,7 +8,7 @@ import (
 	userv1 "github.com/fin-assist/contracts/gen/go/finassist/user/v1"
 	"github.com/fin-assist/contracts/gen/go/finerr"
 
-	"github.com/fin-assist/user/internal/reqctx"
+	"github.com/fin-assist/go-grpc/reqctx"
 )
 
 type deletionFunc func(context.Context, string) error

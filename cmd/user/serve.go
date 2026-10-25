@@ -11,11 +11,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fin-assist/go-worker"
+
 	"github.com/fin-assist/user/internal/app"
 	"github.com/fin-assist/user/internal/config"
 	"github.com/fin-assist/user/internal/logx"
 	"github.com/fin-assist/user/internal/ops"
-	"github.com/fin-assist/user/internal/worker"
 )
 
 // runServe starts the gRPC server, the ops listener and the background jobs, and stops
@@ -59,7 +60,7 @@ func runServe(ctx context.Context) error {
 	runCtx, stopRun := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopRun()
 	var wg sync.WaitGroup
-	errc := make(chan error, 3)
+	errc := make(chan error, 4)
 	if callbackSrv != nil {
 		wg.Go(func() {
 			if err := callbackSrv.Serve(callbackLis); !errors.Is(err, http.ErrServerClosed) {
@@ -78,7 +79,11 @@ func runServe(ctx context.Context) error {
 		}
 	})
 	wg.Go(func() { readiness.Watch(runCtx, 5*time.Second, log, db.Ping, srv.SetServing) })
-	wg.Go(func() { worker.Run(runCtx, log, jobs...) })
+	wg.Go(func() {
+		if err := worker.Run(runCtx, worker.Options{Logger: log, Clock: worker.SystemClock{}, RestartDelay: 5 * time.Second}, jobs...); err != nil && runCtx.Err() == nil {
+			errc <- fmt.Errorf("jobs: %w", err)
+		}
+	})
 	log.Info("serving", "version", version, "grpc", cfg.GRPC.Addr, "http", cfg.HTTP.Addr, "env", cfg.Env)
 
 	var runErr error

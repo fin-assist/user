@@ -11,11 +11,12 @@ import (
 	goidentity "github.com/fin-assist/go-identity"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/fin-assist/user/internal/adapter/client"
-	"github.com/fin-assist/user/internal/adapter/grpc/server"
+	"github.com/fin-assist/go-grpc/client"
+	"github.com/fin-assist/go-grpc/server"
+	"github.com/fin-assist/go-worker"
+
 	"github.com/fin-assist/user/internal/config"
 	"github.com/fin-assist/user/internal/signing"
-	"github.com/fin-assist/user/internal/worker"
 )
 
 type identityRuntime struct {

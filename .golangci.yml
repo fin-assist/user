@@ -22,7 +22,7 @@ linters:
         # Errors that reach the client are built only by the finerr constructors
         # (grpc-api.md 5.2): a hand-made status can carry a misspelled reason or miss a
         # required metadata key, and bank-bff turns it into 500. A bare internal code is
-        # built in internal/adapter/grpc/server/status.go with a nolint and its reason.
+        # built in go-grpc/server/status.go with a nolint and its reason.
         - pattern: ^status\.(Error|Errorf|New|Newf|FromProto)$
           pkg: ^google\.golang\.org/grpc/status$
           msg: build client-facing errors with finerr (grpc-api.md 5.2)

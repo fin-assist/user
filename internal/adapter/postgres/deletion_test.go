@@ -10,7 +10,8 @@ import (
 	tombstone "github.com/fin-assist/go-tombstone"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/fin-assist/user/internal/adapter/postgres/migrate"
+	"github.com/fin-assist/go-migrate"
+
 	"github.com/fin-assist/user/internal/deletion"
 )
 

@@ -30,12 +30,13 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/fin-assist/user/internal/adapter/grpc/server"
-	"github.com/fin-assist/user/internal/adapter/postgres/migrate"
-	"github.com/fin-assist/user/internal/adapter/postgres/migrate/migratetest"
+	"github.com/fin-assist/go-grpc/server"
+	"github.com/fin-assist/go-migrate"
+
 	"github.com/fin-assist/user/internal/app"
 	"github.com/fin-assist/user/internal/config"
 	"github.com/fin-assist/user/internal/ratelimit"
+	"github.com/fin-assist/user/internal/testdb"
 	"github.com/fin-assist/user/internal/verification"
 )
 
@@ -66,7 +67,7 @@ func StartWithOptions(t *testing.T, options []app.Option, mutate ...func(*config
 func start(t *testing.T, options []app.Option, mutate ...func(*config.Config)) *Env {
 	t.Helper()
 	ctx := context.Background()
-	dsn := migratetest.DSN(t)
+	dsn := testdb.DSN(t)
 
 	mcfg := migrate.DefaultConfig(dsn)
 	mcfg.Logger = slog.New(slog.DiscardHandler)

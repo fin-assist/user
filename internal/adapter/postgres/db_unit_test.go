@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/fin-assist/user/internal/reqctx"
+	"github.com/fin-assist/go-grpc/reqctx"
 )
 
 func TestUnitDatabaseSelectorsAndNestedTransactionsRetainOwner(t *testing.T) {
@@ -40,22 +40,10 @@ func TestUnitDatabaseSelectorsAndNestedTransactionsRetainOwner(t *testing.T) {
 	})
 }
 
-func TestUnitPoolConfigurationIsLazyAndCancelledOpenFailsWithoutDial(t *testing.T) {
+func TestUnitCancelledPoolOpenFailsWithoutDial(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	// MinConns/MinIdleConns stay zero; construction itself does not dial a server.
-	pool, err := newPool(ctx, "postgres://localhost:1/postgres?pool_min_conns=0&pool_min_idle_conns=0", Options{MaxConns: 2, AppName: "unit"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg := pool.Config(); cfg.MaxConns != 2 || cfg.ConnConfig.RuntimeParams["application_name"] != "unit" {
-		t.Fatal("pool configuration lost", cfg.MaxConns)
-	}
-	db := &DB{primary: pool, replica: pool}
-	db.Close()
-	for _, replica := range []string{"", "postgres://localhost:1/replica?pool_min_conns=0&pool_min_idle_conns=0", "not a valid DSN"} {
-		if _, err := Open(ctx, Options{PrimaryDSN: "postgres://localhost:1/postgres?pool_min_conns=0&pool_min_idle_conns=0", ReplicaDSN: replica}); err == nil {
-			t.Fatal("cancelled open succeeded")
-		}
+	if _, err := Open(ctx, Options{PrimaryDSN: "postgres://localhost:1/postgres?pool_min_conns=0&pool_min_idle_conns=0"}); err == nil {
+		t.Fatal("cancelled open succeeded")
 	}
 }
