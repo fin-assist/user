@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http/httptest"
 	"net/netip"
+	"strings"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -65,5 +66,44 @@ func TestUnitPostbackTrustBoundaryAndAcknowledgment(t *testing.T) {
 	}
 	if _, err := NewPostback(nil, nil, prometheus.NewRegistry()); err == nil {
 		t.Fatal("nil callback")
+	}
+}
+
+// A trusted proxy may append its hop as another header line; the chain is read
+// right to left across every line, never from the first (client-supplied) line.
+func TestUnitPostbackForwardedChainSpansHeaderLines(t *testing.T) {
+	long := make([]string, 16)
+	for i := range long {
+		long[i] = "10.0.0.3"
+	}
+	for _, tt := range []struct {
+		name  string
+		lines []string
+		want  int
+	}{
+		{"spoofed-first-line", []string{"193.232.64.150", "203.0.113.9"}, 403},
+		{"provider-in-last-line", []string{"203.0.113.9", "193.232.64.150"}, 200},
+		{"provider-behind-two-proxies", []string{"193.232.64.150", "10.0.0.2"}, 200},
+		{"bad-entry-in-earlier-line", []string{"invalid", "10.0.0.2"}, 403},
+		{"limit-boundary-across-lines", []string{"193.232.64.150", strings.Join(long[:15], ",")}, 200},
+		{"limit-across-lines", []string{"193.232.64.150", strings.Join(long, ",")}, 403},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			h, err := NewPostback(callbackFunc(func(context.Context, string) error { calls++; return nil }), []netip.Prefix{netip.MustParsePrefix("10.0.0.0/24")}, prometheus.NewRegistry())
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := httptest.NewRequest("GET", "/callbacks/zvonok?ct_call_id=123", nil)
+			r.RemoteAddr = "10.0.0.1:2"
+			for _, line := range tt.lines {
+				r.Header.Add("X-Forwarded-For", line)
+			}
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			if w.Code != tt.want || (calls == 1) != (tt.want == 200) {
+				t.Fatal(w.Code, calls)
+			}
+		})
 	}
 }
