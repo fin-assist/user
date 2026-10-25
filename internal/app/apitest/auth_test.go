@@ -836,7 +836,7 @@ func TestAPIAuthAPILogoutRequiresAccessTokenAndOwner(t *testing.T) {
 		return n
 	}
 	ownRefresh := &userv1.LogoutRequest{RefreshToken: owner.GetTokens().GetRefreshToken()}
-	// Without an access token the method is refused before the handler runs.
+	// Without an access token Logout is refused and the session survives.
 	if _, err := c.Logout(apitest.Caller(t.Context(), "bank-bff"), ownRefresh); apitest.Reason(err) != "INVALID_TOKEN" {
 		t.Fatal(err)
 	}
