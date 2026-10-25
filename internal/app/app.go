@@ -48,6 +48,8 @@ type App struct {
 	// PhoneCallback is served on a separate ingress listener, never on ops or gRPC.
 	PhoneCallback   http.Handler
 	zvonokTransport http.RoundTripper
+	// limitNow is the clock of the authentication rate limiter (time.Now by default).
+	limitNow func() time.Time
 
 	closers []func()
 }
@@ -73,7 +75,7 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger, reg prometheu
 		ids.close()
 		return nil, err
 	}
-	a := &App{Cfg: cfg, Log: log, DB: db, Tokens: ids.tokens, Signing: keys, Users: ids.users, Jobs: ids.jobs, closers: []func(){ids.close, db.Close}}
+	a := &App{Cfg: cfg, Log: log, DB: db, Tokens: ids.tokens, Signing: keys, Users: ids.users, Jobs: ids.jobs, closers: []func(){ids.close, db.Close}, limitNow: time.Now}
 	for _, option := range options {
 		option(a)
 	}
@@ -92,7 +94,7 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger, reg prometheu
 	if a.Clients, err = client.NewMetrics(reg); err != nil {
 		return fail(err)
 	}
-	if a.Limits, err = ratelimit.New(cfg.Limits, postgres.NewLimits(db), time.Now, reg); err != nil {
+	if a.Limits, err = ratelimit.New(cfg.Limits, postgres.NewLimits(db), a.limitNow, reg); err != nil {
 		return fail(err)
 	}
 	jobs, closeWired, err := wire(ctx, a, reg)
@@ -118,6 +120,17 @@ func WithPhoneBackend(provider verification.Provider, selector verification.Numb
 // production configuration cannot override the pinned HTTPS endpoint.
 func WithZvonokTransport(transport http.RoundTripper) Option {
 	return func(a *App) { a.zvonokTransport = transport }
+}
+
+// WithLimitClock pins the clock that selects the fixed UTC windows of the
+// authentication rate limiter. API tests use it so that one scenario never
+// straddles a window boundary; production keeps time.Now.
+func WithLimitClock(now func() time.Time) Option {
+	return func(a *App) {
+		if now != nil {
+			a.limitNow = now
+		}
+	}
 }
 
 // Close releases what New opened, in reverse order.

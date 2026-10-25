@@ -107,7 +107,7 @@ func TestAPIAuthAPIRegisterAtomicReplayAndInitialTimezone(t *testing.T) {
 	var users, consents, sessions, events, version, hits int
 	var zone string
 	var closed, wiped bool
-	err = env.App.DB.Primary().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM app_user),(SELECT count(*) FROM user_consent WHERE type='personal_data'),(SELECT count(*) FROM auth_session),(SELECT count(*) FROM outbox_events),settings_version,timezone,(SELECT closed_at IS NOT NULL AND user_id=app_user.id FROM phone_verification WHERE id=$2),(SELECT result_ciphertext IS NULL AND result_key_id IS NULL FROM phone_verification WHERE id=$2),(SELECT hits FROM rate_limit_window WHERE scope='register_ip:60') FROM app_user WHERE id=$1`, first.GetUserId(), id).Scan(&users, &consents, &sessions, &events, &version, &zone, &closed, &wiped, &hits)
+	err = env.App.DB.Primary().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM app_user),(SELECT count(*) FROM user_consent WHERE type='personal_data'),(SELECT count(*) FROM auth_session),(SELECT count(*) FROM outbox_events),settings_version,timezone,(SELECT closed_at IS NOT NULL AND user_id=app_user.id FROM phone_verification WHERE id=$2),(SELECT result_ciphertext IS NULL AND result_key_id IS NULL FROM phone_verification WHERE id=$2),(SELECT COALESCE(sum(hits),0)::integer FROM rate_limit_window WHERE scope='register_ip:60') FROM app_user WHERE id=$1`, first.GetUserId(), id).Scan(&users, &consents, &sessions, &events, &version, &zone, &closed, &wiped, &hits)
 	if err != nil || users != 1 || consents != 1 || sessions != 1 || events != 1 || version != 1 || zone != "Asia/Tokyo" || !closed || !wiped || hits != 2 {
 		t.Fatal("atomic registration", users, consents, sessions, events, version, zone, closed, wiped, hits, err)
 	}
@@ -197,7 +197,7 @@ func TestAPIAuthAPIConcurrentRegisterSameKeyIsOneEffect(t *testing.T) {
 		t.Fatal("different cached registration results")
 	}
 	var sessions, hits int
-	if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM auth_session),(SELECT hits FROM rate_limit_window WHERE scope='register_ip:60')`).Scan(&sessions, &hits); err != nil || sessions != 1 || hits != 1 {
+	if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM auth_session),(SELECT COALESCE(sum(hits),0)::integer FROM rate_limit_window WHERE scope='register_ip:60')`).Scan(&sessions, &hits); err != nil || sessions != 1 || hits != 1 {
 		t.Fatal("double registration effect", sessions, hits, err)
 	}
 }
@@ -254,7 +254,7 @@ func TestAPIAuthAPIConcurrentRegisterDifferentKeysConsumesTokenOnce(t *testing.T
 		t.Fatal("registration token consumed more than once", successes, refusals)
 	}
 	var users, sessions, events, consents, closed, hits int
-	err = env.App.DB.Primary().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM app_user),(SELECT count(*) FROM auth_session),(SELECT count(*) FROM outbox_events),(SELECT count(*) FROM user_consent WHERE type='personal_data'),(SELECT count(*) FROM phone_verification WHERE closed_at IS NOT NULL AND user_id=$1),(SELECT hits FROM rate_limit_window WHERE scope='register_ip:60')`, user).Scan(&users, &sessions, &events, &consents, &closed, &hits)
+	err = env.App.DB.Primary().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM app_user),(SELECT count(*) FROM auth_session),(SELECT count(*) FROM outbox_events),(SELECT count(*) FROM user_consent WHERE type='personal_data'),(SELECT count(*) FROM phone_verification WHERE closed_at IS NOT NULL AND user_id=$1),(SELECT COALESCE(sum(hits),0)::integer FROM rate_limit_window WHERE scope='register_ip:60')`, user).Scan(&users, &sessions, &events, &consents, &closed, &hits)
 	if err != nil || users != 1 || sessions != 1 || events != 1 || consents != 1 || closed != 1 || hits != 2 {
 		t.Fatal("duplicate registration effects", users, sessions, events, consents, closed, hits, err)
 	}
@@ -335,7 +335,7 @@ func TestAPIAuthAPIRequestInProgressDoesNotConsumeSecondAttempt(t *testing.T) {
 			go func() { done <- call(authContext(t.Context(), key)) }()
 			eventually(t, func() bool {
 				var hits int
-				err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT hits FROM rate_limit_window WHERE scope=$1`, scope).Scan(&hits)
+				err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT COALESCE(sum(hits),0)::integer FROM rate_limit_window WHERE scope=$1`, scope).Scan(&hits)
 				return err == nil && hits == expected
 			})
 			if err := call(authContext(t.Context(), key)); apitest.Reason(err) != "REQUEST_IN_PROGRESS" {
@@ -351,7 +351,7 @@ func TestAPIAuthAPIRequestInProgressDoesNotConsumeSecondAttempt(t *testing.T) {
 				t.Fatal("completed key not replayed", err)
 			}
 			var hits int
-			if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT hits FROM rate_limit_window WHERE scope=$1`, scope).Scan(&hits); err != nil || hits != expected {
+			if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT COALESCE(sum(hits),0)::integer FROM rate_limit_window WHERE scope=$1`, scope).Scan(&hits); err != nil || hits != expected {
 				t.Fatal("busy/replay consumed attempts", hits, err)
 			}
 		})
@@ -494,7 +494,7 @@ func TestAPIAuthAPIRefreshReplayReuseAndLogout(t *testing.T) {
 	var revoked bool
 	var encrypted bool
 	var seconds float64
-	if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT (SELECT hits FROM rate_limit_window WHERE scope='refresh_ip:60'),(SELECT count(*) FROM refresh_token),(SELECT revoked_at IS NOT NULL FROM auth_session),(SELECT encrypted FROM idempotency_keys WHERE endpoint=$1 AND key=$2),(SELECT extract(epoch FROM expires_at-now()) FROM idempotency_keys WHERE endpoint=$1 AND key=$2)`, userv1.AuthService_RefreshTokens_FullMethodName, key).Scan(&hits, &links, &revoked, &encrypted, &seconds); err != nil || hits != 1 || links != 2 || revoked || !encrypted || seconds > 60 || seconds < 30 {
+	if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT (SELECT COALESCE(sum(hits),0)::integer FROM rate_limit_window WHERE scope='refresh_ip:60'),(SELECT count(*) FROM refresh_token),(SELECT revoked_at IS NOT NULL FROM auth_session),(SELECT encrypted FROM idempotency_keys WHERE endpoint=$1 AND key=$2),(SELECT extract(epoch FROM expires_at-now()) FROM idempotency_keys WHERE endpoint=$1 AND key=$2)`, userv1.AuthService_RefreshTokens_FullMethodName, key).Scan(&hits, &links, &revoked, &encrypted, &seconds); err != nil || hits != 1 || links != 2 || revoked || !encrypted || seconds > 60 || seconds < 30 {
 		t.Fatal(hits, links, revoked, encrypted, seconds, err)
 	}
 	if _, err := c.RefreshTokens(authContext(t.Context(), authKey()), req); apitest.Reason(err) != "TOKEN_REVOKED" {
@@ -544,7 +544,7 @@ func TestAPIAuthAPIBadSecretsHitLimitsBeforeTokensAndKeysBeforeLimits(t *testing
 		}
 	}
 	var hits int
-	if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT hits FROM rate_limit_window WHERE scope='refresh_ip:3600'`).Scan(&hits); err != nil || hits != 2 {
+	if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT COALESCE(sum(hits),0)::integer FROM rate_limit_window WHERE scope='refresh_ip:3600'`).Scan(&hits); err != nil || hits != 2 {
 		t.Fatal(hits, err)
 	}
 	if got := counterValue(t, env, "finassist_rate_limit_consumed_total", "scope", "refresh_ip"); got != 2 {
@@ -717,7 +717,7 @@ func TestAPIAuthAPIFailedOwnerStorageRollsBackEveryRegistrationEffect(t *testing
 		t.Fatal(err)
 	}
 	var users, sessions, events, closed, hits int
-	if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM app_user),(SELECT count(*) FROM auth_session),(SELECT count(*) FROM outbox_events),(SELECT count(*) FROM phone_verification WHERE closed_at IS NOT NULL),(SELECT hits FROM rate_limit_window WHERE scope='register_ip:60')`).Scan(&users, &sessions, &events, &closed, &hits); err != nil || users != 0 || sessions != 0 || events != 0 || closed != 0 || hits != 1 {
+	if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM app_user),(SELECT count(*) FROM auth_session),(SELECT count(*) FROM outbox_events),(SELECT count(*) FROM phone_verification WHERE closed_at IS NOT NULL),(SELECT COALESCE(sum(hits),0)::integer FROM rate_limit_window WHERE scope='register_ip:60')`).Scan(&users, &sessions, &events, &closed, &hits); err != nil || users != 0 || sessions != 0 || events != 0 || closed != 0 || hits != 1 {
 		t.Fatal("partial registration", users, sessions, events, closed, hits, err)
 	}
 }
@@ -814,7 +814,7 @@ func TestAPIAuthAPICachedOwnerIntegrityFailsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	var links, registerHits, refreshHits int
-	if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM refresh_token),(SELECT hits FROM rate_limit_window WHERE scope='register_ip:60'),(SELECT hits FROM rate_limit_window WHERE scope='refresh_ip:60')`).Scan(&links, &registerHits, &refreshHits); err != nil || links != 2 || registerHits != 1 || refreshHits != 1 {
+	if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM refresh_token),(SELECT COALESCE(sum(hits),0)::integer FROM rate_limit_window WHERE scope='register_ip:60'),(SELECT COALESCE(sum(hits),0)::integer FROM rate_limit_window WHERE scope='refresh_ip:60')`).Scan(&links, &registerHits, &refreshHits); err != nil || links != 2 || registerHits != 1 || refreshHits != 1 {
 		t.Fatal("corruption reran effects/limits", links, registerHits, refreshHits, err)
 	}
 }

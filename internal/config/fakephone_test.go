@@ -9,6 +9,9 @@ func TestUnitFakePhoneConfigurationIsOptInAndNeverProd(t *testing.T) {
 	for _, environment := range []string{"dev", "stage", "prod"} {
 		vars := base()
 		vars["ENV"], vars["PHONE_PROVIDER"] = environment, "fake"
+		if environment == "dev" {
+			vars["AUTH_MODE"] = "insecure-dev"
+		}
 		g, l := env(vars)
 		cfg, err := load(g, noFiles, l)
 		if environment == "prod" {

@@ -59,7 +59,7 @@ func (c OutboxConfig) Validate() error {
 			return errors.New("outbox: required deletion target missing")
 		}
 	}
-	if len(union) > 64 || c.MaxConns < int32(len(union)+3) {
+	if len(union) > 64 || int(c.MaxConns) < len(union)+3 {
 		return errors.New("outbox: insufficient pool capacity")
 	}
 	return nil

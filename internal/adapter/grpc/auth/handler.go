@@ -5,6 +5,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"math"
 	"time"
 
 	userv1 "github.com/fin-assist/contracts/gen/go/finassist/user/v1"
@@ -102,7 +103,8 @@ func (h *Handler) StartPhoneVerification(ctx context.Context, in *userv1.StartPh
 	if err != nil {
 		return nil, err
 	}
-	left := max(int32(0), int32(result.ExpiresAt.Sub(h.now())/time.Second))
+	seconds := min(max(0, int64(result.ExpiresAt.Sub(h.now())/time.Second)), math.MaxInt32)
+	left := int32(seconds) //nolint:gosec // clamped to [0, MaxInt32] on the line above
 	return &userv1.StartPhoneVerificationResponse{VerificationToken: result.Token, CallbackNumber: result.CallbackNumber, ExpiresAt: timestamppb.New(result.ExpiresAt), ExpiresIn: &left}, nil
 }
 

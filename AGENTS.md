@@ -54,9 +54,12 @@ synthetic namespace for every provider and emits a private-label-free counter/ER
 The alert rule is prepared in deploy/prometheus; deployment activates it separately.
 Balance monitoring is deferred to FIN-233 and does not block FIN-139/216.
 Real campaign acceptance still awaits external evidence.
-Do not claim production phone sign-in is ready. go-identity v0.1.0 supplies only the verifiers
-and token sources: keep the existing server ACL and reqctx chain, without a second identity
-interceptor. The signing package supplies its local JWKS provider (no self-RPC). go-tombstone
+Do not claim production phone sign-in is ready. go-identity v0.2.0 `NewAssembly` (FIN-325)
+supplies the verifiers, outgoing token and one `identity-keys` refresh job: ENV=prod is Kubernetes,
+ENV=stage file keys, verify in dev is refused; standard AUTH_* variables, renamed old names fail
+startup. Keep the existing server ACL and reqctx chain, without a second identity interceptor.
+The signing package supplies its local JWKS provider as `UserKeys` (no self-RPC); incoming user
+tokens use JWT_ISSUER/JWT_AUDIENCE. go-tombstone
 v0.1.0 reads primary and its migration source precedes the service. Assistant documents check
 the conditional user token and tombstone in their handler; personal-data documents are public
 to authenticated bank-bff. Signing key files are required even in insecure-dev. Make up/run
@@ -145,7 +148,7 @@ See docs/verification.md, including capacity/availability metrics and key retent
 | Background jobs | `github.com/fin-assist/go-worker` |
 | Configuration: every variable with its default and description | `internal/config/vars.go` (`Vars`); generated tables — `docs/config.md` |
 | Request-scoped values (request ID, caller, user, bank-bff hints) | `github.com/fin-assist/go-grpc/reqctx` |
-| Authentication limits, fixed windows and commit-aware metrics; integration rules | `internal/ratelimit/`, `internal/adapter/postgres/limits.go`, `docs/limits.md` |
+| Authentication limits, fixed windows and commit-aware metrics; integration rules | `internal/ratelimit/`, `internal/adapter/postgres/limits.go`, `docs/limits.md`; `apitest` pins the limiter clock (`app.WithLimitClock`, `Env.LimitNow`, FIN-313) so a scenario never straddles a window |
 | Logger, metrics endpoint, readiness | `internal/logx/`, `internal/ops/` |
 | Image, local run, stand | `Dockerfile`, `compose.yaml`, `Makefile`, `deploy/systemd/` |
 | CI, lint | `.github/workflows/ci.yml`, `.golangci.yml`, `.squawk.toml` |
@@ -175,7 +178,7 @@ the PR with why it is needed.
 - The image needs Docker; without it say in the PR that the image was built only by the CI job `image`.
 - Every test or lint run gets a timeout (`timeout 600 make test` or the tool's own): a hung run blocks the session.
 - A local `serve` for a smoke check: `ENV=dev AUTH_MODE=insecure-dev SERVICE_NAME=user DB_PRIMARY_DSN=… make run`;
-  `/readyz` on `HTTP_ADDR` answers when the database does.
+  `/readyz` on `HTTP_ADDR` answers when the database does and drops to 503 at SIGTERM, before `SHUTDOWN_DELAY` (FIN-289).
 
 ## Principles
 
@@ -300,7 +303,9 @@ Also:
 - The measurable gate is at least 80% of all production statements independently in unit, integration and API
   suites. The same `-coverpkg=./...` denominator includes generated production code and `.go` test helpers;
   no exclusions to reach the threshold. Name every test `TestUnit*`, `TestIntegration*` or `TestAPI*` by its
-  actual boundary. Direct handlers on fakes are unit; full-assembly jobs without public RPC are integration.
+  actual boundary, and every fuzz target `FuzzUnit*`, `FuzzIntegration*` or `FuzzAPI*` (its seed corpus runs
+  in that suite); `make test-names` rejects any other `Test`/`Fuzz` name and any `Example…`, which would run
+  outside all three suites (FIN-290). Direct handlers on fakes are unit; full-assembly jobs without public RPC are integration.
   Coverage percentage never substitutes for the use-case review.
 
 ## Checks
@@ -321,7 +326,7 @@ Owner accepts its one-decimal rounding (79.95% passes as 80.0%). The old changed
 are removed. Built-in comma-separated profile merging produces combined coverage, never a substitute for
 one failed suite. A JSON Go-test log must contain an actual passed test; missing, empty and header-only
 profiles fail before analysis. Skipped or failed Test events fail the execution guard; `make test-names`
-rejects Test names outside the three selectors. CI=true makes missing PostgreSQL fatal. CI retains the required `go` job,
+rejects Test/Fuzz names outside the three selectors (`^(Test|Fuzz)<Suite>`) and any Example. CI=true makes missing PostgreSQL fatal. CI retains the required `go` job,
 collects all independent outcomes, fails if any gate fails, and uploads logs, profiles and built-in reports.
 Forks need no PR-write permission. README documents the boundaries and outstanding baseline gaps.
 

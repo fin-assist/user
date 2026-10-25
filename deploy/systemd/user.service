@@ -24,14 +24,15 @@ Environment=JWT_SIGNING_KEY_FILE=%d/jwt-signing
 LoadCredential=phone-result:/etc/finassist/user/phone-result.key
 Environment=PHONE_RESULT_KEY_FILE=%d/phone-result
 # This AES-256 key must differ from the auth replay key; retain it for live results.
-# env must set JWT_KEY_ID, JWT_ISSUER, JWT_AUDIENCE, SERVICE_AUTH_MODE and SERVICE_TOKEN_ISSUER.
+# env must set JWT_KEY_ID, JWT_ISSUER and JWT_AUDIENCE (FIN-325: identity follows ENV,
+# the old SERVICE_AUTH_MODE/SERVICE_TOKEN_ISSUER/STAGE_*/KUBERNETES_* names refuse to start).
 # Set PEER_BANK_STATEMENT_DATA_ADDR, PEER_ANALYTICS_ADDR and PEER_ASSISTANT_ADDR for the default outbox routes.
-# With SERVICE_AUTH_MODE=stage:
+# With ENV=stage the service identity uses file keys; env sets AUTH_STAGE_ISSUER and:
 #LoadCredential=stage-signing:/etc/finassist/user/stage-signing.pem
-#Environment=STAGE_SIGNING_KEY_FILE=%d/stage-signing
-#Environment=STAGE_PUBLIC_KEYS_FILE=/etc/finassist/stage-public.jwks
-# With SERVICE_AUTH_MODE=kubernetes the projected credentials and CA are required.
-# The outgoing Kubernetes service token goes the same way:
+#Environment=AUTH_STAGE_SIGNING_KEY_FILE=%d/stage-signing
+#Environment=AUTH_STAGE_PUBLIC_KEYS_FILE=/etc/finassist/stage-public.jwks
+# With ENV=prod (Kubernetes) the projected credentials and CA are required
+# (AUTH_KUBERNETES_* in docs/config.md). The outgoing Kubernetes service token goes the same way:
 #LoadCredential=service-token:/etc/finassist/user/service-token
 #Environment=SERVICE_TOKEN_FILE=%d/service-token
 

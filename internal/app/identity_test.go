@@ -70,7 +70,7 @@ func TestIntegrationKubernetesIdentityTLS(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	cfg := config.Config{Env: config.EnvProd, Signing: signingConfig(t), Auth: config.AuthConfig{Mode: config.AuthVerify, ServiceMode: "kubernetes", ServiceIssuer: "cluster", ServiceTokenFile: serviceToken, KubernetesTokenFile: apiToken, KubernetesCAFile: ca, KubernetesJWKSURL: endpoint.URL}}
+	cfg := config.Config{Env: config.EnvProd, Signing: signingConfig(t), Service: "user", Auth: config.AuthConfig{Mode: config.AuthVerify, ServiceTokenFile: serviceToken, Kubernetes: config.KubernetesAuthConfig{Issuer: "cluster", APITokenFile: apiToken, CAFile: ca, JWKSURL: endpoint.URL}}}
 	keys, err := signing.Load(signing.Options{PrivateKeyFile: cfg.Signing.PrivateKeyFile, KeyID: cfg.Signing.KeyID, Issuer: cfg.Signing.Issuer, Audience: cfg.Signing.Audience, Clock: time.Now})
 	if err != nil {
 		t.Fatal(err)
@@ -96,18 +96,27 @@ func TestIntegrationKubernetesIdentityTLS(t *testing.T) {
 	if _, err := runtime.services.VerifyService(t.Context(), "dev:bank-bff"); err == nil {
 		t.Fatal("dev token accepted in prod")
 	}
+	// User access tokens are verified against this service's own keys (local provider).
+	access, err := keys.Sign(t.Context(), "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sub, err := runtime.users.VerifyUser(t.Context(), access); err != nil || sub != "user-1" {
+		t.Fatalf("user token: %q %v", sub, err)
+	}
 	for _, mutate := range []func(*config.Config){
-		func(c *config.Config) { c.Auth.KubernetesCAFile = "/missing" },
-		func(c *config.Config) { c.Auth.KubernetesCAFile = apiToken },
-		func(c *config.Config) { c.Auth.KubernetesJWKSURL = "http://untrusted.test" },
+		func(c *config.Config) { c.Auth.Kubernetes.CAFile = "/missing" },
+		func(c *config.Config) { c.Auth.Kubernetes.CAFile = apiToken },
+		func(c *config.Config) { c.Auth.Kubernetes.JWKSURL = "http://untrusted.test" },
 		func(c *config.Config) { c.Auth.ServiceTokenFile = "" },
-		func(c *config.Config) { c.Auth.KubernetesTokenFile = "" },
-		func(c *config.Config) { c.Auth.ServiceIssuer = "" },
-		func(c *config.Config) { c.Auth.ServiceMode = "unsupported" },
+		func(c *config.Config) { c.Auth.ServiceTokenFile = apiToken },
+		func(c *config.Config) { c.Auth.Kubernetes.Namespace = "Not A Namespace" },
 		func(c *config.Config) { c.Auth.Mode = config.AuthInsecureDev },
 		func(c *config.Config) { c.Auth.Mode = config.AuthMode("unknown") },
 		func(c *config.Config) { c.Signing.Issuer = "" },
-		func(c *config.Config) { c.Auth.ServiceMode = "stage"; c.Auth.StagePublicKeysFile = "/missing" },
+		func(c *config.Config) { c.Env = config.EnvDev },
+		func(c *config.Config) { c.Service = "" },
+		func(c *config.Config) { c.Auth.Stage.PublicKeysFile = "/missing" },
 	} {
 		c := cfg
 		mutate(&c)
@@ -142,7 +151,7 @@ func TestIntegrationLibraryMigrationSources(t *testing.T) {
 }
 
 func TestUnitStageVerifierCannotStartInProd(t *testing.T) {
-	cfg := config.Config{Env: config.EnvProd, Service: "user", Signing: signingConfig(t), Auth: config.AuthConfig{Mode: config.AuthVerify, ServiceMode: "stage", ServiceIssuer: "stage"}}
+	cfg := config.Config{Env: config.EnvProd, Service: "user", Signing: signingConfig(t), Auth: config.AuthConfig{Mode: config.AuthVerify, Stage: config.StageAuthConfig{Issuer: "stage"}}}
 	keys, err := signing.Load(signing.Options{PrivateKeyFile: cfg.Signing.PrivateKeyFile, KeyID: cfg.Signing.KeyID, Issuer: cfg.Signing.Issuer, Audience: cfg.Signing.Audience, Clock: time.Now})
 	if err != nil {
 		t.Fatal(err)
@@ -155,7 +164,7 @@ func TestUnitStageVerifierCannotStartInProd(t *testing.T) {
 	if err := os.WriteFile(path, b, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg.Auth.StagePublicKeysFile = path
+	cfg.Auth.Stage.PublicKeysFile, cfg.Auth.Stage.SigningKeyFile = path, cfg.Signing.PrivateKeyFile
 	if _, err := buildIdentity(cfg, keys, prometheus.NewRegistry()); err == nil {
 		t.Fatal("stage verifier enabled in prod")
 	}

@@ -33,19 +33,31 @@ Health (`grpc.health.v1`) и reflection (только `ENV=dev`) открыты 
 
 ## Идентичность
 
-Верификаторы go-identity v0.1.0 подключены к прежним интерфейсам ServiceVerifier и
-UserVerifier. Таблица доступа и reqctx остаются у сервера; вторая цепочка идентичности
-не устанавливается. Ошибка access JWT, включая истечение, — INVALID_TOKEN.
+Идентичность собирает `identity.NewAssembly` из go-identity v0.2.0 (FIN-325): её
+верификаторы и источник исходящего токена подключены к прежним интерфейсам ServiceVerifier,
+UserVerifier и TokenSource. Таблица доступа и reqctx остаются у сервера; вторая цепочка
+идентичности не устанавливается. Ошибка access JWT, включая истечение, — INVALID_TOKEN.
 
-- AUTH_MODE=insecure-dev разрешён только при ENV=dev.
-- AUTH_MODE=verify, SERVICE_AUTH_MODE=kubernetes: projected finassist-internal токен
-  для исходящих вызовов; JWKS API-сервера по HTTPS с cluster CA и отдельным штатным
-  API-server-audience токеном. Namespace finassist, audience finassist-internal,
-  issuer из конфигурации. Ошибка ключей не включает dev-режим.
-- SERVICE_AUTH_MODE=stage: отдельные Ed25519 ключи сервисов, общий issuer и доверенный
-  публичный JWKS (kid — имя сервиса). Библиотека отвергает этот режим в prod.
-- Пользовательские ключи берутся из локального public JWKS signing.Keys; bootstrap
-  не вызывает собственный GetSigningKeys. Задания кэша запускаются общим worker lifecycle.
+- AUTH_MODE=insecure-dev разрешён только при ENV=dev; AUTH_MODE=verify при ENV=dev не
+  стартует (библиотека строит проверенную идентичность только для stage и prod).
+- ENV=prod: ServiceAccount Kubernetes — projected finassist-internal токен
+  (`SERVICE_TOKEN_FILE`) для исходящих вызовов; JWKS API-сервера по HTTPS с CA из
+  `AUTH_KUBERNETES_CA_FILE` и отдельным API-server-audience токеном
+  (`AUTH_KUBERNETES_API_TOKEN_FILE`, другой файл). Namespace `AUTH_KUBERNETES_NAMESPACE`,
+  audience finassist-internal, issuer `AUTH_KUBERNETES_ISSUER`. `AUTH_STAGE_*` в prod
+  запрещены. Ошибка ключей не включает dev-режим.
+- ENV=stage: короткие Ed25519 JWT сервисов — свой ключ `AUTH_STAGE_SIGNING_KEY_FILE`,
+  общий issuer `AUTH_STAGE_ISSUER` и доверенный публичный JWKS
+  `AUTH_STAGE_PUBLIC_KEYS_FILE` (kid — имя сервиса); разбирает его библиотека.
+- Прежние `SERVICE_AUTH_MODE`, `SERVICE_TOKEN_ISSUER`, `STAGE_*`, `KUBERNETES_*` больше
+  не читаются: заданное непустое значение — ошибка старта с именем замены
+  ([config.md](config.md), «Переход на AUTH_*»).
+- Issuer и audience входящих access-токенов — те же `JWT_ISSUER`/`JWT_AUDIENCE`, которыми
+  user подписывает (у потребителей — `AUTH_USER_ISSUER`/`AUTH_USER_AUDIENCE`).
+- Пользовательские ключи берутся из локального public JWKS signing.Keys (`UserKeys`
+  сборки); bootstrap не вызывает собственный GetSigningKeys. Обновление обоих кэшей
+  ключей — одно задание `identity-keys` (`Assembly.Run`) в общем worker lifecycle;
+  `Assembly.Close` — при остановке.
 - Tombstone — go-tombstone v0.1.0 на primary; NoTombstones больше не используется в сборке.
 
 GetConsentDocument проходит сервисный ACL как NoUser. Для типа ASSISTANT обработчик
@@ -59,7 +71,7 @@ GetConsentDocument проходит сервисный ACL как NoUser. Для
 - Keepalive: `MaxConnectionAge = 5 мин`, `MaxConnectionAgeGrace = 4 мин` (больше 3-минутного потока ответа), клиентский ping не чаще 20 с.
 - Размер сообщения — `GRPC_MAX_RECV_MSG_SIZE` (4 МиБ, для `SearchOperations` — 16 МиБ).
 - Готовность: раз в 5 с ping primary; результат — в gRPC health (`""`) и `/readyz`. До первого успешного ping — `NOT_SERVING`.
-- Остановка по `SIGTERM`: `NOT_SERVING` → пауза `SHUTDOWN_DELAY` → `GracefulStop` не дольше `SHUTDOWN_TIMEOUT` → фоновые задания → пулы БД.
+- Остановка по `SIGTERM`: HTTP `/readyz` (`ops.Readiness.Drain`, необратимо до конца процесса) и gRPC health одновременно перестают сообщать готовность → пауза `SHUTDOWN_DELAY` (вызовы ещё принимаются, `/healthz` отвечает 200) → `GracefulStop` не дольше `SHUTDOWN_TIMEOUT` → фоновые задания → пулы БД (FIN-289).
 
 ## Клиенты других сервисов
 
@@ -84,7 +96,9 @@ GetConsentDocument проходит сервисный ACL как NoUser. Для
 При AUTH_MODE=verify библиотека добавляет finassist_identity_rejected_total{kind,reason}:
 kind user/service/access и фиксированные причины invalid/expired/signature/audience/issuer/
 key_unavailable/forbidden/user_id. ACL выполняет сервер, поэтому его отказы остаются
-в finassist_grpc_denied_total. Идентификаторы пользователей, ключи и токены в метки не идут.
+в finassist_grpc_denied_total. С go-identity v0.2.0 добавлен и
+finassist_identity_jwks_skipped_keys{kind,reason} — число пропущенных неподдерживаемых
+ключей в текущем снимке (kind user/service). Идентификаторы пользователей, ключи и токены в метки не идут.
 
 
 - **Логи** — `slog`, JSON (text в dev), в каждой строке `service`, `request_id`, `caller`, `user_id` из контекста (методы `*Context`). Строка на вызов: `method`, `code`, `reason`, `duration_ms`, безопасное событие без текста исходной ошибки обработчика. На `debug` — metadata и запрос: `authorization`, `x-service-authorization`, `idempotency-key`, ключи и поля с `token` в имени маскируются, поля `bytes` (файл выписки, ключ) очищаются независимо от имени.
@@ -98,7 +112,7 @@ key_unavailable/forbidden/user_id. ACL выполняет сервер, поэт
 сразу; списания и заполнение — только после коммита через Receipt.Committed. Смысл
 показателей, границы применения и выражения алертов — [limits.md](limits.md).
 
-- **Проверки**: `/healthz` — процесс жив, `/readyz` — БД отвечает; то же в gRPC health. Работает и под systemd без проб Kubernetes.
+- **Проверки**: `/healthz` — процесс жив, `/readyz` — БД отвечает и процесс не останавливается; то же в gRPC health. Работает и под systemd без проб Kubernetes.
 
 ## Фоновые задания
 

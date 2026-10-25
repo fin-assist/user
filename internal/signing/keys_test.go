@@ -79,9 +79,9 @@ func TestUnitRotationAndPublicKeyValidation(t *testing.T) {
 	if b, err := current.JWKS(t.Context()); err != nil || b[0] != '{' {
 		t.Fatal("caller mutated keys")
 	}
-	stage, err := StagePublicKeys(path)
-	if err != nil || len(stage) != 1 || len(stage["old"]) != 32 {
-		t.Fatalf("stage map: %v", err)
+	published, err := loadPublic(path)
+	if err != nil || len(published.Keys) != 1 || published.Keys[0].ID != "old" {
+		t.Fatalf("published overlap keys: %v", err)
 	}
 	o.KeyID = "old"
 	if _, err := Load(o); err == nil {
@@ -141,11 +141,11 @@ func TestUnitMalformedKeyFiles(t *testing.T) {
 		if err := os.WriteFile(pub, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := StagePublicKeys(pub); err == nil {
+		if _, err := loadPublic(pub); err == nil {
 			t.Fatal("invalid public key accepted")
 		}
 	}
-	if _, err := StagePublicKeys("/missing"); err == nil {
+	if _, err := loadPublic("/missing"); err == nil {
 		t.Fatal("missing public keys accepted")
 	}
 }

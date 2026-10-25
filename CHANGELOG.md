@@ -2,7 +2,18 @@
 
 ## [Unreleased]
 
+### Несовместимо
+
+- FIN-325: идентичность собирает `identity.NewAssembly` из go-identity v0.2.0; режим сервисной идентичности выбирает `ENV` (prod — ServiceAccount Kubernetes, stage — JWT из файлов ключей), `AUTH_MODE=verify` при `ENV=dev` не запускается. Переменные переименованы в стандартный набор `AUTH_*`: `SERVICE_TOKEN_ISSUER` → `AUTH_KUBERNETES_ISSUER`/`AUTH_STAGE_ISSUER`, `KUBERNETES_JWKS_URL`/`KUBERNETES_CA_FILE`/`KUBERNETES_TOKEN_FILE` → `AUTH_KUBERNETES_JWKS_URL`/`AUTH_KUBERNETES_CA_FILE`/`AUTH_KUBERNETES_API_TOKEN_FILE`, `STAGE_SIGNING_KEY_FILE`/`STAGE_PUBLIC_KEYS_FILE` → `AUTH_STAGE_*`; добавлена `AUTH_KUBERNETES_NAMESPACE`, `SERVICE_AUTH_MODE` удалена. Старое имя с непустым значением — ошибка запуска с именем замены; окружение стенда меняется вместе с выкладкой (`deploy/systemd/user.service`, таблица перехода — `docs/config.md`). Issuer/audience входящих access-токенов — по-прежнему `JWT_ISSUER`/`JWT_AUDIENCE`. Новая метрика библиотеки `finassist_identity_jwks_skipped_keys`.
+
+### Исправлено
+
+- FIN-289: во время `SHUTDOWN_DELAY` HTTP `/readyz` отвечает 503 вместе с gRPC health `NOT_SERVING`; раньше `/readyz` до конца паузы отвечал 200. `DB_MAX_CONNS` вне диапазона int32 — ошибка конфигурации, а не молча усечённое значение; глобальное исключение gosec G115 снято. Перенос go-service-template#25; проверка `insecure-dev` вне `ENV=dev` в сборке уже была.
+- FIN-313: API-тесты лимитов больше не зависят от границы фиксированного окна: `apitest` закрепляет часы лимитера (`app.WithLimitClock`), проверки счётчиков суммируют окна. Поведение сервиса не меняется.
+
 ### Изменено
+
+- FIN-290: `make test-names` проверяет и fuzz-цели (`FuzzUnit…`/`FuzzIntegration…`/`FuzzAPI…`, seed-корпус — в своём наборе) и отклоняет `Example…`, которые выполнялись бы вне трёх наборов покрытия; перенос go-service-template#26. Неклассифицированных Fuzz/Example в репозитории не было.
 
 - FIN-306: постбэк Zvonok собирает цепочку X-Forwarded-For из всех строк заголовка; подделанная первая строка больше не выдаёт клиента за IP провайдера, если доверенный прокси дописал свой адрес отдельной строкой.
 

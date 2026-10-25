@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fin-assist/user/internal/app"
 	"github.com/fin-assist/user/internal/app/apitest"
 	"github.com/fin-assist/user/internal/config"
 	"github.com/fin-assist/user/internal/ops"
@@ -102,5 +103,30 @@ func TestIntegrationConfiguredLimitsAndCommittedMetricsAreExposed(t *testing.T) 
 	}
 	if !found {
 		t.Fatal("cleanup worker not wired")
+	}
+}
+
+// FIN-313: the assembly honours the pinned limiter clock, so API scenarios never
+// split their attempts between two fixed windows at a minute boundary.
+func TestIntegrationPinnedLimitClockSelectsOneWindowAcrossTheWallClockBoundary(t *testing.T) {
+	pinned := time.Date(2000, 1, 1, 0, 0, 59, 900_000_000, time.UTC)
+	env := apitest.StartWithOptions(t, []app.Option{app.WithLimitClock(func() time.Time { return pinned })})
+	for i := 0; i < 3; i++ {
+		err := env.App.DB.Run(t.Context(), func(ctx context.Context) error {
+			_, receipt, err := env.App.Limits.Check(ctx, ratelimit.Watch, "", "192.0.2.46")
+			receipt.Committed()
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var rows, hits int
+	var start time.Time
+	if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT count(*),COALESCE(sum(hits),0)::integer,min(window_start) FROM rate_limit_window WHERE scope='watch_ip:60'`).Scan(&rows, &hits, &start); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 1 || hits != 3 || !start.Equal(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("windows %d, hits %d, start %s", rows, hits, start)
 	}
 }

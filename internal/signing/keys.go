@@ -127,20 +127,6 @@ func loadPublic(path string) (keySet, error) {
 	return set, nil
 }
 
-// StagePublicKeys maps trusted JWKS key IDs to Ed25519 public keys.
-func StagePublicKeys(path string) (map[string]ed25519.PublicKey, error) {
-	set, err := loadPublic(path)
-	if err != nil {
-		return nil, err
-	}
-	keys := make(map[string]ed25519.PublicKey, len(set.Keys))
-	for _, key := range set.Keys {
-		b, _ := base64.RawURLEncoding.DecodeString(key.X)
-		keys[key.ID] = ed25519.PublicKey(b)
-	}
-	return keys, nil
-}
-
 func readFile(path string, maxBytes int64, secret bool) ([]byte, error) {
 	f, err := os.Open(path) //nolint:gosec // Operator-supplied trusted key path, never request input.
 	if err != nil {

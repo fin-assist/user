@@ -32,7 +32,7 @@ func TestAPIDeleteAccountSignedJWTStillVerifiesRetries(t *testing.T) {
 	}
 	env := apitest.Start(t, func(c *config.Config) {
 		c.Env = config.EnvStage
-		c.Auth = config.AuthConfig{Mode: config.AuthVerify, ServiceMode: "stage", ServiceIssuer: "stage-services", StageKeyFile: userKey, StagePublicKeysFile: path}
+		c.Auth = config.AuthConfig{Mode: config.AuthVerify, Stage: config.StageAuthConfig{Issuer: "stage-services", SigningKeyFile: userKey, PublicKeysFile: path}}
 	})
 	seedDocuments(t, env)
 	seedRegistration(t, env, "signed-register", "+79001234567", time.Now().UTC())
@@ -99,7 +99,7 @@ func TestAPILogoutSignedJWTRejectsForgedAndExpiredAccess(t *testing.T) {
 	}
 	env := apitest.Start(t, func(c *config.Config) {
 		c.Env = config.EnvStage
-		c.Auth = config.AuthConfig{Mode: config.AuthVerify, ServiceMode: "stage", ServiceIssuer: "stage-services", StageKeyFile: userKey, StagePublicKeysFile: path}
+		c.Auth = config.AuthConfig{Mode: config.AuthVerify, Stage: config.StageAuthConfig{Issuer: "stage-services", SigningKeyFile: userKey, PublicKeysFile: path}}
 	})
 	seedDocuments(t, env)
 	seedRegistration(t, env, "signed-logout", "+79001234567", time.Now().UTC())
