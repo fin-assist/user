@@ -48,17 +48,23 @@ func serveAndStop(t *testing.T, provider string) {
 	if err := migrate.Up(t.Context(), migrate.DefaultConfig(dsn), app.MigrationSources()); err != nil {
 		t.Fatal(err)
 	}
-	for k, v := range map[string]string{"SERVICE_NAME": "user", "ENV": "dev", "AUTH_MODE": "insecure-dev", "LOG_LEVEL": "error", "DB_PRIMARY_DSN": dsn, "GRPC_ADDR": "127.0.0.1:0", "HTTP_ADDR": "127.0.0.1:0", "SHUTDOWN_DELAY": "0s", "SHUTDOWN_TIMEOUT": "5s", "PHONE_PROVIDER": provider} {
-		t.Setenv(k, v)
-	}
-	addr := ""
-	if provider == "zvonok" {
+	free := func() string {
+		t.Helper()
 		lis, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
 			t.Fatal(err)
 		}
-		addr = lis.Addr().String()
+		a := lis.Addr().String()
 		_ = lis.Close()
+		return a
+	}
+	httpAddr := free()
+	for k, v := range map[string]string{"SERVICE_NAME": "user", "ENV": "dev", "AUTH_MODE": "insecure-dev", "LOG_LEVEL": "error", "DB_PRIMARY_DSN": dsn, "GRPC_ADDR": "127.0.0.1:0", "HTTP_ADDR": httpAddr, "SHUTDOWN_DELAY": "0s", "SHUTDOWN_TIMEOUT": "5s", "PHONE_PROVIDER": provider} {
+		t.Setenv(k, v)
+	}
+	addr := ""
+	if provider == "zvonok" {
+		addr = free()
 		t.Setenv("ZVONOK_CALLBACK_ADDR", addr)
 		t.Setenv("ZVONOK_PUBLIC_KEY", "fake-test-key")
 		t.Setenv("ZVONOK_CAMPAIGN_ID", "123")
@@ -67,36 +73,47 @@ func serveAndStop(t *testing.T, provider string) {
 	defer cancel()
 	errc := make(chan error, 1)
 	go func() { errc <- runServe(ctx) }()
-	if provider == "zvonok" {
-		deadline := time.Now().Add(5 * time.Second)
-		ready := false
-		for time.Now().Before(deadline) {
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr+"/callbacks/zvonok?ct_call_id=123", nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			r, err := http.DefaultClient.Do(req)
-			if err == nil {
-				_ = r.Body.Close()
-				if r.StatusCode != 403 {
-					t.Fatal(r.StatusCode)
-				}
-				ready = true
-				break
-			}
+	// Stop only once the service is actually up: wait for a condition with a deadline,
+	// never a fixed delay that a loaded machine may outlast before the first ping.
+	waitCtx, stopWait := context.WithTimeout(t.Context(), 30*time.Second)
+	defer stopWait()
+	status := func(url string) int {
+		req, err := http.NewRequestWithContext(waitCtx, http.MethodGet, url, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return 0
+		}
+		_ = r.Body.Close()
+		return r.StatusCode
+	}
+	await := func(what string, ready func() bool) {
+		t.Helper()
+		tick := time.NewTicker(10 * time.Millisecond)
+		defer tick.Stop()
+		for !ready() {
 			select {
 			case err := <-errc:
 				t.Fatal("serve stopped", err)
-			case <-time.After(10 * time.Millisecond):
+			case <-waitCtx.Done():
+				t.Fatal(what + ": timed out")
+			case <-tick.C:
 			}
 		}
-		if !ready {
-			t.Fatal("callback listener did not start")
-		}
-		cancel()
-	} else {
-		time.AfterFunc(500*time.Millisecond, cancel)
 	}
+	await("readiness", func() bool { return status("http://"+httpAddr+"/readyz") == http.StatusOK })
+	if provider == "zvonok" {
+		await("callback listener", func() bool {
+			code := status("http://" + addr + "/callbacks/zvonok?ct_call_id=123")
+			if code != 0 && code != http.StatusForbidden {
+				t.Fatal(code)
+			}
+			return code == http.StatusForbidden
+		})
+	}
+	cancel()
 	select {
 	case err := <-errc:
 		if err != nil {
