@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"net/http"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,7 +22,7 @@ func TestAPIDeploymentExposesGuardedCallbackListenerAndStopsIt(t *testing.T) {
 	setSigningKey(t)
 	setPhoneKey(t)
 	for key, value := range map[string]string{
-		"SERVICE_NAME": "user", "ENV": "dev", "AUTH_MODE": "insecure-dev", "LOG_LEVEL": "error",
+		"SERVICE_NAME": "user", "ENV": "dev", "AUTH_MODE": "insecure-dev", "LOG_LEVEL": "info", "LOG_FORMAT": "json",
 		"DB_PRIMARY_DSN": testdb.DSN(t), "DB_PRIMARY_DSN_FILE": "", "GRPC_ADDR": "127.0.0.1:0", "HTTP_ADDR": "127.0.0.1:0",
 		"SHUTDOWN_DELAY": "0s", "SHUTDOWN_TIMEOUT": "3s", "PHONE_PROVIDER": "zvonok", "ZVONOK_PUBLIC_KEY": "test-private-key", "ZVONOK_CAMPAIGN_ID": "123", "ZVONOK_CALLBACK_ADDR": "127.0.0.1:0", "ZVONOK_TRUSTED_PROXY_CIDRS": "",
 		"PEER_BANK_STATEMENT_DATA_ADDR": "passthrough:///127.0.0.1:1", "PEER_ANALYTICS_ADDR": "passthrough:///127.0.0.1:1", "PEER_ASSISTANT_ADDR": "passthrough:///127.0.0.1:1",
@@ -28,6 +32,13 @@ func TestAPIDeploymentExposesGuardedCallbackListenerAndStopsIt(t *testing.T) {
 	if err := run(t.Context(), []string{"migrate", "up"}); err != nil {
 		t.Fatal(err)
 	}
+	logs, err := os.CreateTemp(t.TempDir(), "serve-callback-*.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousStderr := os.Stderr
+	os.Stderr = logs
+	t.Cleanup(func() { os.Stderr = previousStderr; _ = logs.Close() })
 	ctx, cancel := context.WithCancel(t.Context())
 	bound, done := startServe(t, ctx)
 	grpcAddr, callbackAddr := bound.GRPC.String(), bound.Callback.String()
@@ -81,8 +92,42 @@ func TestAPIDeploymentExposesGuardedCallbackListenerAndStopsIt(t *testing.T) {
 		}
 	}
 	stop()
+	assertServingLog(t, logs.Name(), callbackAddr, "test-private-key")
 	if response, err := client.Get("http://" + callbackAddr + "/callbacks/zvonok?ct_call_id=41"); err == nil {
 		_ = response.Body.Close()
 		t.Fatal("callback ingress remained available after deployment stopped")
+	}
+}
+
+// assertServingLog checks that the serving record names the bound postback address, or
+// an empty one without Zvonok (FIN-349), and that no record of the run carries secret.
+func assertServingLog(t *testing.T, path, callbackAddr, secret string) {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	found := false
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if strings.Contains(string(line), secret) {
+			t.Fatal("log leaked the provider key")
+		}
+		var record map[string]any
+		if json.Unmarshal(line, &record) != nil || record["msg"] != "serving" {
+			continue
+		}
+		if got, ok := record["callback"].(string); !ok || got != callbackAddr {
+			t.Fatalf("serving record callback=%v, want %s", record["callback"], callbackAddr)
+		}
+		found = true
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatal("no serving record")
 	}
 }

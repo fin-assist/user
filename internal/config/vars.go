@@ -27,7 +27,7 @@ var Vars = []Var{
 	{Name: "ZVONOK_TRUSTED_PROXY_CIDRS", Command: "serve", Doc: "CIDR доверенных ingress-прокси через запятую; только от них читается X-Forwarded-For, по умолчанию только RemoteAddr"},
 	{Name: "ZVONOK_POLL_INTERVAL", Command: "serve", Default: "30s", Doc: "минимальный интервал запасной проверки одной pending-заявки в Watch (1s–1m); общий API-бюджет 20 запросов/с на ключ в PostgreSQL"},
 	{Name: "SERVICE_NAME", Command: "serve", Required: true,
-		Doc: "имя сервиса: логи, `application_name`, токен в dev"},
+		Doc: "имя сервиса: логи, `application_name`, токен в dev; при `ENV=stage` — kid/sub ключа подписи стенда, совпадает с kid в общем JWKS (unit стенда задаёт `user`)"},
 	{Name: "ENV", Command: "serve", Default: string(EnvProd),
 		Doc: "`dev`, `stage` или `prod`. Reflection включён только при `dev`"},
 	{Name: "AUTH_MODE", Command: "serve", Default: string(AuthVerify),
