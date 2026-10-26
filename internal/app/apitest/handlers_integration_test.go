@@ -118,6 +118,11 @@ func TestIntegrationHandlersCommitCachedSessionsAndSettingsAtomically(t *testing
 		t.Fatal(stream.outcomes)
 	}
 	seedRegistration(t, env, "handler-registration", "+79001234567", time.Now().Add(-time.Minute))
+	seedRegistration(t, env, "handler-invalid-zone", "+79001234568", time.Now().UTC())
+	invalidReq := registrationRequest("handler-invalid-zone")
+	invalidReq.Timezone = stringPtr("Local")
+	invalidContext := incoming("integration-register-invalid-zone")
+	assertCachedRegistrationRefusal(t, env, keysByLabel["integration-register-invalid-zone"], func() error { _, err := a.Register(invalidContext, invalidReq); return err })
 	in := &userv1.RegisterRequest{RegistrationToken: "handler-registration", PdConsentAccepted: true, PdConsentVersion: "v1"}
 	registered, err := a.Register(incoming("integration-register"), in)
 	if err != nil {
@@ -186,6 +191,12 @@ func TestIntegrationHandlersCommitCachedSessionsAndSettingsAtomically(t *testing
 	if _, err = a.Register(incoming("integration-register"), in); apitest.Reason(err) != "INVALID_TOKEN" {
 		t.Fatal("deleted cached owner replayed", err)
 	}
+	assertRequestPermission(t, err, false)
+	_, err = p.UpdateProfile(user, &userv1.UpdateProfileRequest{Theme: userv1.Theme_THEME_DARK.Enum()})
+	if apitest.Reason(err) != "TOKEN_REVOKED" {
+		t.Fatal(err)
+	}
+	assertRequestPermission(t, err, false)
 	if _, err = p.GetProfile(user, &userv1.GetProfileRequest{}); apitest.Reason(err) != "NOT_FOUND" {
 		t.Fatal(err)
 	}

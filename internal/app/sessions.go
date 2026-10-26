@@ -13,6 +13,7 @@ import (
 	"github.com/fin-assist/go-worker"
 
 	authgrpc "github.com/fin-assist/user/internal/adapter/grpc/auth"
+	idempotencyadapter "github.com/fin-assist/user/internal/adapter/idempotency"
 	eventsadapter "github.com/fin-assist/user/internal/adapter/outbox"
 	"github.com/fin-assist/user/internal/adapter/postgres"
 	"github.com/fin-assist/user/internal/auth"
@@ -62,7 +63,7 @@ func wireSessions(ctx context.Context, a *App, reg prometheus.Registerer) ([]wor
 	closeAll := func() { closePhone(); pool.Close() }
 	repo := postgres.NewAuth(pool)
 	sessions := auth.New(pool, repo, guard, a.Signing, events, time.Now, token.New, a.Cfg.Sessions.RefreshTTL)
-	starts, err := verification.NewStarter(pool, postgres.NewVerificationStarts(pool), engine, a.Limits.WithStore(postgres.NewLimits(pool)), repo, guard, a.phoneProvider, a.phoneSelector, time.Now, token.New, a.Log, reg)
+	starts, err := verification.NewStarter(pool, postgres.NewVerificationStarts(pool), idempotencyadapter.StartEngine{StartEngine: engine}, a.Limits.WithStore(postgres.NewLimits(pool)), repo, guard, a.phoneProvider, a.phoneSelector, time.Now, token.New, a.Log, reg)
 	if err != nil {
 		closeAll()
 		return nil, nil, err

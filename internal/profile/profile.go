@@ -144,7 +144,7 @@ func (s *Service) Grant(ctx context.Context, id, version string) (out Record, er
 			return err
 		}
 		if version != p.Consent.CurrentVersion {
-			return finerr.ConsentOutdated()
+			return domain.WithRequestRetry(finerr.ConsentOutdated(), false)
 		}
 		if p.Consent.Granted {
 			out = p
@@ -196,7 +196,7 @@ func (s *Service) Status(ctx context.Context, id string) (out Consent, err error
 			return err
 		}
 		if !alive {
-			return finerr.TokenRevoked()
+			return domain.WithRequestRetry(finerr.TokenRevoked(), false)
 		}
 		p, err := s.current(ctx, id)
 		if err != nil {
@@ -214,7 +214,7 @@ func (s *Service) writable(ctx context.Context, id string) (Record, error) {
 		return Record{}, err
 	}
 	if !alive {
-		return Record{}, finerr.TokenRevoked()
+		return Record{}, domain.WithRequestRetry(finerr.TokenRevoked(), false)
 	}
 	if err := s.repo.Lock(ctx, id); err != nil {
 		return Record{}, err
@@ -254,16 +254,16 @@ func validID(s string) bool {
 	return err == nil
 }
 func invalid(field string) error {
-	return finerr.ValidationError(&errdetails.BadRequest_FieldViolation{Field: field, Reason: "INVALID_FORMAT", Description: "Invalid value"})
+	return domain.WithRequestRetry(finerr.ValidationError(&errdetails.BadRequest_FieldViolation{Field: field, Reason: "INVALID_FORMAT", Description: "Invalid value"}), false)
 }
 
 // GrantError selects contract codes for grant refusals after statement or COMMIT.
 func GrantError(err error) error {
 	if errors.Is(err, ErrConsentUserMissing) {
-		return finerr.NotFound()
+		return domain.WithRequestRetry(finerr.NotFound(), false)
 	}
 	if errors.Is(err, ErrConsentOutdated) {
-		return finerr.ConsentOutdated()
+		return domain.WithRequestRetry(finerr.ConsentOutdated(), false)
 	}
 	return err
 }

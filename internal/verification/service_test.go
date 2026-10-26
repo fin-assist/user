@@ -18,6 +18,7 @@ var errDependency = errors.New("dependency failed")
 
 type testTX struct {
 	err                error
+	commitErr          error
 	active             bool
 	commits, rollbacks int
 }
@@ -31,6 +32,9 @@ func (x *testTX) Run(ctx context.Context, fn func(context.Context) error) error 
 	err := fn(ctx)
 	if err != nil {
 		x.rollbacks++
+	} else if x.commitErr != nil {
+		x.rollbacks++
+		return x.commitErr
 	} else {
 		x.commits++
 	}

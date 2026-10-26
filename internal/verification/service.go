@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/fin-assist/user/internal/domain"
+
 	"github.com/fin-assist/contracts/gen/go/finerr"
 
 	"github.com/fin-assist/user/internal/auth"
@@ -253,7 +255,7 @@ func (s *Service) snapshot(ctx context.Context, hash token.Hash, allowExpired bo
 					return err
 				}
 				if !alive {
-					return finerr.InvalidToken()
+					return domain.WithRequestRetry(finerr.InvalidToken(), false)
 				}
 			}
 			r, err = s.repo.Lock(ctx, before.ID, false)
@@ -261,7 +263,7 @@ func (s *Service) snapshot(ctx context.Context, hash token.Hash, allowExpired bo
 				return invalidMissing(err)
 			}
 			if subtle.ConstantTimeCompare(r.Hash[:], hash[:]) != 1 || r.Closed {
-				return finerr.InvalidToken()
+				return domain.WithRequestRetry(finerr.InvalidToken(), false)
 			}
 			if r.UserID != before.UserID {
 				return errChanged
@@ -270,7 +272,7 @@ func (s *Service) snapshot(ctx context.Context, hash token.Hash, allowExpired bo
 			if r.VerifiedAt == nil {
 				if r.Released || !now.Before(r.ExpiresAt) {
 					if !allowExpired {
-						return finerr.InvalidToken()
+						return domain.WithRequestRetry(finerr.InvalidToken(), false)
 					}
 					out = Outcome{State: Expired}
 				} else {
@@ -279,7 +281,7 @@ func (s *Service) snapshot(ctx context.Context, hash token.Hash, allowExpired bo
 				return nil
 			}
 			if !now.Before(r.VerifiedAt.Add(ResultTTL)) || len(r.Ciphertext) == 0 || r.KeyID == "" {
-				return finerr.InvalidToken()
+				return domain.WithRequestRetry(finerr.InvalidToken(), false)
 			}
 			out, err = s.codec.Open(r)
 			if err != nil {
@@ -315,7 +317,7 @@ func validateResult(r Request, o Outcome) error {
 }
 func invalidMissing(err error) error {
 	if errors.Is(err, ErrMissing) {
-		return finerr.InvalidToken()
+		return domain.WithRequestRetry(finerr.InvalidToken(), false)
 	}
 	return err
 }
