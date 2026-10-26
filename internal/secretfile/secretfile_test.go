@@ -20,31 +20,35 @@ func write(t *testing.T, path string, perm fs.FileMode) {
 }
 
 func TestUnitOpenChecksModeByLocation(t *testing.T) {
-	credentials, outside := t.TempDir(), t.TempDir()
 	for _, tc := range []struct {
 		name   string
-		dir    string // CREDENTIALS_DIRECTORY; "-" leaves it unset
+		dir    string // "credentials" sets CREDENTIALS_DIRECTORY, "-" leaves it unset, else as given
 		inside bool
 		perm   fs.FileMode
 		want   error
 	}{
-		{"credential 0400", credentials, true, 0o400, nil},
-		{"credential 0440 (systemd ACL mask)", credentials, true, 0o440, nil},
-		{"credential group write", credentials, true, 0o460, ErrPermissions},
-		{"credential other read", credentials, true, 0o444, ErrPermissions},
-		{"credential owner write", credentials, true, 0o640, ErrPermissions},
-		{"credential owner read-write", credentials, true, 0o600, ErrPermissions},
-		{"0440 outside the credentials directory", credentials, false, 0o440, ErrPermissions},
-		{"0600 outside the credentials directory", credentials, false, 0o600, nil},
+		{"credential 0400", "credentials", true, 0o400, nil},
+		{"credential 0440 (systemd ACL mask)", "credentials", true, 0o440, nil},
+		{"credential group write", "credentials", true, 0o460, ErrPermissions},
+		{"credential other read", "credentials", true, 0o444, ErrPermissions},
+		{"credential owner write", "credentials", true, 0o640, ErrPermissions},
+		{"credential owner read-write", "credentials", true, 0o600, ErrPermissions},
+		{"0440 outside the credentials directory", "credentials", false, 0o440, ErrPermissions},
+		{"0600 outside the credentials directory", "credentials", false, 0o600, nil},
 		{"no CREDENTIALS_DIRECTORY: 0400", "-", true, 0o400, nil},
 		{"no CREDENTIALS_DIRECTORY: 0600", "-", true, 0o600, nil},
 		{"no CREDENTIALS_DIRECTORY: 0440", "-", true, 0o440, ErrPermissions},
 		{"relative CREDENTIALS_DIRECTORY: 0440", "relative", true, 0o440, ErrPermissions},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.dir == "-" {
+			// Fresh directories per case: a 0400 file cannot be rewritten by a non-root owner.
+			credentials, outside := t.TempDir(), t.TempDir()
+			switch tc.dir {
+			case "-":
 				t.Setenv(credentialsDirectory, "")
-			} else {
+			case "credentials":
+				t.Setenv(credentialsDirectory, credentials)
+			default:
 				t.Setenv(credentialsDirectory, tc.dir)
 			}
 			dir := outside

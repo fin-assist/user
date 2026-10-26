@@ -224,13 +224,16 @@ func TestUnitStandUnitChecksRefuseMutations(t *testing.T) {
 	}
 	setting := func(name, value string) string { return "Environment=" + name + "=" + value + "\n" }
 	var (
-		authCredential = credential("auth-idempotency", "auth-idempotency.key")
-		authEnv        = setting("AUTH_IDEMPOTENCY_KEY_FILE", "%d/auth-idempotency")
-		stageEnv       = setting("AUTH_STAGE_SIGNING_KEY_FILE", "%d/stage-signing")
-		envLine        = setting("ENV", "stage")
-		serviceLine    = setting("SERVICE_NAME", standService)
-		envFileLine    = "EnvironmentFile=" + standEnvFile + "\n"
-		jwksLine       = setting("AUTH_STAGE_PUBLIC_KEYS_FILE", standJWKS)
+		authCredential   = credential("auth-idempotency", "auth-idempotency.key")
+		authEnv          = setting("AUTH_IDEMPOTENCY_KEY_FILE", "%d/auth-idempotency")
+		stageEnv         = setting("AUTH_STAGE_SIGNING_KEY_FILE", "%d/stage-signing")
+		envLine          = setting("ENV", "stage")
+		serviceLine      = setting("SERVICE_NAME", standService)
+		envFileLine      = "EnvironmentFile=" + standEnvFile + "\n"
+		jwksLine         = setting("AUTH_STAGE_PUBLIC_KEYS_FILE", standJWKS)
+		zvonokCampaign   = "#" + setting("ZVONOK_CAMPAIGN_ID", "<campaign ID>")
+		zvonokKeyEnv     = setting("ZVONOK_PUBLIC_KEY_FILE", "%d/zvonok-public-key")
+		zvonokCredential = credential("zvonok-public-key", "zvonok-public-key")
 	)
 	replace := func(old, replacement string) func(*testing.T) string {
 		return func(t *testing.T) string {
@@ -241,6 +244,28 @@ func TestUnitStandUnitChecksRefuseMutations(t *testing.T) {
 		}
 	}
 	add := func(lines string) func(*testing.T) string { return replace(dynamicUser, lines+dynamicUser) }
+	// zvonok enables the commented Zvonok block of the unit as an operator would: every
+	// "#LoadCredential=" and "#Environment=" line loses its "#", the campaign gets an ID.
+	// edit changes the commented template before that, as a broken template would.
+	zvonok := func(edit func(string) string) func(*testing.T) string {
+		return func(t *testing.T) string {
+			if !strings.Contains(text, zvonokCampaign) {
+				t.Fatalf("the unit no longer contains %q", zvonokCampaign)
+			}
+			out := strings.Replace(edit(text), zvonokCampaign, setting("ZVONOK_CAMPAIGN_ID", "123456"), 1)
+			lines := strings.SplitAfter(out, "\n")
+			for i, line := range lines {
+				if strings.HasPrefix(line, "#LoadCredential=") || strings.HasPrefix(line, "#Environment=") {
+					lines[i] = line[1:]
+				}
+			}
+			return strings.Join(lines, "")
+		}
+	}
+	keep := func(s string) string { return s }
+	editTemplate := func(old, replacement string) func(string) string {
+		return func(s string) string { return strings.Replace(s, "#"+old, "#"+replacement, 1) }
+	}
 	for _, tc := range []struct {
 		name   string
 		mutate func(*testing.T) string
@@ -285,6 +310,9 @@ func TestUnitStandUnitChecksRefuseMutations(t *testing.T) {
 		{"credential name with a dot", add(credential("zvonok.key", "zvonok.key") + setting("ZVONOK_PUBLIC_KEY_FILE", "%d/zvonok.key")), ""},
 		{"new credential", add(credential("db-replica-dsn", "db-replica-dsn") + setting("DB_REPLICA_DSN_FILE", "%d/db-replica-dsn")), ""},
 		{"peer address", add(setting("PEER_ANALYTICS_ADDR", "dns:///127.0.0.1:9093")), ""},
+		{"Zvonok block enabled", zvonok(keep), ""},
+		{"Zvonok key from /etc", zvonok(editTemplate(zvonokKeyEnv, setting("ZVONOK_PUBLIC_KEY_FILE", standConfigDir+"/zvonok-public-key"))), "must be %d/<credential>"},
+		{"Zvonok block without its credential", zvonok(editTemplate(zvonokCredential, "")), "does not load"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := checkStandUnit(tc.mutate(t))

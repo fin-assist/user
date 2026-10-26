@@ -228,3 +228,47 @@ func TestIntegrationSigningRetainedFileRejectsPrivateOrAmbiguousJWKS(t *testing.
 		})
 	}
 }
+
+// FIN-349: systemd exposes a LoadCredential file as 0440 on tmpfs with ACLs. The key in
+// $CREDENTIALS_DIRECTORY loads with that mode and signs; the same mode elsewhere and a
+// credential readable by others are refused without leaking the path.
+func TestIntegrationSigningKeyFilesFollowSystemdCredentialModes(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		inside bool
+		perm   os.FileMode
+		ok     bool
+	}{
+		{"credential 0400", true, 0o400, true},
+		{"credential 0440", true, 0o440, true},
+		{"credential 0444", true, 0o444, false},
+		{"0440 outside the credentials directory", false, 0o440, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			credentials, outside := t.TempDir(), t.TempDir()
+			t.Setenv("CREDENTIALS_DIRECTORY", credentials)
+			dir := outside
+			if tc.inside {
+				dir = credentials
+			}
+			path := filepath.Join(dir, "jwt-signing")
+			writeSigningKey(t, path)
+			if err := os.Chmod(path, tc.perm); err != nil {
+				t.Fatal(err)
+			}
+			keys, err := signing.Load(signing.Options{PrivateKeyFile: path, KeyID: "current", Issuer: "user", Audience: "app", Clock: time.Now})
+			if !tc.ok {
+				if err == nil || keys != nil || !strings.Contains(err.Error(), "permissions") || strings.Contains(err.Error(), path) {
+					t.Fatalf("unsafe credential accepted or unclear: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if token, err := keys.Sign(t.Context(), "account-1"); err != nil || token == "" {
+				t.Fatal(token, err)
+			}
+		})
+	}
+}
