@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"io"
-	"net"
 	"net/http"
 	"strings"
 	"testing"
@@ -22,20 +21,9 @@ func TestAPIDeploymentRebuildsBoundedCallbackMetricsFromStoredOutcomes(t *testin
 	setSigningKey(t)
 	setPhoneKey(t)
 	dsn := testdb.DSN(t)
-	reserve := func() string {
-		t.Helper()
-		listener, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatal(err)
-		}
-		address := listener.Addr().String()
-		_ = listener.Close()
-		return address
-	}
-	grpcAddress, httpAddress := reserve(), reserve()
 	for name, value := range map[string]string{
 		"SERVICE_NAME": "user", "ENV": "dev", "AUTH_MODE": "insecure-dev", "LOG_LEVEL": "error",
-		"DB_PRIMARY_DSN": dsn, "GRPC_ADDR": grpcAddress, "HTTP_ADDR": httpAddress, "PHONE_PROVIDER": "fake",
+		"DB_PRIMARY_DSN": dsn, "GRPC_ADDR": "127.0.0.1:0", "HTTP_ADDR": "127.0.0.1:0", "PHONE_PROVIDER": "fake",
 		"SHUTDOWN_DELAY": "0s", "SHUTDOWN_TIMEOUT": "3s",
 		"PEER_BANK_STATEMENT_DATA_ADDR": "passthrough:///127.0.0.1:1", "PEER_ANALYTICS_ADDR": "passthrough:///127.0.0.1:1", "PEER_ASSISTANT_ADDR": "passthrough:///127.0.0.1:1",
 	} {
@@ -62,8 +50,7 @@ func TestAPIDeploymentRebuildsBoundedCallbackMetricsFromStoredOutcomes(t *testin
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- run(ctx, []string{"serve"}) }()
+	bound, done := startServe(t, ctx)
 	t.Cleanup(func() {
 		cancel()
 		select {
@@ -75,7 +62,7 @@ func TestAPIDeploymentRebuildsBoundedCallbackMetricsFromStoredOutcomes(t *testin
 			t.Error("deployment did not stop its workers")
 		}
 	})
-	conn, err := grpc.NewClient(grpcAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(bound.GRPC.String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +76,7 @@ func TestAPIDeploymentRebuildsBoundedCallbackMetricsFromStoredOutcomes(t *testin
 	client := &http.Client{Timeout: time.Second}
 	var body string
 	for {
-		request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, "http://"+httpAddress+"/metrics", nil)
+		request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, "http://"+bound.HTTP.String()+"/metrics", nil)
 		if err != nil {
 			t.Fatal(err)
 		}

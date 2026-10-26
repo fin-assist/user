@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -34,15 +33,9 @@ func TestAPIDeploymentRejectsUnsafeRestartsBeforeExposingSigningKeys(t *testing.
 	setSigningKey(t)
 	setPhoneKey(t)
 	dsn := testdb.DSN(t)
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	address := listener.Addr().String()
-	_ = listener.Close()
 	for name, value := range map[string]string{
 		"SERVICE_NAME": "user", "ENV": "dev", "AUTH_MODE": "insecure-dev", "LOG_LEVEL": "error",
-		"DB_PRIMARY_DSN": dsn, "GRPC_ADDR": address, "HTTP_ADDR": "127.0.0.1:0", "PHONE_PROVIDER": "disabled",
+		"DB_PRIMARY_DSN": dsn, "GRPC_ADDR": "127.0.0.1:0", "HTTP_ADDR": "127.0.0.1:0", "PHONE_PROVIDER": "disabled",
 		"SHUTDOWN_DELAY": "0s", "SHUTDOWN_TIMEOUT": "3s",
 		"PEER_BANK_STATEMENT_DATA_ADDR": "passthrough:///127.0.0.1:1", "PEER_ANALYTICS_ADDR": "passthrough:///127.0.0.1:1", "PEER_ASSISTANT_ADDR": "passthrough:///127.0.0.1:1",
 	} {
@@ -51,15 +44,15 @@ func TestAPIDeploymentRejectsUnsafeRestartsBeforeExposingSigningKeys(t *testing.
 	if err := run(t.Context(), []string{"migrate", "up"}); err != nil {
 		t.Fatal(err)
 	}
-	conn, err := grpc.NewClient(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	bound, done := startServe(t, ctx)
+	conn, err := grpc.NewClient(bound.GRPC.String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = conn.Close() }()
 	client := userv1.NewUserInternalServiceClient(conn)
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- run(ctx, []string{"serve"}) }()
 	requestCtx, stop := context.WithTimeout(t.Context(), 10*time.Second)
 	requestCtx = metadata.AppendToOutgoingContext(requestCtx, "x-service-authorization", "Bearer dev:assistant")
 	response, err := client.GetSigningKeys(requestCtx, &userv1.GetSigningKeysRequest{}, grpc.WaitForReady(true))
@@ -168,7 +161,7 @@ func TestAPIDeploymentRejectsUnsafeRestartsBeforeExposingSigningKeys(t *testing.
 		{"default-route-proxy", "trusted proxy CIDR", map[string]string{"ZVONOK_TRUSTED_PROXY_CIDRS": "0.0.0.0/0"}},
 		{"incomplete-zvonok", "invalid credentials", map[string]string{"PHONE_PROVIDER": "zvonok"}},
 		{"missing-stage-jwks", "stage public keys unavailable", map[string]string{"ENV": "stage", "AUTH_MODE": "verify", "AUTH_STAGE_ISSUER": "stage-services", "AUTH_STAGE_SIGNING_KEY_FILE": os.Getenv("JWT_SIGNING_KEY_FILE"), "AUTH_STAGE_PUBLIC_KEYS_FILE": filepath.Join(dir, "missing")}},
-		{"incomplete-stage-identity", "stage issuer and key files are required", map[string]string{"ENV": "stage", "AUTH_MODE": "verify", "AUTH_STAGE_ISSUER": "stage-services"}},
+		{"incomplete-stage-identity", "AUTH_STAGE_SIGNING_KEY_FILE is required with AUTH_MODE=verify and ENV=stage", map[string]string{"ENV": "stage", "AUTH_MODE": "verify", "AUTH_STAGE_ISSUER": "stage-services"}},
 		{"missing-user-key-id", "key ID", map[string]string{"JWT_KEY_ID": ""}},
 		{"invalid-grpc-listener", "address", map[string]string{"GRPC_ADDR": "invalid:address:format"}},
 		{"invalid-ops-listener", "http:", map[string]string{"HTTP_ADDR": "invalid:address:format"}},
@@ -203,17 +196,19 @@ func TestAPIDeploymentRejectsUnsafeRestartsBeforeExposingSigningKeys(t *testing.
 				t.Setenv(name, value)
 			}
 			startupCtx, stopStartup := context.WithTimeout(t.Context(), 3*time.Second)
-			err := run(startupCtx, []string{"serve"})
+			var listened []boundAddrs
+			recorder := &listenRecorder{}
+			err := runWith(startupCtx, []string{"serve"}, serveHooks{listening: func(addrs boundAddrs) { listened = append(listened, addrs) }, listen: recorder.listen})
 			stopStartup()
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("unsafe restart accepted or failed for the wrong reason: %v", err)
 			}
-			requestCtx, stop := context.WithTimeout(t.Context(), 250*time.Millisecond)
-			defer stop()
-			requestCtx = metadata.AppendToOutgoingContext(requestCtx, "x-service-authorization", "Bearer dev:assistant")
-			if response, err := client.GetSigningKeys(requestCtx, &userv1.GetSigningKeysRequest{}); err == nil || response != nil {
-				t.Fatalf("rejected deployment still exposed signing keys: %v %v", response, err)
+			if len(listened) != 0 {
+				t.Fatalf("rejected deployment started serving on %v", listened)
 			}
+			// A listener failure is the only rejection after a bind: what was bound before it
+			// is released again; every other rejection binds nothing.
+			recorder.requireAllClosed(t, map[string]int{"invalid-ops-listener": 1, "invalid-callback-listener": 2}[tc.name])
 		})
 	}
 }

@@ -6,6 +6,9 @@
 # "systemctl show" or /proc/<pid>/environ.
 #   /etc/finassist/user/env            non-secret settings (see docs/config.md)
 #   /etc/finassist/user/db-primary-dsn DSN, mode 0600, owner root
+#   /etc/finassist/user/stage-signing.pem stand signing key, mode 0600, owner root (LoadCredential)
+#   /etc/finassist/stage-public.jwks      stand public JWKS shared by all services, mode 0644
+#                                         (/etc/finassist 0755): DynamicUser reads it directly
 [Unit]
 Description=fin-assist user
 After=network-online.target postgresql.service

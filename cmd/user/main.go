@@ -48,6 +48,11 @@ const usage = `usage:
   service migrate force <source> <version> set the version and clear the dirty flag`
 
 func run(ctx context.Context, args []string) error {
+	return runWith(ctx, args, serveHooks{})
+}
+
+// runWith dispatches a command like run, passing hooks to serve.
+func runWith(ctx context.Context, args []string, hooks serveHooks) error {
 	if len(args) == 0 {
 		return usageError(usage)
 	}
@@ -56,7 +61,7 @@ func run(ctx context.Context, args []string) error {
 		if len(args) != 1 {
 			return usageError(usage)
 		}
-		return runServe(ctx)
+		return runServe(ctx, hooks)
 	case "migrate":
 		return runMigrate(ctx, args[1:], os.Stdout)
 	default:

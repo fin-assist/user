@@ -12,6 +12,9 @@ func TestUnitFakePhoneConfigurationIsOptInAndNeverProd(t *testing.T) {
 		if environment == "dev" {
 			vars["AUTH_MODE"] = "insecure-dev"
 		}
+		if environment == "stage" {
+			vars["AUTH_STAGE_ISSUER"], vars["AUTH_STAGE_SIGNING_KEY_FILE"], vars["AUTH_STAGE_PUBLIC_KEYS_FILE"] = "stage-services", "/stage.pem", "/stage.jwks"
+		}
 		g, l := env(vars)
 		cfg, err := load(g, noFiles, l)
 		if environment == "prod" {

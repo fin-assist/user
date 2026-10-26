@@ -117,6 +117,22 @@ func (s StageAuthConfig) empty() bool {
 	return s.Issuer == "" && s.SigningKeyFile == "" && s.PublicKeysFile == ""
 }
 
+// missing reports every stage identity setting left empty: with AUTH_MODE=verify and
+// ENV=stage all three are required, as in the other services, before any file is read.
+func (s StageAuthConfig) missing() []error {
+	var errs []error
+	for _, v := range []struct{ name, value string }{
+		{"AUTH_STAGE_ISSUER", s.Issuer},
+		{"AUTH_STAGE_SIGNING_KEY_FILE", s.SigningKeyFile},
+		{"AUTH_STAGE_PUBLIC_KEYS_FILE", s.PublicKeysFile},
+	} {
+		if strings.TrimSpace(v.value) == "" {
+			errs = append(errs, errors.New(v.name+" is required with AUTH_MODE=verify and ENV=stage"))
+		}
+	}
+	return errs
+}
+
 // renamedVars are the variables replaced by the standard AUTH_* set (FIN-325).
 // A deployment that still sets one fails at startup instead of silently taking
 // the new variable's default.
@@ -262,6 +278,9 @@ func (c Config) validate() []error {
 		}
 		if c.Env == EnvProd && !c.Auth.Stage.empty() {
 			errs = append(errs, errors.New("AUTH_STAGE_* variables are not allowed with ENV=prod"))
+		}
+		if c.Env == EnvStage {
+			errs = append(errs, c.Auth.Stage.missing()...)
 		}
 	case AuthInsecureDev:
 		if c.Env != EnvDev {

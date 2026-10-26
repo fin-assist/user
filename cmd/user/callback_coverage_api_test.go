@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"net"
 	"net/http"
 	"testing"
 	"time"
@@ -18,21 +17,10 @@ import (
 func TestAPIDeploymentExposesGuardedCallbackListenerAndStopsIt(t *testing.T) {
 	setSigningKey(t)
 	setPhoneKey(t)
-	address := func() string {
-		t.Helper()
-		l, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatal(err)
-		}
-		a := l.Addr().String()
-		_ = l.Close()
-		return a
-	}
-	grpcAddr, callbackAddr := address(), address()
 	for key, value := range map[string]string{
 		"SERVICE_NAME": "user", "ENV": "dev", "AUTH_MODE": "insecure-dev", "LOG_LEVEL": "error",
-		"DB_PRIMARY_DSN": testdb.DSN(t), "DB_PRIMARY_DSN_FILE": "", "GRPC_ADDR": grpcAddr, "HTTP_ADDR": "127.0.0.1:0",
-		"SHUTDOWN_DELAY": "0s", "SHUTDOWN_TIMEOUT": "3s", "PHONE_PROVIDER": "zvonok", "ZVONOK_PUBLIC_KEY": "test-private-key", "ZVONOK_CAMPAIGN_ID": "123", "ZVONOK_CALLBACK_ADDR": callbackAddr, "ZVONOK_TRUSTED_PROXY_CIDRS": "",
+		"DB_PRIMARY_DSN": testdb.DSN(t), "DB_PRIMARY_DSN_FILE": "", "GRPC_ADDR": "127.0.0.1:0", "HTTP_ADDR": "127.0.0.1:0",
+		"SHUTDOWN_DELAY": "0s", "SHUTDOWN_TIMEOUT": "3s", "PHONE_PROVIDER": "zvonok", "ZVONOK_PUBLIC_KEY": "test-private-key", "ZVONOK_CAMPAIGN_ID": "123", "ZVONOK_CALLBACK_ADDR": "127.0.0.1:0", "ZVONOK_TRUSTED_PROXY_CIDRS": "",
 		"PEER_BANK_STATEMENT_DATA_ADDR": "passthrough:///127.0.0.1:1", "PEER_ANALYTICS_ADDR": "passthrough:///127.0.0.1:1", "PEER_ASSISTANT_ADDR": "passthrough:///127.0.0.1:1",
 	} {
 		t.Setenv(key, value)
@@ -41,8 +29,8 @@ func TestAPIDeploymentExposesGuardedCallbackListenerAndStopsIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- run(ctx, []string{"serve"}); close(done) }()
+	bound, done := startServe(t, ctx)
+	grpcAddr, callbackAddr := bound.GRPC.String(), bound.Callback.String()
 	stop := func() {
 		cancel()
 		select {

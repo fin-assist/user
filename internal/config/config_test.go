@@ -105,7 +105,7 @@ func TestUnitServiceAuthenticationFollowsEnvironment(t *testing.T) {
 		valid bool
 	}{
 		{"prod defaults", map[string]string{"ENV": "prod"}, true},
-		{"stage", map[string]string{"ENV": "stage", "AUTH_STAGE_ISSUER": "stage"}, true},
+		{"stage", map[string]string{"ENV": "stage", "AUTH_STAGE_ISSUER": "stage", "AUTH_STAGE_SIGNING_KEY_FILE": "/stage.pem", "AUTH_STAGE_PUBLIC_KEYS_FILE": "/stage.jwks"}, true},
 		{"verify in dev", map[string]string{"ENV": "dev"}, false},
 		{"stage keys in prod", map[string]string{"ENV": "prod", "AUTH_STAGE_PUBLIC_KEYS_FILE": "/stage.jwks"}, false},
 	} {
@@ -123,6 +123,52 @@ func TestUnitServiceAuthenticationFollowsEnvironment(t *testing.T) {
 			if c.Auth.Kubernetes != want {
 				t.Fatalf("kubernetes defaults: %+v", c.Auth.Kubernetes)
 			}
+		}
+	}
+}
+
+// FIN-347: with AUTH_MODE=verify and ENV=stage every AUTH_STAGE_* setting is required by
+// the configuration itself, each missing one named, as in the other services.
+func TestUnitStageIdentityRequiresEveryStageSetting(t *testing.T) {
+	complete := map[string]string{"AUTH_STAGE_ISSUER": "stage-services", "AUTH_STAGE_SIGNING_KEY_FILE": "/stage.pem", "AUTH_STAGE_PUBLIC_KEYS_FILE": "/stage.jwks"}
+	for name := range complete {
+		for _, value := range []string{"", "  "} {
+			vars := base()
+			vars["ENV"] = "stage"
+			for k, v := range complete {
+				vars[k] = v
+			}
+			vars[name] = value
+			get, list := env(vars)
+			_, err := load(get, noFiles, list)
+			if err == nil || !strings.Contains(err.Error(), name+" is required with AUTH_MODE=verify and ENV=stage") {
+				t.Fatalf("%s=%q: %v", name, value, err)
+			}
+			for other := range complete {
+				if other != name && strings.Contains(err.Error(), other) {
+					t.Fatalf("%s=%q also reported the set %s: %v", name, value, other, err)
+				}
+			}
+		}
+	}
+	vars := base()
+	vars["ENV"] = "stage"
+	get, list := env(vars)
+	_, err := load(get, noFiles, list)
+	for name := range complete {
+		if err == nil || !strings.Contains(err.Error(), name+" is required") {
+			t.Fatalf("all stage settings missing, %s not reported: %v", name, err)
+		}
+	}
+	// prod and dev do not require stage settings; insecure-dev in dev never reads them.
+	for _, e := range []map[string]string{{"ENV": "prod"}, {"ENV": "dev", "AUTH_MODE": "insecure-dev"}} {
+		vars := base()
+		for k, v := range e {
+			vars[k] = v
+		}
+		get, list := env(vars)
+		if _, err := load(get, noFiles, list); err != nil {
+			t.Fatalf("%v: %v", e, err)
 		}
 	}
 }
