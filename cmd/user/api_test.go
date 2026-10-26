@@ -202,6 +202,8 @@ func TestAPIServeFromEnvironmentPublishesSigningKeysAndStops(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Without Zvonok there is no postback listener: the serving record has an empty callback.
+	assertServingLog(t, logs.Name(), "", "metadata-secret")
 	if !bytes.Contains(data, []byte("grpc")) || !bytes.Contains(data, []byte("***")) {
 		t.Fatalf("no masked RPC diagnostic: %s", data)
 	}

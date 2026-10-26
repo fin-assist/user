@@ -122,7 +122,7 @@ PHONE_WATCH_MAX_STREAMS ограничивает одновременно ожи
 
 ## Шифрование и эксплуатация
 
-Нужен **PHONE_RESULT_KEY_FILE**: 32 raw-байта AES-256, обычный файл 0600, общий для
+Нужен **PHONE_RESULT_KEY_FILE**: 32 raw-байта AES-256, обычный файл 0600 (credential systemd — 0400 или 0440, [config.md](config.md)), общий для
 реплик, отдельный от ключа идемпотентности и ключа подписи JWT. Совпадение AES-ключей
 запрещает старт, даже если файлы разные. PHONE_RESULT_KEY_ID (default primary,
 1–64 символа A-Z/a-z/0-9/._-) хранится с ciphertext. AES-GCM использует случайный nonce,

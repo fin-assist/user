@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+
+	"github.com/fin-assist/user/internal/secretfile"
 )
 
 // Options pins the active key and the public keys kept during rotation. Files are
@@ -128,20 +130,40 @@ func loadPublic(path string) (keySet, error) {
 }
 
 func readFile(path string, maxBytes int64, secret bool) ([]byte, error) {
-	f, err := os.Open(path) //nolint:gosec // Operator-supplied trusted key path, never request input.
-	if err != nil {
+	f, info, err := openKeyFile(path, secret)
+	if errors.Is(err, secretfile.ErrUnavailable) {
 		return nil, errors.New("signing: key file unavailable")
 	}
-	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Size() > maxBytes || (secret && info.Mode().Perm()&0o077 != 0) {
+	if err != nil || info.Size() > maxBytes {
+		if f != nil {
+			_ = f.Close()
+		}
 		return nil, errors.New("signing: invalid key file or permissions")
 	}
+	defer func() { _ = f.Close() }()
 	b, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
 	if err != nil || int64(len(b)) > maxBytes {
 		return nil, errors.New("signing: invalid key file")
 	}
 	return b, nil
+}
+
+// openKeyFile opens a private key through secretfile (owner-only, or a systemd
+// credential readable through its ACL) and a public key file as any regular file.
+func openKeyFile(path string, secret bool) (*os.File, os.FileInfo, error) {
+	if secret {
+		return secretfile.Open(path)
+	}
+	f, err := os.Open(path) //nolint:gosec // Operator-supplied trusted key path, never request input.
+	if err != nil {
+		return nil, nil, secretfile.ErrUnavailable
+	}
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		_ = f.Close()
+		return nil, nil, secretfile.ErrPermissions
+	}
+	return f, info, nil
 }
 
 // Sign creates an Ed25519 access token valid for exactly 15 minutes.

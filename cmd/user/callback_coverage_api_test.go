@@ -92,16 +92,16 @@ func TestAPIDeploymentExposesGuardedCallbackListenerAndStopsIt(t *testing.T) {
 		}
 	}
 	stop()
-	assertServingLogsCallback(t, logs.Name(), callbackAddr, "test-private-key")
+	assertServingLog(t, logs.Name(), callbackAddr, "test-private-key")
 	if response, err := client.Get("http://" + callbackAddr + "/callbacks/zvonok?ct_call_id=41"); err == nil {
 		_ = response.Body.Close()
 		t.Fatal("callback ingress remained available after deployment stopped")
 	}
 }
 
-// assertServingLogsCallback checks that the serving record names the bound postback
-// address (FIN-349) and that no record of the run carries the provider key.
-func assertServingLogsCallback(t *testing.T, path, callbackAddr, secret string) {
+// assertServingLog checks that the serving record names the bound postback address, or
+// an empty one without Zvonok (FIN-349), and that no record of the run carries secret.
+func assertServingLog(t *testing.T, path, callbackAddr, secret string) {
 	t.Helper()
 	f, err := os.Open(path)
 	if err != nil {
@@ -119,7 +119,7 @@ func assertServingLogsCallback(t *testing.T, path, callbackAddr, secret string) 
 		if json.Unmarshal(line, &record) != nil || record["msg"] != "serving" {
 			continue
 		}
-		if record["callback"] != callbackAddr {
+		if got, ok := record["callback"].(string); !ok || got != callbackAddr {
 			t.Fatalf("serving record callback=%v, want %s", record["callback"], callbackAddr)
 		}
 		found = true

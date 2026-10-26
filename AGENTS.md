@@ -127,6 +127,7 @@ See docs/verification.md, including capacity/availability metrics and key retent
 | Assembly: identity, pools, server; wiring of adapters, usecases and handlers (`wire()`), the access table (`AccessPolicy()`), migration sources | `internal/app/` (`app.go`, `wire.go`) |
 | The whole service in-process for API tests | `internal/app/apitest/` |
 | Access JWT signing, rotation snapshot, local public JWKS | `internal/signing/` |
+| Opening secret files with the owner-only check (systemd credentials 0400/0440) | `internal/secretfile/` |
 | Opaque 256-bit secrets, shared IANA timezone validation | `internal/token/`, `internal/domain/` |
 | Registration, refresh rotation/reuse and logout | `internal/auth/`, `internal/adapter/grpc/auth/`, `internal/adapter/postgres/auth.go` |
 | Phone creation/recovery, confirmation, snapshots, Watch and notification fanout | `internal/verification/`, `internal/adapter/verificationcrypto/`, `internal/adapter/postgres/verification*.go`, `internal/app/phone.go`, `internal/app/sessions.go` |

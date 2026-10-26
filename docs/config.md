@@ -105,7 +105,18 @@ PEER_<NAME>_ADDR; по умолчанию нужны PEER_BANK_STATEMENT_DATA_AD
 
 ## Ключи access JWT и ротация
 
-JWT_SIGNING_KEY_FILE — PKCS#8 PEM Ed25519, права 0600 или строже. JWT_KEY_ID, JWT_ISSUER
+Права файлов секретов (FIN-349, `internal/secretfile`): JWT_SIGNING_KEY_FILE,
+AUTH_IDEMPOTENCY_KEY_FILE и PHONE_RESULT_KEY_FILE — обычный файл без доступа группе и
+остальным (0600 или строже). Исключение — credential systemd прямо в каталоге
+`$CREDENTIALS_DIRECTORY` (без симлинков и вложенных путей): допустимы 0400 и 0440. systemd
+создаёт credential 0400 root и даёт DynamicUser чтение через ACL `user:<uid>:r--`; на tmpfs с
+ACL (ядро 6.3 и новее) маска ACL видна в битах группы, и `stat` показывает 0440. На стенде
+проверяется так: `systemd-run -p DynamicUser=yes -p LoadCredential=k:/etc/finassist/user/auth-idempotency.key --wait -P stat -c '%a %U' '%d/k'`.
+Пример unit стенда и его проверка — `deploy/systemd/user.service`,
+`internal/config/stand_unit_test.go`: секреты только `*_FILE=%d/<credential>`, `Environment=`
+в простой форме `NAME=value`, env-файл не задаёт то, что задаёт unit.
+
+JWT_SIGNING_KEY_FILE — PKCS#8 PEM Ed25519, права 0600 или строже (см. выше). JWT_KEY_ID, JWT_ISSUER
 и JWT_AUDIENCE обязательны при старте, в том числе в dev. Issuer и audience задаются
 оператором одинаково для user и всех проверяющих сервисов; значений по умолчанию нет.
 Access JWT живёт 15 минут. Ключи загружаются при старте, изменения файлов требуют рестарта.

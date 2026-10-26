@@ -18,6 +18,11 @@
 #                                              (/etc/finassist 0755): DynamicUser reads it directly
 #   /etc/finassist/user/zvonok-public-key      Zvonok API key, mode 0600, owner root (LoadCredential),
 #                                              only when the commented Zvonok block below is enabled
+# On tmpfs with ACL support systemd exposes a credential as 0440 (the ACL mask in the group bits);
+# the service accepts 0400 and 0440 inside $CREDENTIALS_DIRECTORY and owner-only modes elsewhere.
+#
+# Every Environment= line here is the plain form NAME=value: no quotes, spaces, tabs or backslashes,
+# no secret values (secrets only as *_FILE=%d/<credential>); internal/config/stand_unit_test.go checks it.
 [Unit]
 Description=fin-assist user
 After=network-online.target postgresql.service
