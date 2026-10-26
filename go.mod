@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/fin-assist/contracts/gen/go v0.5.0
-	github.com/fin-assist/go-grpc v0.2.0
+	github.com/fin-assist/go-grpc v0.2.1
 	github.com/fin-assist/go-idempotency v0.6.0
 	github.com/fin-assist/go-identity v0.2.0
 	github.com/fin-assist/go-migrate v0.2.0
