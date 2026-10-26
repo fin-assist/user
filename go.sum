@@ -67,8 +67,8 @@ github.com/fin-assist/go-postgres v0.3.0 h1:m/GfmwbFekkXwtwveDU5WWDCU7gY87gkVLWq
 github.com/fin-assist/go-postgres v0.3.0/go.mod h1:gzH2EJ9uoMYeeAD+cBjNV0AL9kziOrzMszQjY7CuPIc=
 github.com/fin-assist/go-tombstone v0.1.0 h1:GUeFI7xkYyWDHKCOdxdQMz7/Q0caX1Cgn8xxRJnOiC4=
 github.com/fin-assist/go-tombstone v0.1.0/go.mod h1:lYToNhE4Kf8cH1J4jKduYfWmxvPgRIYG0Q4SF+eNPKw=
-github.com/fin-assist/go-worker v0.1.0 h1:EgZfn94R81ivjmAsKgt2kHrSDiuv9MphLp7LTkAbmu8=
-github.com/fin-assist/go-worker v0.1.0/go.mod h1:HYDap++WxwlX07FYvCimegldbCOez5VYxCuHL6nZjGQ=
+github.com/fin-assist/go-worker v0.1.1 h1:faLNZ/BKgR9abdGxvdF7nwXf8IOs8HFZEPyqPkE64x0=
+github.com/fin-assist/go-worker v0.1.1/go.mod h1:HYDap++WxwlX07FYvCimegldbCOez5VYxCuHL6nZjGQ=
 github.com/go-logr/logr v1.2.2/go.mod h1:jdQByPbusPIv2/zmleS9BjJVeZ6kBagPoEUsqbVz/1A=
 github.com/go-logr/logr v1.4.3 h1:CjnDlHq8ikf6E492q6eKboGOC0T8CDaOvkHCIg8idEI=
 github.com/go-logr/logr v1.4.3/go.mod h1:9T104GzyrTigFIr8wt5mBrctHMim0Nb2HLGrmQ40KvY=
