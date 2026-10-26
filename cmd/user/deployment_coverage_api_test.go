@@ -47,7 +47,6 @@ func TestAPIDeploymentRejectsUnsafeRestartsBeforeExposingSigningKeys(t *testing.
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	bound, done := startServe(t, ctx)
-	// Rejected restarts below must not expose keys at the address the healthy deployment served.
 	conn, err := grpc.NewClient(bound.GRPC.String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatal(err)
@@ -198,7 +197,8 @@ func TestAPIDeploymentRejectsUnsafeRestartsBeforeExposingSigningKeys(t *testing.
 			}
 			startupCtx, stopStartup := context.WithTimeout(t.Context(), 3*time.Second)
 			var listened []boundAddrs
-			err := runWith(startupCtx, []string{"serve"}, serveHooks{listening: func(addrs boundAddrs) { listened = append(listened, addrs) }})
+			recorder := &listenRecorder{}
+			err := runWith(startupCtx, []string{"serve"}, serveHooks{listening: func(addrs boundAddrs) { listened = append(listened, addrs) }, listen: recorder.listen})
 			stopStartup()
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("unsafe restart accepted or failed for the wrong reason: %v", err)
@@ -206,12 +206,9 @@ func TestAPIDeploymentRejectsUnsafeRestartsBeforeExposingSigningKeys(t *testing.
 			if len(listened) != 0 {
 				t.Fatalf("rejected deployment started serving on %v", listened)
 			}
-			requestCtx, stop := context.WithTimeout(t.Context(), 250*time.Millisecond)
-			defer stop()
-			requestCtx = metadata.AppendToOutgoingContext(requestCtx, "x-service-authorization", "Bearer dev:assistant")
-			if response, err := client.GetSigningKeys(requestCtx, &userv1.GetSigningKeysRequest{}); err == nil || response != nil {
-				t.Fatalf("rejected deployment still exposed signing keys: %v %v", response, err)
-			}
+			// A listener failure is the only rejection after a bind: what was bound before it
+			// is released again; every other rejection binds nothing.
+			recorder.requireAllClosed(t, map[string]int{"invalid-ops-listener": 1, "invalid-callback-listener": 2}[tc.name])
 		})
 	}
 }

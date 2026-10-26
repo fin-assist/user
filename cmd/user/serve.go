@@ -30,6 +30,8 @@ type serveHooks struct {
 	// listening is called once, after all listeners are bound and before serving starts.
 	// A configured port 0 is reported as the port the kernel actually assigned.
 	listening func(boundAddrs)
+	// listen binds one listener; nil uses net.ListenConfig.Listen.
+	listen func(ctx context.Context, network, address string) (net.Listener, error)
 }
 
 // runServe starts the gRPC server, the ops listener and the background jobs, and stops
@@ -54,11 +56,15 @@ func runServe(ctx context.Context, hooks serveHooks) error {
 	defer a.Close()
 	srv, db, jobs := a.GRPC, a.DB, a.Jobs
 
-	grpcLis, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.GRPC.Addr)
+	listen := hooks.listen
+	if listen == nil {
+		listen = (&net.ListenConfig{}).Listen
+	}
+	grpcLis, err := listen(ctx, "tcp", cfg.GRPC.Addr)
 	if err != nil {
 		return err
 	}
-	httpLis, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.HTTP.Addr)
+	httpLis, err := listen(ctx, "tcp", cfg.HTTP.Addr)
 	if err != nil {
 		_ = grpcLis.Close()
 		return fmt.Errorf("http: %w", err)
@@ -69,7 +75,7 @@ func runServe(ctx context.Context, hooks serveHooks) error {
 	var callbackLis net.Listener
 	bound := boundAddrs{GRPC: grpcLis.Addr(), HTTP: httpLis.Addr()}
 	if a.PhoneCallback != nil {
-		callbackLis, err = (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.Zvonok.CallbackAddr)
+		callbackLis, err = listen(ctx, "tcp", cfg.Zvonok.CallbackAddr)
 		if err != nil {
 			_ = grpcLis.Close()
 			_ = httpLis.Close()

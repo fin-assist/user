@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -41,6 +43,50 @@ func startServe(t *testing.T, ctx context.Context) (boundAddrs, <-chan error) {
 		t.Fatal("serve did not bind its listeners")
 	}
 	return boundAddrs{}, done
+}
+
+// listenRecorder binds real listeners for serve and remembers each one with whether it
+// was closed, so a test can assert that a failed startup released everything it bound.
+type listenRecorder struct {
+	mu     sync.Mutex
+	opened []*recordedListener
+}
+
+type recordedListener struct {
+	net.Listener
+	closed atomic.Bool
+}
+
+func (l *recordedListener) Close() error {
+	l.closed.Store(true)
+	return l.Listener.Close()
+}
+
+func (r *listenRecorder) listen(ctx context.Context, network, address string) (net.Listener, error) {
+	lis, err := (&net.ListenConfig{}).Listen(ctx, network, address)
+	if err != nil {
+		return nil, err
+	}
+	recorded := &recordedListener{Listener: lis}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.opened = append(r.opened, recorded)
+	return recorded, nil
+}
+
+// requireAllClosed fails unless exactly want listeners were bound and every one is closed.
+func (r *listenRecorder) requireAllClosed(t *testing.T, want int) {
+	t.Helper()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.opened) != want {
+		t.Fatalf("failed startup bound %d listeners, want %d", len(r.opened), want)
+	}
+	for _, l := range r.opened {
+		if !l.closed.Load() {
+			t.Fatalf("failed startup left %s bound", l.Addr())
+		}
+	}
 }
 
 func TestUnitServeFailsBeforeConnectingWithoutSigningKey(t *testing.T) {
@@ -154,7 +200,10 @@ func TestIntegrationServeFailsOnBadInput(t *testing.T) {
 		"listen":   {"DB_PRIMARY_DSN": testdb.DSN(t), "GRPC_ADDR": "256.0.0.1:1"},
 		"outbox":   {"DB_PRIMARY_DSN": testdb.DSN(t), "PEER_ASSISTANT_ADDR": ""},
 		"http":     {"DB_PRIMARY_DSN": testdb.DSN(t), "GRPC_ADDR": "127.0.0.1:0", "HTTP_ADDR": occupied.Addr().String()},
+		"callback": {"DB_PRIMARY_DSN": testdb.DSN(t), "GRPC_ADDR": "127.0.0.1:0", "HTTP_ADDR": "127.0.0.1:0", "PHONE_PROVIDER": "zvonok", "ZVONOK_PUBLIC_KEY": "fake-test-key", "ZVONOK_CAMPAIGN_ID": "123", "ZVONOK_CALLBACK_ADDR": occupied.Addr().String()},
 	}
+	// Listeners each failing startup binds successfully before the failing one.
+	bound := map[string]int{"http": 1, "callback": 2}
 	for name, extra := range cases {
 		t.Run(name, func(t *testing.T) {
 			for k, v := range base {
@@ -164,7 +213,8 @@ func TestIntegrationServeFailsOnBadInput(t *testing.T) {
 				t.Setenv(k, v)
 			}
 			listened := false
-			if err := runServe(t.Context(), serveHooks{listening: func(boundAddrs) { listened = true }}); err == nil {
+			recorder := &listenRecorder{}
+			if err := runServe(t.Context(), serveHooks{listening: func(boundAddrs) { listened = true }, listen: recorder.listen}); err == nil {
 				t.Fatal("want an error")
 			} else if name == "outbox" && !strings.Contains(err.Error(), "peer address required") {
 				t.Fatal(err)
@@ -174,6 +224,7 @@ func TestIntegrationServeFailsOnBadInput(t *testing.T) {
 			if listened {
 				t.Fatal("failed startup reported its listeners as serving")
 			}
+			recorder.requireAllClosed(t, bound[name])
 		})
 	}
 }
