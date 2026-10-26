@@ -51,8 +51,8 @@ github.com/ebitengine/purego v0.10.1 h1:dewVBCBT2GaMu1SrNTYxQhgQBethzfhiwvZiLGP/
 github.com/ebitengine/purego v0.10.1/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=
 github.com/felixge/httpsnoop v1.1.0 h1:3YtUj32ZZkqZtt3sZZsClsymw/QDuVfpNhoA31zeORc=
 github.com/felixge/httpsnoop v1.1.0/go.mod h1:Zqxgdd+1Rkcz8euOqdr7lqgCRJztwr5hp9vDSi5UZCE=
-github.com/fin-assist/contracts/gen/go v0.4.0 h1:tXxehsDQ8olxaVgFZ4fEAVK/K+VHZZKiZ7uAo+SfMjo=
-github.com/fin-assist/contracts/gen/go v0.4.0/go.mod h1:R03qUcSFzz6G6LclYBDqybz9kqY7UDu7cA4FoS9Hivg=
+github.com/fin-assist/contracts/gen/go v0.5.0 h1:xdkUB3yqP/0geoWNJX6l0RdAK7dXoymYVLdeqes6DFw=
+github.com/fin-assist/contracts/gen/go v0.5.0/go.mod h1:R03qUcSFzz6G6LclYBDqybz9kqY7UDu7cA4FoS9Hivg=
 github.com/fin-assist/go-grpc v0.2.0 h1:t/ZBItBUvj2r+d39iV4diJXD0ncjsU2N510Yfb3WL50=
 github.com/fin-assist/go-grpc v0.2.0/go.mod h1:hENrWNrDmoDxGyjX6BjvAT6ycgXJRAnbay5N8yT4D10=
 github.com/fin-assist/go-idempotency v0.4.1 h1:n88s9IUnR1sPV9uPNz0f5uzTyKqpjIkhlkr3OzRVayk=
