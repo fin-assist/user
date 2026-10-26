@@ -18,6 +18,7 @@ import (
 	"github.com/fin-assist/go-grpc/reqctx"
 
 	usecase "github.com/fin-assist/user/internal/auth"
+	"github.com/fin-assist/user/internal/domain"
 	"github.com/fin-assist/user/internal/ratelimit"
 )
 
@@ -292,5 +293,43 @@ func TestUnitUnknownEffectCauseSurvivesIdempotencyBoundary(t *testing.T) {
 	s.err = nil
 	if _, err := h.Register(handlerContext(), &userv1.RegisterRequest{}); grpcReason(err) != "INVALID_TOKEN" {
 		t.Fatal("late domain error not translated", err)
+	}
+}
+
+func TestUnitAuthPhaseAdviceBeforeEffectAndUnknownCommit(t *testing.T) {
+	for _, refresh := range []bool{false, true} {
+		h, _, _, limits, _ := handlerFixture(t)
+		limits.allowed = false
+		var err error
+		if refresh {
+			_, err = h.RefreshTokens(handlerContext(), &userv1.RefreshTokensRequest{})
+		} else {
+			_, err = h.Register(handlerContext(), &userv1.RegisterRequest{})
+		}
+		rest, ok := finerr.ToREST(err)
+		if !ok || rest.RequestRetryable == nil || !*rest.RequestRetryable || rest.RetryAfter <= 0 {
+			t.Fatal(rest, err)
+		}
+	}
+	h, sessions, _, _, _ := handlerFixture(t)
+	sessions.err = domain.WithRequestRetry(finerr.ConsentOutdated(), false)
+	_, err := h.Register(handlerContext(), &userv1.RegisterRequest{})
+	rest, _ := finerr.ToREST(err)
+	if rest.RequestRetryable == nil || *rest.RequestRetryable {
+		t.Fatal("lost explicit refusal", rest)
+	}
+	h, _, _, limits, _ := handlerFixture(t)
+	limits.allowed = false
+	h.attempts = &fakeTx{err: errDependency}
+	_, err = h.Register(handlerContext(), &userv1.RegisterRequest{})
+	if rest, ok := finerr.ToREST(err); ok && rest.RequestRetryable != nil {
+		t.Fatal("failed limiter commit became permission", rest)
+	}
+	h, _, engine, _, _ := handlerFixture(t)
+	engine.err = finerr.RateLimited(time.Now().Add(time.Minute))
+	_, err = h.Register(handlerContext(), &userv1.RegisterRequest{})
+	rest, _ = finerr.ToREST(err)
+	if rest.RequestRetryable != nil {
+		t.Fatal("unmarked engine result gained permission", rest)
 	}
 }

@@ -5,6 +5,9 @@ import (
 	"context"
 	"strings"
 
+	"github.com/fin-assist/user/internal/adapter/grpc/retryinfo"
+	"github.com/fin-assist/user/internal/domain"
+
 	userv1 "github.com/fin-assist/contracts/gen/go/finassist/user/v1"
 	"github.com/fin-assist/contracts/gen/go/finerr"
 	"google.golang.org/grpc"
@@ -48,14 +51,14 @@ func (h *handler) GetConsentDocument(ctx context.Context, req *userv1.GetConsent
 	case userv1.ConsentType_CONSENT_TYPE_ASSISTANT:
 		kind = "assistant"
 		if err := h.authorize(ctx); err != nil {
-			return nil, err
+			return nil, retryinfo.Apply(err)
 		}
 	default:
-		return nil, finerr.NotFound()
+		return nil, retryinfo.Apply(domain.WithRequestRetry(finerr.NotFound(), false))
 	}
 	d, err := h.documents.Current(ctx, kind)
 	if err != nil {
-		return nil, err
+		return nil, retryinfo.Apply(err)
 	}
 	return &userv1.GetConsentDocumentResponse{Document: &userv1.ConsentDocument{Type: req.GetType(), Version: d.Version, Title: d.Title, Url: d.URL}}, nil
 }
@@ -63,25 +66,25 @@ func (h *handler) GetConsentDocument(ctx context.Context, req *userv1.GetConsent
 func (h *handler) authorize(ctx context.Context) error {
 	values := metadata.ValueFromIncomingContext(ctx, "authorization")
 	if len(values) != 1 {
-		return finerr.InvalidToken()
+		return retryinfo.Apply(domain.WithRequestRetry(finerr.InvalidToken(), false))
 	}
 	scheme, token, ok := strings.Cut(values[0], " ")
 	if !ok || !strings.EqualFold(scheme, "Bearer") || token == "" {
-		return finerr.InvalidToken()
+		return retryinfo.Apply(domain.WithRequestRetry(finerr.InvalidToken(), false))
 	}
 	id, err := h.users.VerifyUser(ctx, token)
 	if err != nil {
 		return err
 	}
 	if id == "" {
-		return finerr.InvalidToken()
+		return retryinfo.Apply(domain.WithRequestRetry(finerr.InvalidToken(), false))
 	}
 	deleted, err := h.deleted.Deleted(ctx, id)
 	if err != nil {
 		return err
 	}
 	if deleted {
-		return finerr.TokenRevoked()
+		return retryinfo.Apply(domain.WithRequestRetry(finerr.TokenRevoked(), false))
 	}
 	return nil
 }

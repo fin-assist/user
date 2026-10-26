@@ -39,6 +39,8 @@ updates them in the same PR. A service made from the template rewrites the first
 
 FIN-255 uses go-grpc v0.2.0 server/client/reqctx, go-migrate v0.1.1 and go-worker v0.1.0 directly; no local transport/context/runner copies. go-postgres v0.3.0 owns pool lifecycle; routing and business transaction mapping remain service-owned. Workers receive the logger, SystemClock and explicit five-second restart delay. Shared tests belong to the libraries; service identity, ACL, SQL and RPC scenarios remain here.
 
+FIN-225 uses contracts/gen/go v0.5.0. Usecase-owned `domain.WithRequestRetry` marks only explicit refusal phases; `adapter/grpc/retryinfo` serializes that decision after mapping, and `adapter/idempotency.StartEngine` preserves callback advice before encoding. Never infer permission from a reason/status or decorate an old decoded cache. Positive V1 is restricted to the initial pre-effect limiter; unknown storage/COMMIT/provider outcomes stay unmarked. See `docs/errors.md`; this does not change keys, TTL or provider behavior.
+
 ## Current implementation (FIN-219)
 
 Functional RPCs: GetConsentDocument, GetSigningKeys, GetAssistantConsentStatus, GetProfile,

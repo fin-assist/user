@@ -17,7 +17,9 @@ import (
 
 	"github.com/fin-assist/go-grpc/reqctx"
 
+	"github.com/fin-assist/user/internal/adapter/grpc/retryinfo"
 	usecase "github.com/fin-assist/user/internal/auth"
+	"github.com/fin-assist/user/internal/domain"
 	"github.com/fin-assist/user/internal/ratelimit"
 	"github.com/fin-assist/user/internal/verification"
 )
@@ -95,13 +97,13 @@ func (h *Handler) StartPhoneVerification(ctx context.Context, in *userv1.StartPh
 		var err error
 		request.Hash, err = idempotency.HashProto(in)
 		if err != nil {
-			return nil, err
+			return nil, retryinfo.Apply(err)
 		}
 		result, err = h.start.Start(ctx, request, in.GetPhone(), reqctx.ClientIP(ctx))
-		return nil, err
+		return nil, retryinfo.Apply(err)
 	})
 	if err != nil {
-		return nil, err
+		return nil, retryinfo.Apply(err)
 	}
 	seconds := min(max(0, int64(result.ExpiresAt.Sub(h.now())/time.Second)), math.MaxInt32)
 	left := int32(seconds) //nolint:gosec // clamped to [0, MaxInt32] on the line above
@@ -131,10 +133,10 @@ func (h *Handler) RefreshTokens(ctx context.Context, in *userv1.RefreshTokensReq
 func (h *Handler) Logout(ctx context.Context, in *userv1.LogoutRequest) (*userv1.LogoutResponse, error) {
 	id, ok := reqctx.UserID(ctx)
 	if !ok {
-		return nil, finerr.InvalidToken()
+		return nil, retryinfo.Apply(domain.WithRequestRetry(finerr.InvalidToken(), false))
 	}
 	if err := h.sessions.Logout(ctx, id, in.GetRefreshToken()); err != nil {
-		return nil, err
+		return nil, retryinfo.Apply(err)
 	}
 	return &userv1.LogoutResponse{}, nil
 }
@@ -148,7 +150,7 @@ func (h *Handler) run(ctx context.Context, method string, in, out proto.Message,
 	_, err := h.engine.UnaryInterceptor(func(context.Context) (string, error) { return "", nil })(ctx, in, &grpc.UnaryServerInfo{FullMethod: method}, func(ctx context.Context, _ any) (any, error) {
 		return nil, h.execute(ctx, in, out, op, perform, completeReuse)
 	})
-	return err
+	return retryinfo.Apply(err)
 }
 
 func (h *Handler) execute(ctx context.Context, in, out proto.Message, op ratelimit.Operation, perform action, completeReuse func(context.Context) error) error {
@@ -172,7 +174,7 @@ func (h *Handler) execute(ctx context.Context, in, out proto.Message, op ratelim
 			// completion has no outer transaction. Commit the counter in the
 			// ordinary pool before checking a secret in the dedicated auth pool.
 			if err := h.attempt(completion, op); err != nil {
-				return idempotency.Response{}, err
+				return idempotency.Response{}, retryinfo.Apply(usecase.ContractError(err))
 			}
 			msg, id, reuse, err := perform(effect)
 			reused = reuse
@@ -182,7 +184,7 @@ func (h *Handler) execute(ctx context.Context, in, out proto.Message, op ratelim
 				if _, contract := finerr.ToREST(err); !contract {
 					effectFailure = err
 				}
-				return idempotency.Response{}, err
+				return idempotency.Response{}, retryinfo.Apply(usecase.ContractError(err))
 			}
 			body, err := proto.Marshal(msg)
 			return idempotency.Response{Body: body, OwnerID: id}, err
@@ -203,9 +205,9 @@ func (h *Handler) execute(ctx context.Context, in, out proto.Message, op ratelim
 			}
 			if !alive {
 				if request.Endpoint == userv1.AuthService_Register_FullMethodName {
-					return finerr.InvalidToken()
+					return domain.WithRequestRetry(finerr.InvalidToken(), false)
 				}
-				return finerr.TokenRevoked()
+				return domain.WithRequestRetry(finerr.TokenRevoked(), false)
 			}
 		}
 		return nil
@@ -219,7 +221,7 @@ func (h *Handler) execute(ctx context.Context, in, out proto.Message, op ratelim
 		return result.Err
 	}
 	if err != nil {
-		return usecase.ContractError(err)
+		return retryinfo.Apply(usecase.ContractError(err))
 	}
 	if result.Err != nil {
 		return result.Err
@@ -240,7 +242,7 @@ func (h *Handler) attempt(ctx context.Context, op ratelimit.Operation) error {
 	}
 	receipt.Committed()
 	if !d.Allowed {
-		return finerr.RateLimited(d.RetryAt)
+		return domain.WithRequestRetry(finerr.RateLimited(d.RetryAt), true)
 	}
 	return nil
 }
@@ -251,9 +253,9 @@ func pair(p usecase.Pair) *userv1.TokenPair {
 
 func (h *Handler) WatchPhoneVerification(in *userv1.WatchPhoneVerificationRequest, stream grpc.ServerStreamingServer[userv1.WatchPhoneVerificationResponse]) error {
 	if err := h.attempt(stream.Context(), ratelimit.Watch); err != nil {
-		return err
+		return retryinfo.Apply(err)
 	}
-	return h.phone.Watch(stream.Context(), in.GetVerificationToken(), func(o verification.Outcome) error { return stream.Send(verificationMessage(o)) })
+	return retryinfo.Apply(h.phone.Watch(stream.Context(), in.GetVerificationToken(), func(o verification.Outcome) error { return stream.Send(verificationMessage(o)) }))
 }
 func verificationMessage(o verification.Outcome) *userv1.WatchPhoneVerificationResponse {
 	out := &userv1.WatchPhoneVerificationResponse{}

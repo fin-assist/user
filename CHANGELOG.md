@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- FIN-225: регрессии для отказа лимитера с неуспешным COMMIT, сохранения false при повторе cached Register400, удалённых аккаунтов и безопасного преобразования обёрнутых ошибок. Тесты явно различают отсутствие advice у общего admission guard и запрет повтора в usecase.
+
+- FIN-225: contracts/gen/go v0.5.0; RequestRetryInfo формируется в явной фазе сценария: начальный отказ лимитера до эффекта разрешает повтор после ожидания, неизменённые неверные данные/секрет/согласие запрещают. Неопределённые COMMIT, storage, provider и старые cached исходы не получают нового разрешения. Адаптер сохраняет решение до кодирования результата; каталог UI остаётся в BFF. Ключи, TTL, протокол провайдера и схема БД не меняются. Специальный cached phone RATE_LIMITED остаётся без положительного advice до отдельного опубликованного исправления go-idempotency; детали — docs/errors.md.
+
 ### Несовместимо
 
 - FIN-325: идентичность собирает `identity.NewAssembly` из go-identity v0.2.0; режим сервисной идентичности выбирает `ENV` (prod — ServiceAccount Kubernetes, stage — JWT из файлов ключей), `AUTH_MODE=verify` при `ENV=dev` не запускается. Переменные переименованы в стандартный набор `AUTH_*`: `SERVICE_TOKEN_ISSUER` → `AUTH_KUBERNETES_ISSUER`/`AUTH_STAGE_ISSUER`, `KUBERNETES_JWKS_URL`/`KUBERNETES_CA_FILE`/`KUBERNETES_TOKEN_FILE` → `AUTH_KUBERNETES_JWKS_URL`/`AUTH_KUBERNETES_CA_FILE`/`AUTH_KUBERNETES_API_TOKEN_FILE`, `STAGE_SIGNING_KEY_FILE`/`STAGE_PUBLIC_KEYS_FILE` → `AUTH_STAGE_*`; добавлена `AUTH_KUBERNETES_NAMESPACE`, `SERVICE_AUTH_MODE` удалена. Старое имя с непустым значением — ошибка запуска с именем замены; окружение стенда меняется вместе с выкладкой (`deploy/systemd/user.service`, таблица перехода — `docs/config.md`). Issuer/audience входящих access-токенов — по-прежнему `JWT_ISSUER`/`JWT_AUDIENCE`. Новая метрика библиотеки `finassist_identity_jwks_skipped_keys`.

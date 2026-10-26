@@ -32,10 +32,10 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (out Registere
 			zone = *in.Timezone
 		}
 		if !domain.ValidTimezone(zone) {
-			return finerr.ValidationError(&errdetails.BadRequest_FieldViolation{Field: "timezone", Reason: "INVALID_FORMAT"})
+			return domain.WithRequestRetry(finerr.ValidationError(&errdetails.BadRequest_FieldViolation{Field: "timezone", Reason: "INVALID_FORMAT"}), false)
 		}
 		if !in.Accepted {
-			return finerr.ConsentRequired()
+			return domain.WithRequestRetry(finerr.ConsentRequired(), false)
 		}
 		version, err := s.repo.CurrentPD(ctx)
 		if err != nil {
@@ -45,7 +45,7 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (out Registere
 			return errors.New("auth: personal-data document not published")
 		}
 		if in.ConsentVersion != version {
-			return finerr.ConsentOutdated()
+			return domain.WithRequestRetry(finerr.ConsentOutdated(), false)
 		}
 		id, created, err := s.repo.CreateUser(ctx, v.Phone, zone, now)
 		if err != nil {
@@ -56,7 +56,7 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (out Registere
 			return err
 		}
 		if !alive {
-			return finerr.InvalidToken()
+			return domain.WithRequestRetry(finerr.InvalidToken(), false)
 		}
 		if err := s.repo.LockUser(ctx, id); err != nil {
 			return missingToken(err)
@@ -100,10 +100,10 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (out Registere
 
 func usableRegistration(v Registration, now time.Time) error {
 	if v.VerifiedAt == nil || !v.IsNewUser || v.Closed {
-		return finerr.InvalidToken()
+		return domain.WithRequestRetry(finerr.InvalidToken(), false)
 	}
 	if !now.Before(v.VerifiedAt.Add(15 * time.Minute)) {
-		return finerr.TokenExpired()
+		return domain.WithRequestRetry(finerr.TokenExpired(), false)
 	}
 	return nil
 }

@@ -6,6 +6,7 @@
 
 Создан из шаблона [`fin-assist/go-service-template`](https://github.com/fin-assist/go-service-template) ([FIN-117](https://finassist.youtrack.cloud/issue/FIN-117)) в состоянии `main` 740a202 ([FIN-191](https://finassist.youtrack.cloud/issue/FIN-191)). Изменения шаблона после этого коммита в сервис не приходят сами — переносятся отдельной задачей.
 
+- [docs/errors.md](docs/errors.md) — фазовое разрешение повтора исходного RPC и совместимость cache (FIN-225).
 - [docs/server.md](docs/server.md) — gRPC-сервер и интерцепторы, идентичность, таблица доступа, клиенты, транзакции, логи и метрики.
 - [docs/config.md](docs/config.md) — переменные окружения.
 - [docs/migrations.md](docs/migrations.md) — миграции и запросы на pgx ([FIN-115](https://finassist.youtrack.cloud/issue/FIN-115)).
