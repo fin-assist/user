@@ -10,9 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fin-assist/contracts/gen/go/finerr"
 	idempotency "github.com/fin-assist/go-idempotency"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/fin-assist/user/internal/adapter/grpc/retryinfo"
 	"github.com/fin-assist/user/internal/domain"
 	"github.com/fin-assist/user/internal/ratelimit"
 	"github.com/fin-assist/user/internal/token"
@@ -496,5 +498,34 @@ func TestUnitStartAdviceIsLimitedToInitialQuotaPhase(t *testing.T) {
 		if errors.As(err, &advice) {
 			t.Fatal(mode, "invented permission", err)
 		}
+	}
+}
+
+func TestUnitStartLimiterAdviceRequiresSuccessfulCommit(t *testing.T) {
+	f := startFixture(t)
+	f.counters.hits = []int{999, 999, 999, 999}
+	f.tx.commitErr = errors.New("unknown limiter COMMIT outcome")
+	_, err := f.run(t.Context())
+	var advice *domain.RequestRetryError
+	if !errors.Is(err, f.tx.commitErr) || errors.As(err, &advice) || f.tx.rollbacks != 1 || f.tx.commits != 0 || f.provider.creates != 0 || f.repo.claimed != 0 || f.engine.releases != 1 {
+		t.Fatal("limiter decision escaped failed COMMIT", err, f.tx, f.engine.releases)
+	}
+	if rest, ok := finerr.ToREST(retryinfo.Apply(err)); ok && rest.RequestRetryable != nil {
+		t.Fatal("unknown COMMIT acquired advice", rest)
+	}
+}
+
+func TestUnitStartConflictingDurableRequestForbidsOriginalReplay(t *testing.T) {
+	f := startFixture(t)
+	f.unfinished()
+	f.repo.record.Hash = token.Sum("different body")
+	_, err := f.run(t.Context())
+	var advice *domain.RequestRetryError
+	if reason(err) != "IDEMPOTENCY_CONFLICT" || !errors.As(err, &advice) || advice.RequestRetryPermission() || f.provider.creates != 0 || f.provider.recovers != 0 {
+		t.Fatal(err)
+	}
+	rest, ok := finerr.ToREST(retryinfo.Apply(err))
+	if !ok || rest.RequestRetryable == nil || *rest.RequestRetryable {
+		t.Fatal("conflict lost explicit false", rest, err)
 	}
 }

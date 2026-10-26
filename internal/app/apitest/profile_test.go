@@ -75,6 +75,7 @@ func TestAPIProfileAPISettingsAndIsolation(t *testing.T) {
 		if apitest.Reason(err) != "VALIDATION_ERROR" {
 			t.Fatalf("invalid patch: %v", err)
 		}
+		assertRequestPermission(t, err, false)
 		field := "timezone"
 		if request.Theme != nil {
 			field = "theme"

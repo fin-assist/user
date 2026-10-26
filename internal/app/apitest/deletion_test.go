@@ -7,6 +7,7 @@ import (
 	"time"
 
 	userv1 "github.com/fin-assist/contracts/gen/go/finassist/user/v1"
+	"github.com/fin-assist/contracts/gen/go/finerr"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -69,9 +70,21 @@ func TestAPIDeleteAccountPurgesPhoneSecretsAndRepeats(t *testing.T) {
 	// remain invalid after deletion, for both registration and refresh.
 	if out, err := auth.Register(authContext(t.Context(), regKey), registrationRequest("delete-reg")); err == nil || out != nil {
 		t.Fatal("cached registration survived", err)
+	} else {
+		assertRequestPermission(t, err, false)
 	}
 	if _, err = auth.RefreshTokens(authContext(t.Context(), refreshKey), &userv1.RefreshTokensRequest{RefreshToken: original.GetTokens().GetRefreshToken()}); apitest.Reason(err) != "INVALID_TOKEN" {
 		t.Fatal(err)
+	}
+	assertRequestPermission(t, err, false)
+	_, err = profiles.UpdateProfile(ctx, &userv1.UpdateProfileRequest{Theme: userv1.Theme_THEME_DARK.Enum()})
+	if apitest.Reason(err) != "TOKEN_REVOKED" {
+		t.Fatal(err)
+	}
+	// The server's tombstone admission guard runs before profile.writable. The
+	// published shared guard has no phase advice; it must not gain positive advice.
+	if r, ok := finerr.ToREST(err); !ok || r.RequestRetryable != nil {
+		t.Fatal("early admission guard changed", r, err)
 	}
 	if _, err = auth.RefreshTokens(authContext(t.Context(), authKey()), &userv1.RefreshTokensRequest{RefreshToken: rotation.GetTokens().GetRefreshToken()}); apitest.Reason(err) != "INVALID_TOKEN" {
 		t.Fatal(err)

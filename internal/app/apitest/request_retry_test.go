@@ -69,3 +69,45 @@ func TestAPIPhoneQuotaAdviceDoesNotAuthorizeDuplicateReplay(t *testing.T) {
 		}
 	}
 }
+
+// A cacheable Register 400 uses Engine.Do, not Start's DoReserved adapter.
+// A confirmed secret must remain unconsumed and the second RPC must decode the
+// stored false Any without another attempt counter or registration side effect.
+func TestAPIRegisterValidationFalseSurvivesIdempotentReplay(t *testing.T) {
+	env := apitest.Start(t)
+	seedDocuments(t, env)
+	seedRegistration(t, env, "cache-invalid-zone", "+79001234567", time.Now().UTC())
+	req := registrationRequest("cache-invalid-zone")
+	req.Timezone = stringPtr("Local")
+	key := authKey()
+	client := userv1.NewAuthServiceClient(env.Conn)
+	call := func() error { _, err := client.Register(authContext(t.Context(), key), req); return err }
+	assertCachedRegistrationRefusal(t, env, key, call)
+}
+func assertCachedRegistrationRefusal(t *testing.T, env *apitest.Env, key string, call func() error) {
+	t.Helper()
+	var hits int
+	for i := 0; i < 2; i++ {
+		err := call()
+		if apitest.Reason(err) != "VALIDATION_ERROR" {
+			t.Fatal("invalid timezone not refused", err)
+		}
+		assertRequestPermission(t, err, false)
+		var nextHits, users, sessions, done, encrypted int
+		if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT
+ (SELECT coalesce(sum(hits),0) FROM rate_limit_window),
+ (SELECT count(*) FROM app_user),
+ (SELECT count(*) FROM auth_session),
+ (SELECT count(*) FROM idempotency_keys WHERE key=$1 AND done AND payload IS NOT NULL),
+ (SELECT count(*) FROM idempotency_keys WHERE key=$1 AND encrypted)`, key).Scan(&nextHits, &users, &sessions, &done, &encrypted); err != nil {
+			t.Fatal(err)
+		}
+		if users != 0 || sessions != 0 || done != 1 || encrypted != 1 || nextHits <= 0 {
+			t.Fatal("wrong durable refusal", nextHits, users, sessions, done, encrypted)
+		}
+		if i == 1 && nextHits != hits {
+			t.Fatal("cached refusal repeated the operation", hits, nextHits)
+		}
+		hits = nextHits
+	}
+}

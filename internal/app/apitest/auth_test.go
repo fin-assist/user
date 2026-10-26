@@ -144,6 +144,7 @@ func TestAPIAuthAPIRegisterErrorsDoNotConsumeTheResult(t *testing.T) {
 			if apitest.Reason(err) != tc.want {
 				t.Fatal(err)
 			}
+			assertRequestPermission(t, err, false)
 			if tc.want == "VALIDATION_ERROR" {
 				found := false
 				for _, d := range status.Convert(err).Details() {
