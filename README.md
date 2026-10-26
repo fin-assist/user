@@ -33,10 +33,13 @@ Ed25519-подпись access JWT на 15 минут, GetSigningKeys и GetConse
 пользовательский токен и отсутствие tombstone. Документы читаются с primary.
 
 Реализованы GetProfile, UpdateProfile, GrantAssistantConsent, RevokeAssistantConsent
-и GetAssistantConsentStatus. Смена пояса атомарно пишет событие go-outbox v0.1.0;
+и GetAssistantConsentStatus. Смена пояса атомарно пишет событие go-outbox v0.2.0;
 доставщик независимо отправляет SetUserTimezone в bank-statement-data и assistant.
 Маршруты настраиваются без изменения производителя события, для доставки выделен
-отдельный primary-пул. Детали и ограничения — [docs/profile.md](docs/profile.md).
+отдельный primary-пул. Publisher получает `a.DB` и контекст транзакционного callback;
+`Dispatcher.Run` — lifecycle-контекст фонового задания без транзакции. Выбор события
+фиксируется до RPC; session advisory lock удерживается до сохранения результата доставки.
+Детали и ограничения — [docs/profile.md](docs/profile.md).
 
 StartPhoneVerification, Register и RefreshTokens работают через go-idempotency v0.4.1
 с владельцем результата (FIN-226): зашифрованный

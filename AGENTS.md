@@ -70,8 +70,13 @@ create an ignored .local key through `cmd/dev-key` (not shipped in the service i
 Profile writes take the tombstone guard and the user row lock in one primary transaction.
 Assistant consent is effective only for the current document version; Status is primary-only,
 assistant-only SYSTEM per grpc-api.md 3.3, despite the mixed-model comment in the proto.
-go-outbox v0.1.0 publishes timezone changes in the same transaction. Its dispatcher uses
-a dedicated primary pool and operator-configured recipients, with system credentials only.
+go-outbox v0.2.0 publishes timezone changes through `NewPublisher(a.DB, time.Now)` in the
+caller-owned transaction; Publish requires its callback context and does not commit.
+The dispatcher runs as `worker.Job{Name: "outbox", Run: dispatcher.Run}` with a service
+lifecycle context, never a go-postgres transaction context (`postgres.ErrForeignTransaction`).
+Its internal Manager uses a pinned connection from a dedicated primary pool; selection
+commits before RPC, and the session advisory lock survives through acknowledgement.
+Delivery uses operator-configured recipients and system credentials only.
 Timezone defaults to bank-statement-data and assistant; deletion requires bank-statement-data,
 analytics and assistant. Pool capacity is at least the union of recipients + 3. Missing configured peer addresses fail startup. See docs/profile.md.
 
