@@ -4,6 +4,9 @@ package profile
 import (
 	"context"
 
+	"github.com/fin-assist/user/internal/adapter/grpc/retryinfo"
+	"github.com/fin-assist/user/internal/domain"
+
 	userv1 "github.com/fin-assist/contracts/gen/go/finassist/user/v1"
 	"github.com/fin-assist/contracts/gen/go/finerr"
 	"google.golang.org/grpc"
@@ -41,18 +44,18 @@ func Register(s grpc.ServiceRegistrar, service Usecases, deletions Deletions) {
 func (h *handler) GetProfile(ctx context.Context, _ *userv1.GetProfileRequest) (*userv1.GetProfileResponse, error) {
 	id, ok := reqctx.UserID(ctx)
 	if !ok {
-		return nil, finerr.InvalidToken()
+		return nil, retryinfo.Apply(domain.WithRequestRetry(finerr.InvalidToken(), false))
 	}
 	p, err := h.service.Get(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, retryinfo.Apply(err)
 	}
 	return &userv1.GetProfileResponse{Profile: Message(p)}, nil
 }
 func (h *handler) UpdateProfile(ctx context.Context, in *userv1.UpdateProfileRequest) (*userv1.UpdateProfileResponse, error) {
 	id, ok := reqctx.UserID(ctx)
 	if !ok {
-		return nil, finerr.InvalidToken()
+		return nil, retryinfo.Apply(domain.WithRequestRetry(finerr.InvalidToken(), false))
 	}
 	patch := profile.Patch{Timezone: in.Timezone}
 	if in.Theme != nil {
@@ -61,28 +64,28 @@ func (h *handler) UpdateProfile(ctx context.Context, in *userv1.UpdateProfileReq
 	}
 	p, err := h.service.Update(ctx, id, patch)
 	if err != nil {
-		return nil, err
+		return nil, retryinfo.Apply(err)
 	}
 	return &userv1.UpdateProfileResponse{Profile: Message(p)}, nil
 }
 func (h *handler) GrantAssistantConsent(ctx context.Context, in *userv1.GrantAssistantConsentRequest) (*userv1.GrantAssistantConsentResponse, error) {
 	id, ok := reqctx.UserID(ctx)
 	if !ok {
-		return nil, finerr.InvalidToken()
+		return nil, retryinfo.Apply(domain.WithRequestRetry(finerr.InvalidToken(), false))
 	}
 	p, err := h.service.Grant(ctx, id, in.GetVersion())
 	if err != nil {
-		return nil, err
+		return nil, retryinfo.Apply(err)
 	}
 	return &userv1.GrantAssistantConsentResponse{Profile: Message(p)}, nil
 }
 func (h *handler) RevokeAssistantConsent(ctx context.Context, _ *userv1.RevokeAssistantConsentRequest) (*userv1.RevokeAssistantConsentResponse, error) {
 	id, ok := reqctx.UserID(ctx)
 	if !ok {
-		return nil, finerr.InvalidToken()
+		return nil, retryinfo.Apply(domain.WithRequestRetry(finerr.InvalidToken(), false))
 	}
 	if err := h.service.Revoke(ctx, id); err != nil {
-		return nil, err
+		return nil, retryinfo.Apply(err)
 	}
 	return &userv1.RevokeAssistantConsentResponse{}, nil
 }
@@ -90,10 +93,10 @@ func (h *handler) RevokeAssistantConsent(ctx context.Context, _ *userv1.RevokeAs
 func (h *handler) DeleteAccount(ctx context.Context, _ *userv1.DeleteAccountRequest) (*userv1.DeleteAccountResponse, error) {
 	id, ok := reqctx.UserID(ctx)
 	if !ok {
-		return nil, finerr.InvalidToken()
+		return nil, retryinfo.Apply(domain.WithRequestRetry(finerr.InvalidToken(), false))
 	}
 	if err := h.deletions.Delete(ctx, id); err != nil {
-		return nil, err
+		return nil, retryinfo.Apply(err)
 	}
 	return &userv1.DeleteAccountResponse{}, nil
 }

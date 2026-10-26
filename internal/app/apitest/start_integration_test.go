@@ -9,7 +9,11 @@ import (
 	idempotency "github.com/fin-assist/go-idempotency"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/fin-assist/contracts/gen/go/finerr"
+
 	"github.com/fin-assist/user/internal/adapter/fakephone"
+	"github.com/fin-assist/user/internal/adapter/grpc/retryinfo"
+	idempotencyadapter "github.com/fin-assist/user/internal/adapter/idempotency"
 	"github.com/fin-assist/user/internal/adapter/postgres"
 	"github.com/fin-assist/user/internal/app/apitest"
 	"github.com/fin-assist/user/internal/config"
@@ -39,7 +43,7 @@ func integrationStarter(t *testing.T, env *apitest.Env, p verification.Provider)
 		}
 		selector = numbers
 	}
-	starter, err := verification.NewStarter(env.App.DB, postgres.NewVerificationStarts(env.App.DB), engine, env.App.Limits, postgres.NewAuth(env.App.DB), env.App.Tombstones, p, selector, time.Now, token.New, env.App.Log, prometheus.NewRegistry())
+	starter, err := verification.NewStarter(env.App.DB, postgres.NewVerificationStarts(env.App.DB), idempotencyadapter.StartEngine{StartEngine: engine}, env.App.Limits, postgres.NewAuth(env.App.DB), env.App.Tombstones, p, selector, time.Now, token.New, env.App.Log, prometheus.NewRegistry())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,5 +153,33 @@ func TestIntegrationFakeBackendUsesDurableAttemptAndCommonConfirmation(t *testin
 	var results int
 	if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT count(*) FROM phone_verification WHERE phone=$1 AND verified_at IS NOT NULL`, phone).Scan(&results); err != nil || results != 0 {
 		t.Fatal(results, err)
+	}
+}
+
+func TestIntegrationPhoneAdviceSurvivesCachedValidationButDoesNotUpgradeBusyReplay(t *testing.T) {
+	env := apitest.Start(t)
+	starter := integrationStarter(t, env, &creationProvider{})
+	request := idempotency.Request{Endpoint: userv1.AuthService_StartPhoneVerification_FullMethodName, Key: authKey(), Hash: token.Sum("invalid")}
+	for range 2 {
+		_, err := starter.Start(t.Context(), request, "invalid", "192.0.2.1")
+		rest, ok := finerr.ToREST(retryinfo.Apply(err))
+		if !ok || rest.Code != "VALIDATION_ERROR" || rest.RequestRetryable == nil || *rest.RequestRetryable {
+			t.Fatal("cached validation lost false", rest, err)
+		}
+	}
+	var rows int
+	if err := env.App.DB.Primary().QueryRow(t.Context(), "SELECT count(*) FROM phone_verification").Scan(&rows); err != nil || rows != 0 {
+		t.Fatal(rows, err)
+	}
+	p := &creationProvider{mode: "duplicate"}
+	starter = integrationStarter(t, env, p)
+	request.Key = authKey()
+	request.Hash = token.Sum("duplicate")
+	for range 2 {
+		_, err := starter.Start(t.Context(), request, "+79001234567", "192.0.2.1")
+		rest, ok := finerr.ToREST(retryinfo.Apply(err))
+		if !ok || rest.Code != "RATE_LIMITED" || rest.RequestRetryable != nil {
+			t.Fatal("old busy outcome gained advice", rest, err)
+		}
 	}
 }

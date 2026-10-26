@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 
+	"github.com/fin-assist/user/internal/domain"
 	"github.com/fin-assist/user/internal/ratelimit"
 	"github.com/fin-assist/user/internal/token"
 )
@@ -148,7 +149,7 @@ func (s *Starter) Start(ctx context.Context, key idempotency.Request, phone, ip 
 		}
 		if !validStartPhone(phone) {
 			result, err = s.engine.DoReserved(tx, reservation, func(context.Context) (idempotency.Response, error) {
-				return idempotency.Response{}, finerr.ValidationError(&errdetails.BadRequest_FieldViolation{Field: "phone", Reason: "INVALID_FORMAT"})
+				return idempotency.Response{}, domain.WithRequestRetry(finerr.ValidationError(&errdetails.BadRequest_FieldViolation{Field: "phone", Reason: "INVALID_FORMAT"}), false)
 			})
 			return err
 		}
@@ -159,7 +160,7 @@ func (s *Starter) Start(ctx context.Context, key idempotency.Request, phone, ip 
 		if err == nil {
 			if len(record.Windows) == 4 && record.Request.ExpiresAt.After(s.now()) && !record.Request.Released {
 				if record.Hash != key.Hash {
-					return finerr.IdempotencyConflict()
+					return domain.WithRequestRetry(finerr.IdempotencyConflict(), false)
 				}
 				if record.Request.Provider != s.provider.Name() || record.Request.CallID != "" {
 					return ErrProviderUnavailable
@@ -178,7 +179,7 @@ func (s *Starter) Start(ctx context.Context, key idempotency.Request, phone, ip 
 			return err
 		}
 		if !decision.Allowed {
-			result.Err = finerr.RateLimited(decision.RetryAt)
+			result.Err = domain.WithRequestRetry(finerr.RateLimited(decision.RetryAt), true)
 			return s.engine.Release(tx, reservation)
 		}
 		if _, err = s.owner(tx, phone); err != nil {

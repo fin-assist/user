@@ -8,6 +8,8 @@ import (
 	"math"
 	"time"
 
+	"github.com/fin-assist/user/internal/domain"
+
 	"github.com/fin-assist/contracts/gen/go/finerr"
 
 	"github.com/fin-assist/user/internal/token"
@@ -126,14 +128,14 @@ func (s *Service) Refresh(ctx context.Context, raw string) (out Rotation, err er
 		}
 		now = s.now().UTC()
 		if !now.Before(l.ExpiresAt) {
-			return finerr.InvalidToken()
+			return domain.WithRequestRetry(finerr.InvalidToken(), false)
 		}
 		if l.RevokedAt != nil {
-			return finerr.TokenRevoked()
+			return domain.WithRequestRetry(finerr.TokenRevoked(), false)
 		}
 		if l.RotatedAt != nil {
 			out.Reused = true
-			return finerr.TokenRevoked()
+			return domain.WithRequestRetry(finerr.TokenRevoked(), false)
 		}
 		if l.Generation < 1 || l.Generation == math.MaxInt32 {
 			return errors.New("auth: invalid refresh generation")
@@ -192,7 +194,7 @@ func (s *Service) lockLink(ctx context.Context, hash token.Hash, now time.Time) 
 		return Link{}, err
 	}
 	if !alive {
-		return Link{}, finerr.TokenRevoked()
+		return Link{}, domain.WithRequestRetry(finerr.TokenRevoked(), false)
 	}
 	l, err = s.repo.LockLink(ctx, hash, now)
 	return l, err
@@ -202,14 +204,14 @@ func (s *Service) lockLink(ctx context.Context, hash token.Hash, now time.Time) 
 // including a deferred constraint failure at the handler's outer COMMIT.
 func ContractError(err error) error {
 	if errors.Is(err, ErrConsentOutdated) {
-		return finerr.ConsentOutdated()
+		return domain.WithRequestRetry(finerr.ConsentOutdated(), false)
 	}
 	return missingToken(err)
 }
 
 func missingToken(err error) error {
 	if errors.Is(err, ErrMissing) {
-		return finerr.InvalidToken()
+		return domain.WithRequestRetry(finerr.InvalidToken(), false)
 	}
 	return err
 }
@@ -237,7 +239,7 @@ func IssuePair(ctx context.Context, id string, signer Signer, newToken func() (s
 // so the reply never confirms another user's session; access JWTs keep their expiry.
 func (s *Service) Logout(ctx context.Context, userID, raw string) error {
 	if userID == "" {
-		return finerr.InvalidToken()
+		return domain.WithRequestRetry(finerr.InvalidToken(), false)
 	}
 	return s.tx.Run(ctx, func(ctx context.Context) error { return s.repo.Logout(ctx, userID, token.Sum(raw)) })
 }

@@ -4,6 +4,8 @@ package consent
 import (
 	"context"
 
+	"github.com/fin-assist/user/internal/domain"
+
 	"github.com/fin-assist/contracts/gen/go/finerr"
 )
 
@@ -24,7 +26,7 @@ func New(documents Documents) *Service { return &Service{documents: documents} }
 // Current returns NOT_FOUND for unknown types, without querying storage.
 func (s *Service) Current(ctx context.Context, kind string) (Document, error) {
 	if kind != "personal_data" && kind != "assistant" {
-		return Document{}, finerr.NotFound()
+		return Document{}, domain.WithRequestRetry(finerr.NotFound(), false)
 	}
 	return s.documents.Current(ctx, kind)
 }
