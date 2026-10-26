@@ -129,7 +129,17 @@ finassist_phone_watch_listener_ready и finassist_phone_watch_rejected_total{rea
 показывают заполнение, предел и недоступность. reason — только capacity/not_ready,
 других меток нет. Настройки и выражения алертов — [verification.md](verification.md).
 
-`outbox` доставляет `user.timezone_changed` и `user.deleted` через go-outbox v0.1.0, на отдельном primary-пуле.
+`outbox` доставляет `user.timezone_changed` и `user.deleted` через go-outbox v0.2.0, на отдельном primary-пуле.
+`internal/app/outbox.go` создаёт `NewPublisher(a.DB, time.Now)`: запись события и
+`pg_notify` используют транзакцию вызывающего сервиса и её callback-контекст; commit
+остаётся у сервиса. Уведомление поступает только после commit. `Dispatcher.Run` передан
+как `Run` фонового задания `outbox` и получает lifecycle-контекст вне `db.Run`.
+Контекст с транзакцией go-postgres отклоняется с `postgres.ErrForeignTransaction`
+до получения соединений и запуска горутин. Внутренний Manager доставщика закреплён
+за выделенным соединением: короткая транзакция выбора завершается до RPC, session
+advisory lock удерживается на том же соединении до подтверждения или записи повтора.
+После возможного получения lock соединение физически закрывается при освобождении;
+в pool с удерживаемым lock оно не возвращается. Подробности — [profile.md](profile.md).
 Метрики: `finassist_outbox_rows{target}`, `finassist_outbox_oldest_age_seconds{target}`,
 `finassist_outbox_delivery_errors_total{target}`; target ограничен настройкой получателей,
 пустой строкой до fanout и unconfigured. Содержимое событий и user_id метками не становятся.
