@@ -25,7 +25,7 @@ updates them in the same PR. A service made from the template rewrites the first
   never defines its own `.proto`, error codes or REST fields: a change goes to `contracts` first (its own FIN issue
   and PR), then the service bumps the module.
 - Shared code: Go libraries made from `fin-assist/go-library-template` (FIN-118) — `go-identity`, `go-idempotency`,
-  `go-outbox`, `go-tombstone`, `go-postgres` (v0.2.0, FIN-253), `go-grpc` (v0.2.0, FIN-250), `go-worker` (v0.1.0, FIN-252), `go-migrate` (v0.1.1, FIN-251/262). The service imports them at tagged versions and wires them in `internal/app` by the
+  `go-outbox`, `go-tombstone`, `go-postgres` (v0.3.0, FIN-253), `go-grpc` (v0.2.0, FIN-250), `go-worker` (v0.1.0, FIN-252), `go-migrate` (v0.1.1, FIN-251/262). The service imports them at tagged versions and wires them in `internal/app` by the
   «Внедрение» section of their README; versions and compatibility — `docs/releasing.md` of the library template.
   Code that more than one service needs goes into a library (its own FIN issue), not into a copy here.
 - Architecture, MVP scope, product decisions: Confluence PF (https://finassist.atlassian.net/wiki/spaces/PF),
@@ -37,7 +37,7 @@ updates them in the same PR. A service made from the template rewrites the first
   non-radical. The owner writes backend code himself and is strong in PostgreSQL: schemas and queries are proposed
   with arguments, not decided for him.
 
-FIN-255 uses go-grpc v0.2.0 server/client/reqctx, go-migrate v0.1.1 and go-worker v0.1.0 directly; no local transport/context/runner copies. go-postgres v0.2.0 owns pool lifecycle; routing and business transaction mapping remain service-owned. Workers receive the logger, SystemClock and explicit five-second restart delay. Shared tests belong to the libraries; service identity, ACL, SQL and RPC scenarios remain here.
+FIN-255 uses go-grpc v0.2.0 server/client/reqctx, go-migrate v0.1.1 and go-worker v0.1.0 directly; no local transport/context/runner copies. go-postgres v0.3.0 owns pool lifecycle; routing and business transaction mapping remain service-owned. Workers receive the logger, SystemClock and explicit five-second restart delay. Shared tests belong to the libraries; service identity, ACL, SQL and RPC scenarios remain here.
 
 ## Current implementation (FIN-219)
 

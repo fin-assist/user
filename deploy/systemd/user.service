@@ -3,30 +3,44 @@
 # The deploy script runs "/opt/finassist/user/user migrate up" (same environment) before restarting the unit.
 #
 # Secrets are systemd credentials, not environment variables: they do not show up in
-# "systemctl show" or /proc/<pid>/environ.
-#   /etc/finassist/user/env            non-secret settings (see docs/config.md)
-#   /etc/finassist/user/db-primary-dsn DSN, mode 0600, owner root
-#   /etc/finassist/user/stage-signing.pem stand signing key, mode 0600, owner root (LoadCredential)
-#   /etc/finassist/stage-public.jwks      stand public JWKS shared by all services, mode 0644
-#                                         (/etc/finassist 0755): DynamicUser reads it directly
+# "systemctl show" or /proc/<pid>/environ. DynamicUser cannot read root-owned 0600 files, so
+# every private file below reaches the process only through LoadCredential (%d/<name>).
+#   /etc/finassist/user/env                    non-secret settings (see docs/config.md); EnvironmentFile=
+#                                              overrides Environment=, so it must not set what this unit sets
+#   /etc/finassist/user/db-primary-dsn         DSN, mode 0600, owner root (LoadCredential)
+#   /etc/finassist/user/jwt-signing.pem        user access JWT signing key, mode 0600, owner root (LoadCredential)
+#   /etc/finassist/user/auth-idempotency.key   32 raw bytes AES-256, Register/Refresh replay, mode 0600,
+#                                              owner root (LoadCredential); shared by replicas, kept >= 24h
+#   /etc/finassist/user/phone-result.key       32 raw bytes AES-256, phone verification result, mode 0600,
+#                                              owner root (LoadCredential); must differ from auth-idempotency.key
+#   /etc/finassist/user/stage-signing.pem      stand signing key, mode 0600, owner root (LoadCredential)
+#   /etc/finassist/stage-public.jwks           stand public JWKS shared by all services, mode 0644
+#                                              (/etc/finassist 0755): DynamicUser reads it directly
+#   /etc/finassist/user/zvonok-public-key      Zvonok API key, mode 0600, owner root (LoadCredential),
+#                                              only when the commented Zvonok block below is enabled
 [Unit]
 Description=fin-assist user
 After=network-online.target postgresql.service
 Wants=network-online.target
 
 [Service]
-# AUTH_IDEMPOTENCY_KEY_FILE must name a private 32-byte AES key shared by replicas.
 Type=exec
 ExecStart=/opt/finassist/user/user serve
 EnvironmentFile=/etc/finassist/user/env
 Environment=ENV=stage
+# SERVICE_NAME is the kid/sub of the stand signing key and must match its kid in the shared JWKS;
+# it also names the service in logs, application_name and the caller name it presents.
+Environment=SERVICE_NAME=user
 LoadCredential=db-primary-dsn:/etc/finassist/user/db-primary-dsn
 Environment=DB_PRIMARY_DSN_FILE=%d/db-primary-dsn
 LoadCredential=jwt-signing:/etc/finassist/user/jwt-signing.pem
 Environment=JWT_SIGNING_KEY_FILE=%d/jwt-signing
+# The phone result AES-256 key must differ from the auth replay key; retain it for live results.
 LoadCredential=phone-result:/etc/finassist/user/phone-result.key
 Environment=PHONE_RESULT_KEY_FILE=%d/phone-result
-# This AES-256 key must differ from the auth replay key; retain it for live results.
+# The auth replay AES-256 key is shared by replicas; retain it for 24h after the last write.
+LoadCredential=auth-idempotency:/etc/finassist/user/auth-idempotency.key
+Environment=AUTH_IDEMPOTENCY_KEY_FILE=%d/auth-idempotency
 # env must set JWT_KEY_ID, JWT_ISSUER, JWT_AUDIENCE and AUTH_STAGE_ISSUER (FIN-325: identity follows ENV,
 # the old SERVICE_AUTH_MODE/SERVICE_TOKEN_ISSUER/STAGE_*/KUBERNETES_* names refuse to start).
 # Set PEER_BANK_STATEMENT_DATA_ADDR, PEER_ANALYTICS_ADDR and PEER_ASSISTANT_ADDR for the default outbox routes.
