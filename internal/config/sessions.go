@@ -4,8 +4,9 @@ import (
 	"errors"
 	"io"
 	"math"
-	"os"
 	"time"
+
+	"github.com/fin-assist/user/internal/secretfile"
 )
 
 // SessionsConfig configures the shared encrypted replay and sliding refresh lifetime.
@@ -36,15 +37,15 @@ func loadAESKey(path, purpose string) ([]byte, error) {
 	if path == "" {
 		return nil, errors.New(purpose + ": key file required")
 	}
-	f, err := os.Open(path) //nolint:gosec // Operator-supplied secret path, never request input.
-	if err != nil {
+	// Owner-only, or a systemd credential readable through its ACL (secretfile.Open).
+	f, _, err := secretfile.Open(path)
+	if errors.Is(err, secretfile.ErrUnavailable) {
 		return nil, errors.New(purpose + ": cannot open key file")
 	}
-	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
+	if err != nil {
 		return nil, errors.New(purpose + ": key must be a regular owner-only file")
 	}
+	defer func() { _ = f.Close() }()
 	b, err := io.ReadAll(io.LimitReader(f, 33))
 	if err != nil || len(b) != 32 {
 		return nil, errors.New(purpose + ": key must contain exactly 32 raw bytes")

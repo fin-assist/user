@@ -19,7 +19,7 @@
 
 FIN-255 подключает `go-grpc v0.2.0` (server/client/reqctx), `go-migrate v0.1.1` и `go-worker v0.1.0` вместо локальных копий. Identity, AccessPolicy, tombstones, прикладные jobs и SQL остаются в `internal/app` и адаптерах сервиса. Перезапуск jobs явно ограничен прежними 5 секундами; расписания используют переданные logger и clock. Тестовые базы и up → down → up обслуживает публичный `go-migrate/migratetest`, выбор PostgreSQL 18 — `internal/testdb`.
 
-Транзакции выполняет `go-postgres v0.2.0` ([FIN-240](https://finassist.youtrack.cloud/issue/FIN-240)). Lifecycle пулов передан `go-postgres.OpenPools`; сервис задаёт параметры и сохраняет маршрутизацию primary/replica; каждый участник auth-транзакции явно привязан к выделенному auth-пулу. Нарушения ограничений переводятся в доменные ошибки адаптерами конкретной операции, включая фактический COMMIT; usecase/transport не разбирают PostgreSQL-ошибки. См. [docs/migrations.md](docs/migrations.md).
+Транзакции выполняет `go-postgres v0.3.0` ([FIN-240](https://finassist.youtrack.cloud/issue/FIN-240)). Lifecycle пулов передан `go-postgres.OpenPools`; сервис задаёт параметры и сохраняет маршрутизацию primary/replica; каждый участник auth-транзакции явно привязан к выделенному auth-пулу. Нарушения ограничений переводятся в доменные ошибки адаптерами конкретной операции, включая фактический COMMIT; usecase/transport не разбирают PostgreSQL-ошибки. См. [docs/migrations.md](docs/migrations.md).
 
 ## Автоматизация обновлений зависимостей
 

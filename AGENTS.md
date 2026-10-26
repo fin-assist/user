@@ -25,7 +25,7 @@ updates them in the same PR. A service made from the template rewrites the first
   never defines its own `.proto`, error codes or REST fields: a change goes to `contracts` first (its own FIN issue
   and PR), then the service bumps the module.
 - Shared code: Go libraries made from `fin-assist/go-library-template` (FIN-118) — `go-identity`, `go-idempotency`,
-  `go-outbox`, `go-tombstone`, `go-postgres` (v0.2.0, FIN-253), `go-grpc` (v0.2.0, FIN-250), `go-worker` (v0.1.0, FIN-252), `go-migrate` (v0.1.1, FIN-251/262). The service imports them at tagged versions and wires them in `internal/app` by the
+  `go-outbox`, `go-tombstone`, `go-postgres` (v0.3.0, FIN-253), `go-grpc` (v0.2.0, FIN-250), `go-worker` (v0.1.0, FIN-252), `go-migrate` (v0.1.1, FIN-251/262). The service imports them at tagged versions and wires them in `internal/app` by the
   «Внедрение» section of their README; versions and compatibility — `docs/releasing.md` of the library template.
   Code that more than one service needs goes into a library (its own FIN issue), not into a copy here.
 - Architecture, MVP scope, product decisions: Confluence PF (https://finassist.atlassian.net/wiki/spaces/PF),
@@ -37,7 +37,7 @@ updates them in the same PR. A service made from the template rewrites the first
   non-radical. The owner writes backend code himself and is strong in PostgreSQL: schemas and queries are proposed
   with arguments, not decided for him.
 
-FIN-255 uses go-grpc v0.2.0 server/client/reqctx, go-migrate v0.1.1 and go-worker v0.1.0 directly; no local transport/context/runner copies. go-postgres v0.2.0 owns pool lifecycle; routing and business transaction mapping remain service-owned. Workers receive the logger, SystemClock and explicit five-second restart delay. Shared tests belong to the libraries; service identity, ACL, SQL and RPC scenarios remain here.
+FIN-255 uses go-grpc v0.2.0 server/client/reqctx, go-migrate v0.1.1 and go-worker v0.1.0 directly; no local transport/context/runner copies. go-postgres v0.3.0 owns pool lifecycle; routing and business transaction mapping remain service-owned. Workers receive the logger, SystemClock and explicit five-second restart delay. Shared tests belong to the libraries; service identity, ACL, SQL and RPC scenarios remain here.
 
 FIN-225 uses contracts/gen/go v0.5.0. Usecase-owned `domain.WithRequestRetry` marks only explicit refusal phases; `adapter/grpc/retryinfo` serializes that decision after mapping, and `adapter/idempotency.StartEngine` preserves callback advice before encoding. Never infer permission from a reason/status or decorate an old decoded cache. Positive V1 is restricted to the initial pre-effect limiter; unknown storage/COMMIT/provider outcomes stay unmarked. See `docs/errors.md`; this does not change keys, TTL or provider behavior.
 
@@ -129,6 +129,7 @@ See docs/verification.md, including capacity/availability metrics and key retent
 | Assembly: identity, pools, server; wiring of adapters, usecases and handlers (`wire()`), the access table (`AccessPolicy()`), migration sources | `internal/app/` (`app.go`, `wire.go`) |
 | The whole service in-process for API tests | `internal/app/apitest/` |
 | Access JWT signing, rotation snapshot, local public JWKS | `internal/signing/` |
+| Opening secret files with the owner-only check (systemd credentials 0400/0440) | `internal/secretfile/` |
 | Opaque 256-bit secrets, shared IANA timezone validation | `internal/token/`, `internal/domain/` |
 | Registration, refresh rotation/reuse and logout | `internal/auth/`, `internal/adapter/grpc/auth/`, `internal/adapter/postgres/auth.go` |
 | Phone creation/recovery, confirmation, snapshots, Watch and notification fanout | `internal/verification/`, `internal/adapter/verificationcrypto/`, `internal/adapter/postgres/verification*.go`, `internal/app/phone.go`, `internal/app/sessions.go` |

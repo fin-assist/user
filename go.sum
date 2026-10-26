@@ -61,8 +61,8 @@ github.com/fin-assist/go-identity v0.2.0 h1:1DPF9R4GeSu2zm8Lo6atrPN4nusGEpKZrkET
 github.com/fin-assist/go-identity v0.2.0/go.mod h1:BqlMUBMfEXjKZ/VbXuEIbihZ/jJwmpY+1UgHWuot9XE=
 github.com/fin-assist/go-migrate v0.1.1 h1:tSXiKv/itPM1E8D+pK8Zel6bUD6eB+ENVb/5hpJm3QQ=
 github.com/fin-assist/go-migrate v0.1.1/go.mod h1:HrFhmWrq0nOj7Aqtds+MuqMRNavS1SzKXcdSEMnPFW4=
-github.com/fin-assist/go-outbox v0.1.0 h1:uO1jiRsbEb9V2yjULnqWh3U/ibLKnDCMFyx4+53MVFY=
-github.com/fin-assist/go-outbox v0.1.0/go.mod h1:DlsXhxID90dF4UW7cJWeVEXsPlGtDVmYzlZ/QbDM0pA=
+github.com/fin-assist/go-outbox v0.2.0 h1:41He3jghOJwVGtUnABVT3KJzGYhbZ7yoSaMoQoQBF1E=
+github.com/fin-assist/go-outbox v0.2.0/go.mod h1:yuAe7LoiBVq6ijHhqf56h5wxXi+3au8RXnZAT9XEvpA=
 github.com/fin-assist/go-postgres v0.3.0 h1:m/GfmwbFekkXwtwveDU5WWDCU7gY87gkVLWqiKgrAVE=
 github.com/fin-assist/go-postgres v0.3.0/go.mod h1:gzH2EJ9uoMYeeAD+cBjNV0AL9kziOrzMszQjY7CuPIc=
 github.com/fin-assist/go-tombstone v0.1.0 h1:GUeFI7xkYyWDHKCOdxdQMz7/Q0caX1Cgn8xxRJnOiC4=

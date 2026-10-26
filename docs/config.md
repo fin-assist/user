@@ -35,7 +35,7 @@ PEER_<NAME>_ADDR; по умолчанию нужны PEER_BANK_STATEMENT_DATA_AD
 | `ZVONOK_CALLBACK_ADDR` | `:9095` | отдельный HTTP-listener, только GET /callbacks/zvonok; ingress мимо bank-bff, без query в access-логах |
 | `ZVONOK_TRUSTED_PROXY_CIDRS` | — | CIDR доверенных ingress-прокси через запятую; только от них читается X-Forwarded-For, по умолчанию только RemoteAddr |
 | `ZVONOK_POLL_INTERVAL` | `30s` | минимальный интервал запасной проверки одной pending-заявки в Watch (1s–1m); общий API-бюджет 20 запросов/с на ключ в PostgreSQL |
-| `SERVICE_NAME` | — (обязательна) | имя сервиса: логи, `application_name`, токен в dev |
+| `SERVICE_NAME` | — (обязательна) | имя сервиса: логи, `application_name`, токен в dev; при `ENV=stage` — kid/sub ключа подписи стенда, совпадает с kid в общем JWKS (unit стенда задаёт `user`) |
 | `ENV` | `prod` | `dev`, `stage` или `prod`. Reflection включён только при `dev` |
 | `AUTH_MODE` | `verify` | `verify` — проверка JWT и сервисных токенов через go-identity `NewAssembly`: при `ENV=prod` — ServiceAccount Kubernetes, при `ENV=stage` — JWT из файлов ключей, при `ENV=dev` не запускается; `insecure-dev` — токены `dev:<имя>` без проверки, только при `ENV=dev` |
 | `JWT_SIGNING_KEY_FILE` | — | PKCS#8 PEM Ed25519, приватный ключ access JWT; файл 0600, обязателен при старте |
@@ -105,7 +105,18 @@ PEER_<NAME>_ADDR; по умолчанию нужны PEER_BANK_STATEMENT_DATA_AD
 
 ## Ключи access JWT и ротация
 
-JWT_SIGNING_KEY_FILE — PKCS#8 PEM Ed25519, права 0600 или строже. JWT_KEY_ID, JWT_ISSUER
+Права файлов секретов (FIN-349, `internal/secretfile`): JWT_SIGNING_KEY_FILE,
+AUTH_IDEMPOTENCY_KEY_FILE и PHONE_RESULT_KEY_FILE — обычный файл без доступа группе и
+остальным (0600 или строже). Исключение — credential systemd прямо в каталоге
+`$CREDENTIALS_DIRECTORY` (без симлинков и вложенных путей): допустимы 0400 и 0440. systemd
+создаёт credential 0400 root и даёт DynamicUser чтение через ACL `user:<uid>:r--`; на tmpfs с
+ACL (ядро 6.3 и новее) маска ACL видна в битах группы, и `stat` показывает 0440. На стенде
+проверяется так: `systemd-run -p DynamicUser=yes -p LoadCredential=k:/etc/finassist/user/auth-idempotency.key --wait -P stat -c '%a %U' '%d/k'`.
+Пример unit стенда и его проверка — `deploy/systemd/user.service`,
+`internal/config/stand_unit_test.go`: секреты только `*_FILE=%d/<credential>`, `Environment=`
+в простой форме `NAME=value`, env-файл не задаёт то, что задаёт unit.
+
+JWT_SIGNING_KEY_FILE — PKCS#8 PEM Ed25519, права 0600 или строже (см. выше). JWT_KEY_ID, JWT_ISSUER
 и JWT_AUDIENCE обязательны при старте, в том числе в dev. Issuer и audience задаются
 оператором одинаково для user и всех проверяющих сервисов; значений по умолчанию нет.
 Access JWT живёт 15 минут. Ключи загружаются при старте, изменения файлов требуют рестарта.
@@ -129,10 +140,10 @@ NOT_SERVING сервер ещё принимает вызовы, в том чи�
 снимок потребителя ещё свежий и не содержит нового kid, такой токен отклоняется как
 INVALID_TOKEN, и клиент с валидным новым токеном выходит из аккаунта. Минута — абсолютный
 минимум для случая доступного user, а не порядок ротации. Это верно для любой версии
-go-identity. В закреплённой сейчас v0.1.0 отказ источника после устаревания снимка тоже
-даёт INVALID_TOKEN, но для всех токенов, а не только новых: 10 минут гарантируют, что сама
-ротация не добавляет отказов. Ответ UNAVAILABLE вместо INVALID_TOKEN при отсутствии
-свежего снимка будет только у сервисов, перешедших на выпуск go-identity с FIN-293.
+go-identity. В закреплённой v0.2.0 (FIN-293) отказ источника после устаревания снимка
+даёт голый UNAVAILABLE, а не INVALID_TOKEN: сбой user больше не разлогинивает клиентов, но
+вызовы с любым токеном отклоняются, пока свежего снимка нет. 10 минут гарантируют, что сама
+ротация не добавляет отказов.
 
 Старый публичный удалить только после истечения всех выданных им access JWT (15 минут
 после переключения последней реплики) и запаса на развёртывание. Не смешивать ключи

@@ -115,7 +115,12 @@ func runServe(ctx context.Context, hooks serveHooks) error {
 			errc <- fmt.Errorf("jobs: %w", err)
 		}
 	})
-	log.Info("serving", "version", version, "grpc", bound.GRPC.String(), "http", bound.HTTP.String(), "env", cfg.Env)
+	// The postback address is logged only when the Zvonok listener is bound; it carries no secret.
+	callbackAddr := ""
+	if bound.Callback != nil {
+		callbackAddr = bound.Callback.String()
+	}
+	log.Info("serving", "version", version, "grpc", bound.GRPC.String(), "http", bound.HTTP.String(), "callback", callbackAddr, "env", cfg.Env)
 
 	var runErr error
 	select {
