@@ -17,7 +17,7 @@
 - [docs/fake-phone.md](docs/fake-phone.md) — вход без звонка в dev/stage, тестовые телефоны и защита prod.
 - [AGENTS.md](AGENTS.md) — карта и правила для агентов, Code Review Rules.
 
-FIN-255 подключает `go-grpc v0.2.0` (server/client/reqctx), `go-migrate v0.1.1` и `go-worker v0.1.0` вместо локальных копий. Identity, AccessPolicy, tombstones, прикладные jobs и SQL остаются в `internal/app` и адаптерах сервиса. Перезапуск jobs явно ограничен прежними 5 секундами; расписания используют переданные logger и clock. Тестовые базы и up → down → up обслуживает публичный `go-migrate/migratetest`, выбор PostgreSQL 18 — `internal/testdb`.
+FIN-255 подключает `go-grpc v0.2.0` (server/client/reqctx), `go-migrate v0.2.0` и `go-worker v0.1.0` вместо локальных копий. Identity, AccessPolicy, tombstones, прикладные jobs и SQL остаются в `internal/app` и адаптерах сервиса. Перезапуск jobs явно ограничен прежними 5 секундами; расписания используют переданные logger и clock. Тестовые базы и up → down → up обслуживает публичный `go-migrate/migratetest`, выбор PostgreSQL 18 — `internal/testdb`.
 
 Транзакции выполняет `go-postgres v0.3.0` ([FIN-240](https://finassist.youtrack.cloud/issue/FIN-240)). Lifecycle пулов передан `go-postgres.OpenPools`; сервис задаёт параметры и сохраняет маршрутизацию primary/replica; каждый участник auth-транзакции явно привязан к выделенному auth-пулу. Нарушения ограничений переводятся в доменные ошибки адаптерами конкретной операции, включая фактический COMMIT; usecase/transport не разбирают PostgreSQL-ошибки. См. [docs/migrations.md](docs/migrations.md).
 
@@ -41,7 +41,7 @@ Ed25519-подпись access JWT на 15 минут, GetSigningKeys и GetConse
 фиксируется до RPC; session advisory lock удерживается до сохранения результата доставки.
 Детали и ограничения — [docs/profile.md](docs/profile.md).
 
-StartPhoneVerification, Register и RefreshTokens работают через go-idempotency v0.4.1
+StartPhoneVerification, Register и RefreshTokens работают через go-idempotency v0.6.0
 с владельцем результата (FIN-226): зашифрованный
 повтор, одноразовая регистрация, скользящие refresh-сессии и отзыв цепочки при reuse.
 Logout идемпотентен без ключа, требует access-токен и завершает только сессию
@@ -212,7 +212,7 @@ RPC не становятся API только из-за расположени�
 в том числе для fork: отчёты видны в сводке Actions и артефакте `coverage`
 (профили, JSON-логи, штатные текстовые отчёты и breakdown).
 
-FIN-255 добавляет integration-сценарии записи настоящего log-файла с общим `go-grpc/reqctx` и файлового развёртывания/ротации signing keys. Они проверяют сохранение identity в логах, отсутствие её переноса в фоновые записи, совместимость старых/новых токенов и отказ небезопасного key deployment. Исправление FIN-262 убирает ошибки up/down/up у трёхзначных миграций; отдельный дефицит integration-покрытия после удаления общих копий закрывается этими сценариями. Проверки используют опубликованный `go-migrate v0.1.1`: поддержка трёхзначных миграций проверяется штатным `make test` и тремя независимыми CI-профилями, без временного modfile или replace.
+FIN-255 добавляет integration-сценарии записи настоящего log-файла с общим `go-grpc/reqctx` и файлового развёртывания/ротации signing keys. Они проверяют сохранение identity в логах, отсутствие её переноса в фоновые записи, совместимость старых/новых токенов и отказ небезопасного key deployment. Исправление FIN-262 убирает ошибки up/down/up у трёхзначных миграций; отдельный дефицит integration-покрытия после удаления общих копий закрывается этими сценариями. Проверки используют опубликованный `go-migrate v0.2.0`: поддержка трёхзначных миграций проверяется штатным `make test` и тремя независимыми CI-профилями, без временного modfile или replace.
 
 Актуальные значения каждого уровня находятся в сводке Actions и артефакте `coverage` текущего коммита.
 Локальная версия Go может считать statements иначе, чем версия из `go.mod` в CI: приёмка требует
