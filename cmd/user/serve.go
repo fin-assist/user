@@ -19,9 +19,23 @@ import (
 	"github.com/fin-assist/user/internal/ops"
 )
 
+// boundAddrs holds the actual addresses of the listeners after every bind succeeded.
+// Callback is nil when the phone callback listener is not configured.
+type boundAddrs struct {
+	GRPC, HTTP, Callback net.Addr
+}
+
+// serveHooks are optional observers of the serve lifecycle; the zero value observes nothing.
+type serveHooks struct {
+	// listening is called once, after all listeners are bound and before serving starts.
+	// A configured port 0 is reported as the port the kernel actually assigned.
+	listening func(boundAddrs)
+}
+
 // runServe starts the gRPC server, the ops listener and the background jobs, and stops
 // them in order on SIGTERM: NOT_SERVING, a pause for balancers, graceful stop, jobs, pools.
-func runServe(ctx context.Context) error {
+// Every listener is bound before any of them serves; a failed bind releases the others.
+func runServe(ctx context.Context, hooks serveHooks) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -44,17 +58,28 @@ func runServe(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	httpLis, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.HTTP.Addr)
+	if err != nil {
+		_ = grpcLis.Close()
+		return fmt.Errorf("http: %w", err)
+	}
 	readiness := &ops.Readiness{}
 	httpSrv := ops.Server(cfg.HTTP.Addr, ops.Handler(reg, readiness))
 	var callbackSrv *http.Server
 	var callbackLis net.Listener
+	bound := boundAddrs{GRPC: grpcLis.Addr(), HTTP: httpLis.Addr()}
 	if a.PhoneCallback != nil {
 		callbackLis, err = (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.Zvonok.CallbackAddr)
 		if err != nil {
 			_ = grpcLis.Close()
+			_ = httpLis.Close()
 			return err
 		}
+		bound.Callback = callbackLis.Addr()
 		callbackSrv = &http.Server{Handler: a.PhoneCallback, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192}
+	}
+	if hooks.listening != nil {
+		hooks.listening(bound)
 	}
 
 	runCtx, stopRun := context.WithCancel(context.WithoutCancel(ctx))
@@ -74,7 +99,7 @@ func runServe(ctx context.Context) error {
 		}
 	})
 	wg.Go(func() {
-		if err := httpSrv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+		if err := httpSrv.Serve(httpLis); !errors.Is(err, http.ErrServerClosed) {
 			errc <- fmt.Errorf("http: %w", err)
 		}
 	})
@@ -84,7 +109,7 @@ func runServe(ctx context.Context) error {
 			errc <- fmt.Errorf("jobs: %w", err)
 		}
 	})
-	log.Info("serving", "version", version, "grpc", cfg.GRPC.Addr, "http", cfg.HTTP.Addr, "env", cfg.Env)
+	log.Info("serving", "version", version, "grpc", bound.GRPC.String(), "http", bound.HTTP.String(), "env", cfg.Env)
 
 	var runErr error
 	select {

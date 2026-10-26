@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"net"
 	"os"
 	"strings"
 	"testing"
@@ -24,15 +23,9 @@ func TestAPIServeFromEnvironmentPublishesSigningKeysAndStops(t *testing.T) {
 	setSigningKey(t)
 	setPhoneKey(t)
 	dsn := testdb.DSN(t)
-	reserved, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	address := reserved.Addr().String()
-	_ = reserved.Close()
 	for name, value := range map[string]string{
 		"SERVICE_NAME": "user", "ENV": "dev", "AUTH_MODE": "insecure-dev", "LOG_LEVEL": "debug",
-		"DB_PRIMARY_DSN": dsn, "GRPC_ADDR": address, "HTTP_ADDR": "127.0.0.1:0",
+		"DB_PRIMARY_DSN": dsn, "GRPC_ADDR": "127.0.0.1:0", "HTTP_ADDR": "127.0.0.1:0",
 		"SHUTDOWN_DELAY": "0s", "SHUTDOWN_TIMEOUT": "5s", "PHONE_PROVIDER": "fake",
 		"PEER_BANK_STATEMENT_DATA_ADDR": "passthrough:///127.0.0.1:1",
 		"PEER_ANALYTICS_ADDR":           "passthrough:///127.0.0.1:1", "PEER_ASSISTANT_ADDR": "passthrough:///127.0.0.1:1",
@@ -139,8 +132,7 @@ func TestAPIServeFromEnvironmentPublishesSigningKeysAndStops(t *testing.T) {
 	os.Stderr = logs
 	t.Cleanup(func() { os.Stderr = previousStderr; _ = logs.Close() })
 	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- run(ctx, []string{"serve"}) }()
+	bound, done := startServe(t, ctx)
 	t.Cleanup(func() {
 		cancel()
 		select {
@@ -152,7 +144,7 @@ func TestAPIServeFromEnvironmentPublishesSigningKeysAndStops(t *testing.T) {
 			t.Error("serve did not stop")
 		}
 	})
-	conn, err := grpc.NewClient(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(bound.GRPC.String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatal(err)
 	}

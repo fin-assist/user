@@ -8,7 +8,7 @@
 
 1. **`x-request-id`** — из metadata или новый; значение неожиданной формы (не `[A-Za-z0-9._-]{1,128}`) заменяется.
 2. **Логи и метрики** — после обработчика (см. «Наблюдаемость»).
-3. **Перехват паники** — голый `INTERNAL`, в журнале безопасное событие без payload и стека (go-grpc v0.1.0).
+3. **Перехват паники** — голый `INTERNAL`, в журнале безопасное событие без payload и стека (go-grpc v0.2.0).
 4. **Сервисный токен** `x-service-authorization` → имя вызывающего. Нет или неверный — голый `UNAUTHENTICATED`.
 5. **Таблица доступа** (`AccessPolicy()` в `internal/app/wire.go`, копия таблицы grpc-api.md 3.3). Метода нет в таблице или вызывающего нет в правиле — голый `PERMISSION_DENIED`, строка в лог уровня `ERROR` и метрика `finassist_grpc_denied_total{cause="caller_not_allowed"}` (на неё — алерт). Сервер **не стартует**, если у зарегистрированного метода нет правила.
 6. **Подсказки `bank-bff`** — `x-client-ip`, `x-client-version`, `x-read-primary` берутся только от `bank-bff`; от других вызывающих игнорируются.
@@ -70,6 +70,7 @@ GetConsentDocument проходит сервисный ACL как NoUser. Для
 
 - Keepalive: `MaxConnectionAge = 5 мин`, `MaxConnectionAgeGrace = 4 мин` (больше 3-минутного потока ответа), клиентский ping не чаще 20 с.
 - Размер сообщения — `GRPC_MAX_RECV_MSG_SIZE` (4 МиБ, для `SearchOperations` — 16 МиБ).
+- Запуск: `serve` занимает адреса gRPC, HTTP и (при Zvonok) постбэка до того, как начинает обслуживать любой из них; ошибка любого bind закрывает уже занятые и завершает запуск. Порт `0` допустим: в журнал `serving` пишутся фактические адреса (FIN-346).
 - Готовность: раз в 5 с ping primary; результат — в gRPC health (`""`) и `/readyz`. До первого успешного ping — `NOT_SERVING`.
 - Остановка по `SIGTERM`: HTTP `/readyz` (`ops.Readiness.Drain`, необратимо до конца процесса) и gRPC health одновременно перестают сообщать готовность → пауза `SHUTDOWN_DELAY` (вызовы ещё принимаются, `/healthz` отвечает 200) → `GracefulStop` не дольше `SHUTDOWN_TIMEOUT` → фоновые задания → пулы БД (FIN-289).
 

@@ -20,11 +20,34 @@ import (
 	"github.com/fin-assist/user/internal/testdb"
 )
 
+// startServe runs the serve command in the background and waits until every listener is
+// bound, returning the actual addresses. Listeners use port 0, so no port is reserved,
+// released and bound again by another process in between. The returned channel delivers
+// the serve result once and is then closed.
+func startServe(t *testing.T, ctx context.Context) (boundAddrs, <-chan error) {
+	t.Helper()
+	listening := make(chan boundAddrs, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- runWith(ctx, []string{"serve"}, serveHooks{listening: func(addrs boundAddrs) { listening <- addrs }})
+		close(done)
+	}()
+	select {
+	case addrs := <-listening:
+		return addrs, done
+	case err := <-done:
+		t.Fatalf("serve stopped before listening: %v", err)
+	case <-time.After(30 * time.Second):
+		t.Fatal("serve did not bind its listeners")
+	}
+	return boundAddrs{}, done
+}
+
 func TestUnitServeFailsBeforeConnectingWithoutSigningKey(t *testing.T) {
 	t.Setenv("SERVICE_NAME", "user")
 	t.Setenv("DB_PRIMARY_DSN", "postgres://nowhere.invalid/db")
 	t.Setenv("ENV", "prod")
-	err := runServe(t.Context())
+	err := runServe(t.Context(), serveHooks{})
 	if err == nil || !strings.Contains(err.Error(), "signing:") {
 		t.Fatalf("error %v", err)
 	}
@@ -48,31 +71,21 @@ func serveAndStop(t *testing.T, provider string) {
 	if err := migrate.Up(t.Context(), migrate.DefaultConfig(dsn), app.MigrationSources()); err != nil {
 		t.Fatal(err)
 	}
-	free := func() string {
-		t.Helper()
-		lis, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatal(err)
-		}
-		a := lis.Addr().String()
-		_ = lis.Close()
-		return a
-	}
-	httpAddr := free()
-	for k, v := range map[string]string{"SERVICE_NAME": "user", "ENV": "dev", "AUTH_MODE": "insecure-dev", "LOG_LEVEL": "error", "DB_PRIMARY_DSN": dsn, "GRPC_ADDR": "127.0.0.1:0", "HTTP_ADDR": httpAddr, "SHUTDOWN_DELAY": "0s", "SHUTDOWN_TIMEOUT": "5s", "PHONE_PROVIDER": provider} {
+	for k, v := range map[string]string{"SERVICE_NAME": "user", "ENV": "dev", "AUTH_MODE": "insecure-dev", "LOG_LEVEL": "error", "DB_PRIMARY_DSN": dsn, "GRPC_ADDR": "127.0.0.1:0", "HTTP_ADDR": "127.0.0.1:0", "SHUTDOWN_DELAY": "0s", "SHUTDOWN_TIMEOUT": "5s", "PHONE_PROVIDER": provider} {
 		t.Setenv(k, v)
 	}
-	addr := ""
 	if provider == "zvonok" {
-		addr = free()
-		t.Setenv("ZVONOK_CALLBACK_ADDR", addr)
+		t.Setenv("ZVONOK_CALLBACK_ADDR", "127.0.0.1:0")
 		t.Setenv("ZVONOK_PUBLIC_KEY", "fake-test-key")
 		t.Setenv("ZVONOK_CAMPAIGN_ID", "123")
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	errc := make(chan error, 1)
-	go func() { errc <- runServe(ctx) }()
+	bound, errc := startServe(t, ctx)
+	if (bound.Callback != nil) != (provider == "zvonok") {
+		t.Fatalf("callback listener bound %v for provider %s", bound.Callback, provider)
+	}
+	httpAddr := bound.HTTP.String()
 	// Stop only once the service is actually up: wait for a condition with a deadline,
 	// never a fixed delay that a loaded machine may outlast before the first ping.
 	waitCtx, stopWait := context.WithTimeout(t.Context(), 30*time.Second)
@@ -106,7 +119,7 @@ func serveAndStop(t *testing.T, provider string) {
 	await("readiness", func() bool { return status("http://"+httpAddr+"/readyz") == http.StatusOK })
 	if provider == "zvonok" {
 		await("callback listener", func() bool {
-			code := status("http://" + addr + "/callbacks/zvonok?ct_call_id=123")
+			code := status("http://" + bound.Callback.String() + "/callbacks/zvonok?ct_call_id=123")
 			if code != 0 && code != http.StatusForbidden {
 				t.Fatal(code)
 			}
@@ -129,11 +142,18 @@ func TestIntegrationServeFailsOnBadInput(t *testing.T) {
 	setPhoneKey(t)
 	base := map[string]string{"SERVICE_NAME": "user", "ENV": "dev", "AUTH_MODE": "insecure-dev", "LOG_LEVEL": "error",
 		"PEER_BANK_STATEMENT_DATA_ADDR": "passthrough:///127.0.0.1:1", "PEER_ANALYTICS_ADDR": "passthrough:///127.0.0.1:1", "PEER_ASSISTANT_ADDR": "passthrough:///127.0.0.1:1"}
+	// The test keeps this port bound for its whole duration, so the conflict is certain.
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = occupied.Close() }()
 	cases := map[string]map[string]string{
 		"config":   {"DB_PRIMARY_DSN": ""},
 		"database": {"DB_PRIMARY_DSN": "postgres://nobody@127.0.0.1:1/db?connect_timeout=1"},
 		"listen":   {"DB_PRIMARY_DSN": testdb.DSN(t), "GRPC_ADDR": "256.0.0.1:1"},
 		"outbox":   {"DB_PRIMARY_DSN": testdb.DSN(t), "PEER_ASSISTANT_ADDR": ""},
+		"http":     {"DB_PRIMARY_DSN": testdb.DSN(t), "GRPC_ADDR": "127.0.0.1:0", "HTTP_ADDR": occupied.Addr().String()},
 	}
 	for name, extra := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -143,10 +163,16 @@ func TestIntegrationServeFailsOnBadInput(t *testing.T) {
 			for k, v := range extra {
 				t.Setenv(k, v)
 			}
-			if err := runServe(t.Context()); err == nil {
+			listened := false
+			if err := runServe(t.Context(), serveHooks{listening: func(boundAddrs) { listened = true }}); err == nil {
 				t.Fatal("want an error")
 			} else if name == "outbox" && !strings.Contains(err.Error(), "peer address required") {
 				t.Fatal(err)
+			} else if name == "http" && !strings.HasPrefix(err.Error(), "http: ") {
+				t.Fatal(err)
+			}
+			if listened {
+				t.Fatal("failed startup reported its listeners as serving")
 			}
 		})
 	}

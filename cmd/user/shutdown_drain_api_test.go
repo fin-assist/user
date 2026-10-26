@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -28,20 +27,9 @@ func TestAPIShutdownDelayReportsNotReadyOnBothProbes(t *testing.T) {
 	if err := os.WriteFile(dsnFile, []byte(dsn), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	free := func() string {
-		t.Helper()
-		l, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatal(err)
-		}
-		addr := l.Addr().String()
-		_ = l.Close()
-		return addr
-	}
-	grpcAddr, httpAddr := free(), free()
 	for k, v := range map[string]string{
 		"SERVICE_NAME": "user", "ENV": "dev", "AUTH_MODE": "insecure-dev", "LOG_LEVEL": "error",
-		"DB_PRIMARY_DSN": "", "DB_PRIMARY_DSN_FILE": dsnFile, "GRPC_ADDR": grpcAddr, "HTTP_ADDR": httpAddr,
+		"DB_PRIMARY_DSN": "", "DB_PRIMARY_DSN_FILE": dsnFile, "GRPC_ADDR": "127.0.0.1:0", "HTTP_ADDR": "127.0.0.1:0",
 		"SHUTDOWN_DELAY": "3s", "SHUTDOWN_TIMEOUT": "2s",
 		"PEER_BANK_STATEMENT_DATA_ADDR": "passthrough:///127.0.0.1:1",
 		"PEER_ANALYTICS_ADDR":           "passthrough:///127.0.0.1:1", "PEER_ASSISTANT_ADDR": "passthrough:///127.0.0.1:1",
@@ -55,8 +43,8 @@ func TestAPIShutdownDelayReportsNotReadyOnBothProbes(t *testing.T) {
 	}
 	serveCtx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	done := make(chan error, 1)
-	go func() { done <- run(serveCtx, []string{"serve"}) }()
+	bound, done := startServe(t, serveCtx)
+	grpcAddr, httpAddr := bound.GRPC.String(), bound.HTTP.String()
 
 	conn, err := grpc.NewClient(grpcAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
