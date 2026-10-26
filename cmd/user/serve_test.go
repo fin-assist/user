@@ -214,7 +214,10 @@ func TestIntegrationServeFailsOnBadInput(t *testing.T) {
 			}
 			listened := false
 			recorder := &listenRecorder{}
-			if err := runServe(t.Context(), serveHooks{listening: func(boundAddrs) { listened = true }, listen: recorder.listen}); err == nil {
+			// A regression that let startup reach serving must fail fast, not hang the suite.
+			startupCtx, stopStartup := context.WithTimeout(t.Context(), 30*time.Second)
+			defer stopStartup()
+			if err := runServe(startupCtx, serveHooks{listening: func(boundAddrs) { listened = true }, listen: recorder.listen}); err == nil {
 				t.Fatal("want an error")
 			} else if name == "outbox" && !strings.Contains(err.Error(), "peer address required") {
 				t.Fatal(err)
