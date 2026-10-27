@@ -15,6 +15,9 @@ stage = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(stage)
 
 
+BINARY = b"ELF-test-binary" + bytes(range(256)) * 9000
+
+
 class StageArtifactTest(unittest.TestCase):
     def setUp(self):
         self.env = dict(GITHUB_SHA="a" * 40, GITHUB_REPOSITORY="fin-assist/user", GITHUB_RUN_ID="123", GITHUB_RUN_ATTEMPT="2",
@@ -28,7 +31,7 @@ class StageArtifactTest(unittest.TestCase):
         if args[0] == "create":
             return "container-id"
         if args[0] == "cp":
-            Path(args[2]).write_bytes(b"ELF-test-binary")
+            Path(args[2]).write_bytes(BINARY)
         return ""
 
     def test_package_binds_exact_image_source_and_binary(self):
@@ -38,7 +41,7 @@ class StageArtifactTest(unittest.TestCase):
             self.assertEqual(result["platform"], "linux/amd64")
             self.assertEqual(result["run_id"], 123)
             out = Path(tmp) / "out"
-            digest = hashlib.sha256(b"ELF-test-binary").hexdigest()
+            digest = hashlib.sha256(BINARY).hexdigest()
             self.assertEqual(result["binary_sha256"], digest)
             self.assertEqual((out / "SHA256SUMS").read_text(), f"{digest}  user\n")
             self.assertEqual(json.loads((out / "manifest.json").read_text()), result)
@@ -90,6 +93,7 @@ class StageArtifactTest(unittest.TestCase):
 
     def test_nonregular_missing_and_empty_binary_are_rejected(self):
         for kind in ["symlink", "directory", "missing", "empty"]:
+            self.calls = []
             def copy(*args):
                 if args[0] != "cp":
                     return self.docker(*args)
@@ -131,11 +135,24 @@ class StageArtifactTest(unittest.TestCase):
         workflow = Path(".github/workflows/ci.yml").read_text()
         built = re.findall(r"-t ([a-z-]+:ci) \.", workflow)
         extracted = re.findall(r"scripts/stage_artifact.py ([a-z-]+) ([a-z-]+:ci) ", workflow)
+        module = re.search(r"^module github.com/fin-assist/(\S+)", Path("go.mod").read_text()).group(1)
+        service = "service" if module == "go-service-template" else module
+        image = "service:ci" if service == "user" else service + ":ci"
+        expected = [(service, image)]
+        if service == "assistant":
+            expected.append(("fake-llm", "fake-llm:ci"))
+        self.assertEqual(extracted, expected, "every expected artifact must use its smoke-tested image")
+        self.assertTrue(built, "workflow must build an image")
         for service, image in extracted:
             self.assertIn(image, built)
-            self.assertIn(f"docker run --rm {image}", workflow)
+            smoke = workflow.index(f"docker run --rm {image}")
+            extract = workflow.index(f"scripts/stage_artifact.py {service} {image} ")
+            self.assertLess(workflow.index(f"-t {image} ."), smoke)
+            self.assertLess(smoke, extract)
+            if service == "bank-bff":
+                self.assertLess(workflow.index("docker stop --time"), extract)
             dockerfile = Path("Dockerfile.fake-llm" if service == "fake-llm" else "Dockerfile").read_text()
-            self.assertIn(f"/{service}", dockerfile)
+            self.assertRegex(dockerfile, rf"(?m)^COPY --from=build /out/{re.escape(service)} /{re.escape(service)}$")
 
     def test_existing_directory_not_overwritten(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(stage, "docker", self.docker):
