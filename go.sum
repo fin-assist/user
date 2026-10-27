@@ -65,8 +65,8 @@ github.com/fin-assist/go-outbox v0.2.1 h1:siUgqRFBF9OYjbRmrCGSJ9Bs8uCar+i4CiprBy
 github.com/fin-assist/go-outbox v0.2.1/go.mod h1:NuiunPorpcFg3kRMPQFqqaSXDMphw+NoGW3IyuqZyd4=
 github.com/fin-assist/go-postgres v0.3.1 h1:ThDWfXG7EWl5m2ps30h4oaqUj4wB0vTT2I9hVRo0XoQ=
 github.com/fin-assist/go-postgres v0.3.1/go.mod h1:AWa/05+7vRUt+nyRJKKpVBhbca15NNVbHkyvVj6s4nQ=
-github.com/fin-assist/go-tombstone v0.1.0 h1:GUeFI7xkYyWDHKCOdxdQMz7/Q0caX1Cgn8xxRJnOiC4=
-github.com/fin-assist/go-tombstone v0.1.0/go.mod h1:lYToNhE4Kf8cH1J4jKduYfWmxvPgRIYG0Q4SF+eNPKw=
+github.com/fin-assist/go-tombstone v0.1.1 h1:24vrx4mmpAaZ7cwfSwTEbJbrK6gyIHuthvsVMZK57xg=
+github.com/fin-assist/go-tombstone v0.1.1/go.mod h1:bv/1NxubroabZP7u4yhdT1FobquPTG4RGM8QEmcA5kk=
 github.com/fin-assist/go-worker v0.1.1 h1:faLNZ/BKgR9abdGxvdF7nwXf8IOs8HFZEPyqPkE64x0=
 github.com/fin-assist/go-worker v0.1.1/go.mod h1:HYDap++WxwlX07FYvCimegldbCOez5VYxCuHL6nZjGQ=
 github.com/go-logr/logr v1.2.2/go.mod h1:jdQByPbusPIv2/zmleS9BjJVeZ6kBagPoEUsqbVz/1A=
