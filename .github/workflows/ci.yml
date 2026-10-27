@@ -141,7 +141,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Build only; publishing to GHCR and the tag in fin-assist/infra are FIN-148.
+      # Build once; stage artifacts are extracted below. GHCR publication remains FIN-148.
       - name: Build
         env:
           TOKEN: ${{ secrets.GO_MODULES_TOKEN }}
@@ -151,8 +151,17 @@ jobs:
             printf 'machine github.com login x-access-token password %s\n' "$TOKEN" > "$RUNNER_TEMP/netrc"
             secret=(--secret id=netrc,src="$RUNNER_TEMP/netrc")
           fi
-          DOCKER_BUILDKIT=1 docker build "${secret[@]}" --build-arg VERSION="${GITHUB_SHA::12}" -t service:ci .
+          DOCKER_BUILDKIT=1 docker build "${secret[@]}" --build-arg VERSION="$GITHUB_SHA" -t service:ci .
           docker run --rm service:ci help 2>&1 | grep -q 'usage:' # the binary starts in the image
+
+      - name: Extract stage binary from the tested image
+        run: python3 scripts/stage_artifact.py user user:ci stage-artifact
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stage-user-${{ github.sha }}-linux-amd64
+          path: stage-artifact/
+          retention-days: 30
+          if-no-files-found: error
 
   migrations:
     if: github.event_name == 'pull_request'
