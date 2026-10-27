@@ -492,3 +492,7 @@ only provider-owned callback numbers, capped at 256 per process, then `other` pl
 observable overflow gauge. Caller phone numbers and call IDs remain forbidden labels.
 Rolling 24h gauges come from primary, do not sum replicas. Exact public numbers in the
 bounded outcome report are aggregate logs, not a per-request event audit. See docs/zvonok.md.
+
+## Stage artifacts (FIN-148)
+
+`scripts/stage_artifact.py` extracts the binary from the smoke-tested image; `docs/stage-artifacts.md` describes provenance, checks and retention. Keep its Python tests and CI image job in sync. Artifacts do not authorize deployment; only a successful main push CI is eligible for stage. GHCR/production delivery is still pending.
