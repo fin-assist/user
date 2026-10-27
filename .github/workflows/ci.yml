@@ -155,7 +155,7 @@ jobs:
           docker run --rm service:ci help 2>&1 | grep -q 'usage:' # the binary starts in the image
 
       - name: Extract stage binary from the tested image
-        run: python3 scripts/stage_artifact.py user user:ci stage-artifact
+        run: python3 scripts/stage_artifact.py user service:ci stage-artifact
       - uses: actions/upload-artifact@v4
         with:
           name: stage-user-${{ github.sha }}-linux-amd64

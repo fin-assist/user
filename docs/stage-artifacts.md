@@ -6,7 +6,7 @@ Job `image` извлекает исполняемый файл из **того �
 у assistant отдельный `stage-fake-llm-SHA-linux-amd64` из `Dockerfile.fake-llm`.
 Manifest фиксирует репозиторий, SHA, Actions run/attempt, content ID образа, платформу,
 SHA-256 бинаря и версии модулей fin-assist из go.mod. Контрольная сумма подтверждает целостность,
-но не заменяет доверенный источник Actions.
+но не заменяет доверенный источник Actions. Manifest также сохраняет event/ref: для выкладки допустимы только push и refs/heads/main. На PR source_sha — синтетический merge-коммит, такой комплект предназначен только для проверки.
 
 ## Получение и проверка
 
@@ -20,7 +20,7 @@ gh run download RUN_ID --repo fin-assist/user --name stage-user-SHA-linux-amd64 
 (cd ./user-SHA && sha256sum --check SHA256SUMS)
 ```
 
-Сверить SHA, repository, run_id/attempt, platform и зависимости в manifest с выбранным run;
+Сверить SHA, repository, run_id/attempt, platform, event/ref и зависимости в manifest с выбранным run;
 не выполнять скачанный бинарь до этой проверки. Набор пяти сервисов и fake-llm фиксируется
 отдельно в deployment manifest infra: одинаковая версия contracts необходима, но сама по себе
 не доказывает совместимость. Её подтверждает совместный запуск и API-приёмка FIN-362.
@@ -29,3 +29,5 @@ gh run download RUN_ID --repo fin-assist/user --name stage-user-SHA-linux-amd64 
 
 Это stage-часть FIN-148. Публикация GHCR, SBOM/сканирование, политика хранения образов и
 production-доставка через PR infra остаются отдельной невыполненной частью исходной задачи.
+
+После скачивания upload-artifact восстанавливает обычным файлам режим 0644. После проверки provenance и checksum установить бинарь через `install -m 0755` в каталог релиза (либо явно `chmod 0755` перед локальным smoke-check). Сохранённый комплект сам по себе не является доказательством успешного CI: сохранить и проверенный run JSON.

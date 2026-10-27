@@ -7,11 +7,14 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 
 
 def docker(*args):
-    return subprocess.run(["docker", *args], check=True, text=True,
-                          capture_output=True, timeout=60).stdout.strip()
+    result = subprocess.run(["docker", *args], text=True, capture_output=True, timeout=60)
+    if result.returncode:
+        raise RuntimeError(f"docker {args[0]} failed: {result.stderr.strip()}")
+    return result.stdout.strip()
 
 
 def package(service, image, output, environ=os.environ):
@@ -35,8 +38,14 @@ def package(service, image, output, environ=os.environ):
     container = docker("create", image_id)
     try:
         docker("cp", f"{container}:/{service}", str(output / service))
-    finally:
-        docker("rm", container)
+    except BaseException:
+        try:
+            docker("rm", "-f", container)
+        except Exception as cleanup_error:
+            print(f"container cleanup failed: {cleanup_error}", file=sys.stderr)
+        raise
+    else:
+        docker("rm", "-f", container)
     binary = output / service
     if binary.is_symlink() or not binary.is_file() or binary.stat().st_size == 0:
         raise ValueError("image binary is not a nonempty regular file")
@@ -48,6 +57,7 @@ def package(service, image, output, environ=os.environ):
     digest = hasher.hexdigest()
     modules = re.findall(r"github.com/fin-assist/([^\s]+)\s+(v[^\s]+)", Path("go.mod").read_text())
     manifest = dict(schema_version=1, service=service, repository=repository, source_sha=sha,
+                    event=environ["GITHUB_EVENT_NAME"], ref=environ["GITHUB_REF"],
                     run_id=int(run_id), run_attempt=int(environ.get("GITHUB_RUN_ATTEMPT", "1")),
                     image_id=image_id, platform=platform, binary_sha256=digest,
                     modules=dict(modules))
