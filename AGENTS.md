@@ -171,6 +171,8 @@ and `migratetest.DefaultImage` (PostgreSQL). Main pieces: grpc-go, protobuf, pro
 prometheus client_golang, testcontainers-go, squawk; the fin-assist libraries above. A new dependency is named in
 the PR with why it is needed.
 
+Integer widths follow domain bounds and expected table growth. Squawk excludes both `prefer-bigint-over-int` and `prefer-bigint-over-smallint` in `.squawk.toml` (FIN-371); preserve historical ignores in immutable migrations.
+
 ## Build in an agent container
 
 - Go: the toolchain from `go.mod` is downloaded by `GOTOOLCHAIN=auto` (the default) on the first `go` command.

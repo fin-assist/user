@@ -8,9 +8,13 @@ Runner — опубликованный `github.com/fin-assist/go-migrate v0.2.0
 - Запросы — ручной SQL на `pgx/v5`, без ORM и генерации кода.
 - Линтер миграций — [squawk](https://squawkhq.com) в CI.
 
+FIN-371: правила Squawk `prefer-bigint-over-int` и `prefer-bigint-over-smallint` выключены
+в `.squawk.toml`. Разрядность выбирается по предметному диапазону и ожидаемому росту таблицы.
+Существующие типы колонок и immutable-миграции не меняются; прежние inline ignore сохраняются.
+
 ## Что бывает в схеме
 
-Решение владельца 19.10.2026 (FIN-112): в схеме — только `PRIMARY KEY`, `UNIQUE` (в том числе частичные уникальные индексы), `FOREIGN KEY` с каскадами, `NOT NULL` и `DEFAULT`. `CHECK`, `EXCLUDE`, триггеры и функции не используются: правила валидации и логика — в коде сервиса ([schema.md](schema.md), «Инварианты в коде сервиса»; тест `TestSchemaHasNoRulesOrLogic`). Ширина целочисленного ключа — по числу строк за жизнь таблицы, поэтому правило squawk `prefer-bigint-over-int` выключено (`.squawk.toml`).
+Решение владельца 19.10.2026 (FIN-112): в схеме — только `PRIMARY KEY`, `UNIQUE` (в том числе частичные уникальные индексы), `FOREIGN KEY` с каскадами, `NOT NULL` и `DEFAULT`. `CHECK`, `EXCLUDE`, триггеры и функции не используются: правила валидации и логика — в коде сервиса ([schema.md](schema.md), «Инварианты в коде сервиса»; тест `TestSchemaHasNoRulesOrLogic`). Ширина целочисленного ключа — по числу строк за жизнь таблицы, поэтому правила squawk `prefer-bigint-over-int` и `prefer-bigint-over-smallint` выключены (`.squawk.toml`).
 
 ## Файлы
 
