@@ -145,7 +145,7 @@ class StageArtifactTest(unittest.TestCase):
         self.assertEqual(caller["with"]["service"], service)
         self.assertEqual(caller["with"].get("fake_llm", False), fake)
         self.assertEqual(caller["with"]["revision"], manifest["revision"])
-        self.assertEqual(caller["uses"], "fin-assist/go-service-template/.github/workflows/shared-image.yml@" + manifest["revision"])
+        self.assertEqual(caller["uses"], "fin-assist/go-ci/.github/workflows/shared-image.yml@" + manifest["revision"])
 
         shared = yaml.safe_load((common.parent / ".github/workflows/shared-image.yml").read_text())
         steps = shared["jobs"]["image"]["steps"]
