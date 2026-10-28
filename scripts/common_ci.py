@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shutil
 import subprocess
@@ -45,18 +46,86 @@ def read_config(root: Path) -> dict:
     return config
 
 
-def git(root: Path, *args: str) -> str:
-    """Run bounded git without shell evaluation, hooks, prompts or external config."""
+def git_output(root: Path, args: tuple[str, ...], text: bool):
+    """Read bounded Git output without shell, hooks, prompts or replacement objects."""
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-    env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull, GIT_TERMINAL_PROMPT="0")
+    env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull, GIT_TERMINAL_PROMPT="0",
+               GIT_NO_REPLACE_OBJECTS="1")
     try:
         result = subprocess.run(
-            ["git", "-c", "core.hooksPath=" + os.devnull, "-c", "core.fsmonitor=false", "-c", "protocol.file.allow=never", *args],
-            cwd=root, env=env, check=True, capture_output=True, text=True, timeout=120)
+            ["git", "-c", "core.worktree=" + str(root.resolve()), "-c", "core.hooksPath=" + os.devnull,
+             "-c", "core.fsmonitor=false", "-c", "protocol.file.allow=never", *args],
+            cwd=root, env=env, check=True, capture_output=True, text=text, timeout=120)
     except (subprocess.SubprocessError, OSError) as error:
         # Git stderr can contain local credential helpers or authenticated URL rewrites.
         raise ValueError("Unable to obtain or verify the pinned shared CI source.") from error
-    return result.stdout.strip()
+    return result.stdout
+
+
+def git(root: Path, *args: str) -> str:
+    """Run a bounded textual Git command using the explicit caller working tree."""
+    return git_output(root, args, True).strip()
+
+
+def object_bytes(cache: Path, kind: str, oid: str) -> bytes:
+    """Verify an object's raw bytes against its SHA-1 identity, not local Git metadata."""
+    if not re.fullmatch(r"[0-9a-f]{40}", oid):
+        raise ValueError("Invalid pinned Git object identity.")
+    data = git_output(cache, ("cat-file", kind, oid), False)
+    header = kind.encode() + b" " + str(len(data)).encode() + b"\0"
+    if hashlib.sha1(header + data).hexdigest() != oid:
+        raise ValueError("Pinned Git object integrity check failed.")
+    return data
+
+
+def verify_checkout(cache: Path, revision: str) -> None:
+    """Compare raw files with the authenticated commit tree without clean filters/stat caches."""
+    commit = object_bytes(cache, "commit", revision)
+    first = commit.split(b"\n", 1)[0]
+    if not re.fullmatch(b"tree [0-9a-f]{40}", first):
+        raise ValueError("Pinned commit has no valid root tree.")
+    object_bytes(cache, "tree", first[5:].decode("ascii"))
+    # ls-tree only reads objects; unlike status/diff it never runs a worktree clean filter.
+    records = git_output(cache, ("ls-tree", "-r", "-t", "-z", "--full-tree", revision), False)
+    expected = {}
+    for record in records.split(b"\0"):
+        if not record:
+            continue
+        header, separator, raw_path = record.partition(b"\t")
+        if not separator:
+            raise ValueError("Invalid pinned tree listing.")
+        mode, kind, raw_oid = header.split(b" ")
+        oid = raw_oid.decode("ascii")
+        path = PurePosixPath(os.fsdecode(raw_path))
+        if path.is_absolute() or any(part in {".", ".."} or part.lower() == ".git" or "\\" in part for part in path.parts):
+            raise ValueError("Unsafe path in pinned source tree.")
+        if mode == b"040000" and kind == b"tree":
+            object_bytes(cache, "tree", oid)
+        elif mode in {b"100644", b"100755"} and kind == b"blob":
+            expected[path.as_posix()] = oid
+        else:
+            raise ValueError("Pinned source must contain regular files and directories only.")
+    actual = set()
+    for directory, dirs, files in os.walk(cache, followlinks=False):
+        parent = Path(directory)
+        if parent == cache:
+            dirs.remove(".git")
+        if any((parent / name).is_symlink() for name in dirs + files):
+            raise ValueError("Shared CI cache has local modifications (symbolic link).")
+        actual.update((parent / name).relative_to(cache).as_posix() for name in files)
+    if actual != set(expected):
+        raise ValueError("Shared CI cache has local modifications (file inventory).")
+    for name, oid in expected.items():
+        path = cache / name
+        size = path.stat().st_size
+        digest = hashlib.sha1(b"blob " + str(size).encode() + b"\0")
+        count = 0
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(65536), b""):
+                digest.update(chunk)
+                count += len(chunk)
+        if count != size or digest.hexdigest() != oid:
+            raise ValueError("Shared CI cache has local modifications (file content).")
 
 
 def validate_cache(cache: Path, revision: str) -> Path:
@@ -69,8 +138,7 @@ def validate_cache(cache: Path, revision: str) -> Path:
         raise ValueError("Shared CI cache has an unexpected source repository.")
     if any(line.startswith(tuple("abcdefghijklmnopqrstuvwxyzS")) for line in git(cache, "ls-files", "-v").splitlines()):
         raise ValueError("Shared CI cache has hidden index entries; remove that revision cache and retry.")
-    if git(cache, "status", "--porcelain", "--untracked-files=all", "--ignored=matching"):
-        raise ValueError("Shared CI cache has local modifications; remove that revision cache and retry.")
+    verify_checkout(cache, revision)
     common = cache / "common"
     if common.is_symlink() or not (common / "render_lint.py").is_file():
         raise ValueError("Pinned shared CI source is incomplete.")

@@ -62,10 +62,10 @@ cover: collect-unit collect-integration collect-api ## collect all profiles befo
 	$(MAKE) cover-combined || status=1; exit "$$status"
 
 lint: ## shared pinned golangci-lint and rendered configuration
-	@common=$$(python3 scripts/common_ci.py) && python3 "$$common/lint.py" lint --root "$(CURDIR)"
+	@common=$$(python3 -B scripts/common_ci.py) && python3 -B "$$common/lint.py" lint --root "$(CURDIR)"
 
 fmt: ## format using the same pinned linter and configuration
-	@common=$$(python3 scripts/common_ci.py) && python3 "$$common/lint.py" fmt --root "$(CURDIR)"
+	@common=$$(python3 -B scripts/common_ci.py) && python3 -B "$$common/lint.py" fmt --root "$(CURDIR)"
 
 image: ## the service image
 	docker build -t user:dev .
@@ -101,7 +101,7 @@ dev-key:
 BASE_REF ?= origin/main
 .PHONY: lint-config lint-migrations
 lint-config: ## render the declared shared linter profile without running Go
-	python3 scripts/common_ci.py render
+	python3 -B scripts/common_ci.py render
 
 lint-migrations: ## immutable SQL and Squawk on added up migrations
-	@common=$$(python3 scripts/common_ci.py) && python3 "$$common/lint.py" migrations --root "$(CURDIR)" --base "$(BASE_REF)"
+	@common=$$(python3 -B scripts/common_ci.py) && python3 -B "$$common/lint.py" migrations --root "$(CURDIR)" --base "$(BASE_REF)"

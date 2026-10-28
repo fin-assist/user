@@ -21,6 +21,14 @@ def load_tests(loader, tests, pattern):
     """Keep one case catalogue while exercising the local trust boundary."""
     local = load_module("consumer_common_ci", ROOT / "scripts/common_ci.py")
     common = local.source_dir(ROOT, local.read_config(ROOT))
-    shared = load_module("shared_bootstrap_cases", common / "tests/test_bootstrap.py")
-    shared.bootstrap = local
-    return loader.loadTestsFromModule(shared)
+    suites = []
+    for filename in ("test_bootstrap.py", "test_cache_integrity.py"):
+        shared = load_module("shared_" + filename[:-3], common / "tests" / filename)
+        # Rebinding is an explicit seam; a renamed catalogue must fail closed.
+        if not isinstance(getattr(shared, "bootstrap", None), type(local)):
+            raise AssertionError("Shared bootstrap catalogue no longer exposes its module seam")
+        shared.bootstrap = local
+        suites.append(loader.loadTestsFromModule(shared))
+    # The contract separately requires this local copy to equal the pinned bootstrap bytes.
+    contract = load_module("shared_consumer_contract", common / "consumer_contract.py")
+    return loader.suiteClass([*suites, contract.suite(ROOT, common)])
