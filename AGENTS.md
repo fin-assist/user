@@ -258,8 +258,8 @@ Priorities when they pull apart, in this order:
 - Time: `app.WithClock` supplies one business clock (default `time.Now`) through assembly to verification,
   sessions, repositories, profile/deletion retention, guards, event publishers, local fake provider and public
   `expires_in` mapping. Zvonok local admission/receive timestamps use this clock too; provider-created remains
-  an authenticated remote value and must agree within the fixed tolerance. Signing, operational polling/metrics and `WithLimitClock`
-  retain their separate clock boundaries. Admission repositories sample this function after blocking PostgreSQL
+  an authenticated remote value and must agree within the fixed tolerance. Signing, `WithLimitClock`, polling coalescing, elapsed HTTP
+  durations and rolling-outcome reports retain their documented clock boundaries. Admission repositories sample this function after blocking PostgreSQL
   locks/writes; do not replace it with a timestamp captured before the wait.
   "now" in business logic comes from an injected clock (`func() time.Time` or an interface passed by `wire()`),
   never `time.Now()` inside a usecase or repository query: tests pin the date, and month and year boundaries must be

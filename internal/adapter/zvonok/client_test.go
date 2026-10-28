@@ -46,6 +46,45 @@ func client(t *testing.T, f transportFunc) *Client {
 	return c
 }
 
+func TestUnitRequestLatencyUsesElapsedTimeWithFrozenBusinessClock(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	clock := time.Date(2032, time.February, 29, 23, 59, 0, 0, time.UTC)
+	c, err := New("secret-key", "123", gateFunc(func(ctx context.Context) error {
+		timer := time.NewTimer(time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}), transportFunc(func(*http.Request) (*http.Response, error) { return reply(200, "[]"), nil }), registry, func() time.Time { return clock })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.request(t.Context(), "phones/call_by_id", url.Values{"call_id": {"42"}}, false); err != nil {
+		t.Fatal(err)
+	}
+	assertPositiveRequestLatency(t, registry)
+}
+
+func assertPositiveRequestLatency(t *testing.T, registry *prometheus.Registry) {
+	t.Helper()
+	families, err := registry.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, family := range families {
+		if family.GetName() == "finassist_zvonok_request_duration_seconds" {
+			if len(family.Metric) != 1 || family.Metric[0].GetHistogram().GetSampleCount() != 1 || family.Metric[0].GetHistogram().GetSampleSum() <= 0 {
+				t.Fatal("frozen business clock erased measured request latency", family)
+			}
+			return
+		}
+	}
+	t.Fatal("request latency was not observed")
+}
+
 func TestUnitCreateMultipartAndPrivateReads(t *testing.T) {
 	var paths []string
 	c := client(t, func(r *http.Request) (*http.Response, error) {

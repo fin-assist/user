@@ -82,11 +82,11 @@ type response struct {
 }
 
 func (c *Client) request(ctx context.Context, operation string, values url.Values, post bool, notAfter ...time.Time) (response, error) {
-	started := c.now()
+	started := time.Now()
 	outcome := "capacity_unavailable"
 	defer func() {
 		c.requests.WithLabelValues(operation, outcome).Inc()
-		c.latency.WithLabelValues(operation).Observe(c.now().Sub(started).Seconds())
+		c.latency.WithLabelValues(operation).Observe(time.Since(started).Seconds())
 	}()
 	if ctx.Err() != nil {
 		return response{}, errUnavailable

@@ -48,6 +48,8 @@ Auth handler считает expires_in и локальный fake backend стр
 ответа и должен укладываться в фиксированный допуск. Тест с перенесённой датой должен
 возвращать согласованный provider.created; это не изменение удалённых часов. Контекст
 ограничивается оставшейся Duration до captured business deadline, HTTP timeout — elapsed time.
+HTTP latency измеряется `time.Since` от монотонного `time.Now` независимо от business clock;
+диагностические расстояния provider.created сравниваются с локальным admission/receive окном.
 
 До unknown_deadline новый ключ получает обычный cached duplicate429 до
 ceilMinute(deadline), с однократным списанием phone/IP; replay не списывает, чистый

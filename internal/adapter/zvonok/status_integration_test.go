@@ -158,6 +158,9 @@ func TestIntegrationRecoveryUsesInjectedAdmissionClockAndElapsedTimeout(t *testi
 			if counts.reads.Load() != 1 || counts.posts.Load() != 0 {
 				t.Fatal("clock override changed read-only dispatch semantics", counts.reads.Load(), counts.posts.Load())
 			}
+			latency := prometheus.NewRegistry()
+			latency.MustRegister(c.latency)
+			assertPositiveRequestLatency(t, latency)
 		})
 	}
 }
