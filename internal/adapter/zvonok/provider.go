@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/url"
 	"time"
@@ -61,110 +60,145 @@ func (c *Client) phoneHistory(a verification.Attempt) url.Values {
 	return url.Values{"campaign_id": {c.campaign}, "phone": {a.Phone}, "from_created_date": {a.CreatedAt.Add(-phoneHistoryLookback).UTC().Format("2006-01-02 15:04:05")}}
 }
 
-// Create checks for a foreign unfinished provider call before adding this attempt.
-// The local claim is already committed; it grants no right to adopt older calls.
+// ClockSkewTolerance is an adapter bound, independent of timestamp precision.
+// Public verification ends early by this bound; known busy occupancy ends late.
+const ClockSkewTolerance = time.Second
+
+func pending(r remoteCall) bool {
+	status := r.Status
+	if status == "" {
+		status = r.LegacyStatus
+	}
+	return status == "new" || status == "wait" || status == "in_process"
+}
+
+func validPool(numbers []string) bool {
+	if len(numbers) < 1 || len(numbers) > verification.MaxCallbackPoolNumbers {
+		return false
+	}
+	seen := make(map[string]struct{}, len(numbers))
+	for _, number := range numbers {
+		if !phone.MatchString(number) {
+			return false
+		}
+		if _, exists := seen[number]; exists {
+			return false
+		}
+		seen[number] = struct{}{}
+	}
+	return true
+}
+
+// Create runs once after the durable dispatch marker has committed. The history
+// preflight can refuse a known holder but cannot adopt it or authorize a retry.
 func (c *Client) Create(ctx context.Context, a verification.Attempt) (verification.Call, error) {
+	if a.Campaign != c.campaign || a.FirstDispatchAt.IsZero() || a.DispatchNotAfter.IsZero() || !c.now().Before(a.DispatchNotAfter) {
+		return verification.Call{}, errUnavailable
+	}
+	ctx, cancel := context.WithDeadline(ctx, a.DispatchNotAfter)
+	defer cancel()
 	calls, err := c.lookup(ctx, "phones/calls_by_phone", c.phoneHistory(a))
 	if err != nil {
 		return verification.Call{}, verification.ErrProviderRejected
-	} // no write was attempted
+	}
+	received := c.now().UTC()
+	var busyUntil time.Time
 	for _, call := range calls {
-		if call.Phone != a.Phone {
-			return verification.Call{}, errUnavailable
+		if call.Phone != a.Phone || call.Created.After(received.Add(ClockSkewTolerance)) {
+			return verification.Call{}, verification.ErrProviderRejected
 		}
-		if !terminal(call) && call.Created.Add(verification.RequestTTL).After(c.now()) {
-			return verification.Call{}, verification.ErrProviderDuplicate
+		if !terminal(call) && !pending(call) {
+			return verification.Call{}, verification.ErrProviderRejected
+		}
+		if !terminal(call) && pending(call) {
+			until := call.Created.Add(verification.RequestTTL + ClockSkewTolerance)
+			if until.After(received) && until.After(busyUntil) {
+				busyUntil = until
+			}
 		}
 	}
-	return c.confirm(ctx, a, "", a.CreatedAt)
+	if !busyUntil.IsZero() {
+		return verification.Call{}, &verification.ProviderDuplicateError{BusyUntil: busyUntil}
+	}
+	if !c.now().Before(a.DispatchNotAfter) || ctx.Err() != nil {
+		return verification.Call{}, verification.ErrProviderRejected
+	}
+	return c.confirm(ctx, a)
 }
 
-// Recover first establishes ownership from the durable attempt's call ID or its
-// creation interval. Unknown statuses and foreign calls never permit a write.
-func (c *Client) Recover(ctx context.Context, a verification.Attempt) (out verification.Call, err error) {
-	// A refusal of a recovery POST says nothing about the original uncertain
-	// write. The original call may still exist: only a fresh Create can authorize
-	// refunding its reservation after a definitive rejection.
-	defer func() {
-		if errors.Is(err, verification.ErrProviderRejected) {
-			err = errUnavailable
-		}
-	}()
-
-	operation := "phones/calls_by_phone"
-	values := c.phoneHistory(a)
-	if a.CallID != "" {
-		operation = "phones/call_by_id"
-		values = url.Values{"call_id": {a.CallID}}
-	}
-	calls, err := c.lookup(ctx, operation, values)
-	if err != nil {
+// Recover cannot POST even if no call is found. Absence in a read is not proof
+// that the original dispatch cannot appear later. Missing pools stay unknown.
+func (c *Client) Recover(ctx context.Context, a verification.Attempt) (verification.Call, error) {
+	if a.Campaign != c.campaign || a.FirstDispatchAt.IsZero() || a.DispatchNotAfter.IsZero() || !c.now().Before(a.DispatchNotAfter) {
 		return verification.Call{}, errUnavailable
 	}
-	var own *remoteCall
-	owned := 0
+	ctx, cancel := context.WithDeadline(ctx, a.DispatchNotAfter)
+	defer cancel()
+	operation, values := "phones/calls_by_phone", c.phoneHistory(a)
+	if a.CallID != "" {
+		if !digits.MatchString(a.CallID) {
+			return verification.Call{}, errUnavailable
+		}
+		operation, values = "phones/call_by_id", url.Values{"call_id": {a.CallID}}
+	}
+	calls, err := c.lookup(ctx, operation, values)
+	if err != nil || len(calls) == 0 {
+		return verification.Call{}, errUnavailable
+	}
+	received := c.now().UTC()
+	var candidate *remoteCall
+	var busyUntil time.Time
+	sawOwnTerminal := false
 	for i := range calls {
-		r := &calls[i]
-		if r.Phone != a.Phone || r.Created.After(c.now()) {
+		call := &calls[i]
+		if call.Phone != a.Phone || (a.CallID != "" && string(call.ID) != a.CallID) || call.Created.After(received.Add(ClockSkewTolerance)) {
 			return verification.Call{}, errUnavailable
 		}
-		if a.CallID != "" && string(r.ID) != a.CallID {
+		if !terminal(*call) && !pending(*call) {
 			return verification.Call{}, errUnavailable
 		}
-		if r.Created.Before(a.CreatedAt.Truncate(time.Millisecond)) {
-			if !terminal(*r) && r.Created.Add(verification.RequestTTL).After(c.now()) {
-				return verification.Call{}, verification.ErrProviderDuplicate
+		if terminal(*call) {
+			if a.CallID != "" || !call.Created.Before(a.FirstDispatchAt.Truncate(time.Millisecond).Add(-ClockSkewTolerance)) {
+				sawOwnTerminal = true
 			}
 			continue
 		}
-		owned++
-		if own != nil {
-			// A recovered replacement can coexist with its terminal predecessor
-			// in history after another lost response. Two live calls are ambiguous.
-			newer, older := r, own
-			if newer.Created.Before(older.Created) {
-				newer, older = older, newer
+		if call.Created.Before(a.FirstDispatchAt.Truncate(time.Millisecond).Add(-ClockSkewTolerance)) {
+			until := call.Created.Add(verification.RequestTTL + ClockSkewTolerance)
+			if until.After(received) && until.After(busyUntil) {
+				busyUntil = until
 			}
-			if newer.Created.Equal(older.Created) || (!terminal(*older) && older.Created.Add(verification.RequestTTL).After(c.now())) {
-				return verification.Call{}, errUnavailable
-			}
-			own = newer
-		} else {
-			own = r
+			continue
 		}
-	}
-	if own == nil {
-		if a.CallID != "" {
+		if candidate != nil {
 			return verification.Call{}, errUnavailable
 		}
-		return c.confirm(ctx, a, "", c.now().UTC())
+		candidate = call
 	}
-	s := own.Status
-	if s == "" {
-		s = own.LegacyStatus
+	if !busyUntil.IsZero() {
+		return verification.Call{}, &verification.ProviderDuplicateError{BusyUntil: busyUntil}
 	}
-	if !terminal(*own) && s != "in_process" && s != "new" && s != "wait" {
+	if candidate == nil {
+		if sawOwnTerminal {
+			return verification.Call{}, verification.ErrProviderTerminal
+		}
 		return verification.Call{}, errUnavailable
 	}
-	if owned > 1 {
-		a.CreatedAt = own.Created
-	}
-	// An unfinished call can become terminal during this operation. confirm checks
-	// its returned ID; replacement means a fresh local lifetime and no old proof.
-	return c.confirm(ctx, a, string(own.ID), c.now().UTC())
+	return c.admit(a, *candidate, received)
 }
 
-func (c *Client) confirm(ctx context.Context, a verification.Attempt, previous string, sent time.Time) (verification.Call, error) {
-	r, err := c.request(ctx, "phones/confirm", url.Values{"campaign_id": {c.campaign}, "phone": {a.Phone}}, true)
+func (c *Client) confirm(ctx context.Context, a verification.Attempt) (verification.Call, error) {
+	r, err := c.request(ctx, "phones/confirm", url.Values{"campaign_id": {c.campaign}, "phone": {a.Phone}}, true, a.DispatchNotAfter)
+	received := c.now().UTC()
 	if err != nil {
 		return verification.Call{}, errUnavailable
 	}
-	if r.status == 429 {
+	if r.status == http.StatusTooManyRequests {
 		return verification.Call{}, verification.ErrProviderRejected
 	}
 	var envelope struct {
-		Status string          `json:"status"`
-		Data   json.RawMessage `json:"data"`
+		Status string
+		Data   json.RawMessage
 	}
 	if json.Unmarshal(r.body, &envelope) != nil {
 		return verification.Call{}, errUnavailable
@@ -172,52 +206,90 @@ func (c *Client) confirm(ctx context.Context, a verification.Attempt, previous s
 	if r.status >= 400 && r.status < 500 && envelope.Status == "error" {
 		return verification.Call{}, verification.ErrProviderRejected
 	}
-	if r.status != 200 || envelope.Status != "ok" {
+	if r.status != http.StatusOK || envelope.Status != "ok" {
 		return verification.Call{}, errUnavailable
 	}
 	var call remoteCall
-	if json.Unmarshal(envelope.Data, &call) != nil || !call.valid() || call.Phone != a.Phone || len(call.Numbers) < 1 || len(call.Numbers) > verification.MaxCallbackPoolNumbers || call.Created.After(c.now()) {
+	if json.Unmarshal(envelope.Data, &call) != nil || !call.valid() || call.Phone != a.Phone {
 		return verification.Call{}, errUnavailable
 	}
-	if call.Created.Before(a.CreatedAt.Truncate(time.Millisecond)) {
-		return verification.Call{}, verification.ErrProviderDuplicate
-	}
-	for _, n := range call.Numbers {
-		if !phone.MatchString(n) {
+	// V1's confirm schema need not contain a status. A separate authenticated read
+	// may establish it for exactly this ID/created/phone, using only its own pool.
+	if call.Status == "" && call.LegacyStatus == "" && !terminal(call) {
+		checked, err := c.lookup(ctx, "phones/call_by_id", url.Values{"call_id": {string(call.ID)}})
+		if err != nil || len(checked) != 1 || checked[0].ID != call.ID || checked[0].Phone != call.Phone || !checked[0].Created.Equal(call.Created) {
 			return verification.Call{}, errUnavailable
 		}
-	}
-	started := sent
-	if call.Created.Before(sent.Truncate(time.Millisecond)) {
-		if previous != "" && string(call.ID) != previous {
-			return verification.Call{}, errUnavailable
+		originalPool := call.Numbers
+		call = checked[0]
+		if len(call.Numbers) == 0 {
+			call.Numbers = originalPool
 		}
-		// A temporarily missing history response does not prove that confirm made
-		// a new call. Never extend that existing call's conservative local TTL.
-		started = a.CreatedAt
+		// The initial response's receive instant remains the admission upper bound.
 	}
-	if previous != "" && string(call.ID) == previous {
-		started = a.CreatedAt
-	}
-	// No fresh call may predate the operation which was allowed to create it.
-	if started.Before(a.CreatedAt) {
+	return c.admit(a, call, received)
+}
+
+func (c *Client) admit(a verification.Attempt, call remoteCall, received time.Time) (verification.Call, error) {
+	lower := a.FirstDispatchAt.Truncate(time.Millisecond)
+	if !call.valid() || call.Phone != a.Phone || a.FirstDispatchAt.IsZero() || received.Before(a.FirstDispatchAt) {
 		return verification.Call{}, errUnavailable
 	}
-	return verification.Call{ID: string(call.ID), Phone: a.Phone, StartedAt: started, Numbers: call.Numbers}, nil
+	if call.Created.Before(lower) {
+		c.observeClockDistance("before_dispatch", lower.Sub(call.Created))
+	}
+	if call.Created.After(received) {
+		c.observeClockDistance("after_receive", call.Created.Sub(received))
+	}
+	if call.Created.After(received.Add(ClockSkewTolerance)) {
+		return verification.Call{}, errUnavailable
+	}
+	if terminal(call) {
+		return verification.Call{}, verification.ErrProviderTerminal
+	}
+	if !pending(call) {
+		return verification.Call{}, errUnavailable
+	}
+	busyUntil := call.Created.Add(verification.RequestTTL + ClockSkewTolerance)
+	if call.Created.Before(lower.Add(-ClockSkewTolerance)) || !call.Created.Add(verification.RequestTTL-ClockSkewTolerance).After(c.now()) {
+		if busyUntil.After(c.now()) {
+			return verification.Call{}, &verification.ProviderDuplicateError{BusyUntil: busyUntil}
+		}
+		return verification.Call{}, verification.ErrProviderTerminal
+	}
+	if !validPool(call.Numbers) {
+		return verification.Call{}, errUnavailable
+	}
+	return verification.Call{ID: string(call.ID), Phone: call.Phone, StartedAt: call.Created, Numbers: call.Numbers,
+		Campaign: c.campaign, ReceivedAt: received, ClockSkewTolerance: ClockSkewTolerance, State: verification.Pending}, nil
+}
+
+func (c *Client) observeClockDistance(direction string, distance time.Duration) {
+	// Bound observations as well as bucket/cardinality, and never label identities.
+	seconds := distance.Seconds()
+	if seconds > 300 {
+		seconds = 300
+	}
+	c.clockDistance.WithLabelValues(direction).Observe(seconds)
 }
 
 // Status obtains proof only from the authenticated API and validates both ID and
 // phone. Provider status hints supplied by a postback are intentionally absent.
 func (c *Client) Status(ctx context.Context, a verification.Attempt) (verification.ProviderStatus, error) {
-	if !digits.MatchString(a.CallID) {
+	if a.Campaign != c.campaign || !digits.MatchString(a.CallID) {
 		return verification.ProviderStatus{}, errUnavailable
+	}
+	if a.CreatedAt.IsZero() {
+		return verification.ProviderStatus{}, verification.ErrProof
 	}
 	calls, err := c.lookup(ctx, "phones/call_by_id", url.Values{"call_id": {a.CallID}})
 	if err != nil || len(calls) != 1 {
 		return verification.ProviderStatus{}, errUnavailable
 	}
 	r := calls[0]
-	if string(r.ID) != a.CallID || r.Phone != a.Phone {
+	// PostgreSQL stores microseconds. The provider's millisecond timestamp must
+	// still identify the bound call; skew tolerance belongs only to admission.
+	if string(r.ID) != a.CallID || r.Phone != a.Phone || !r.Created.Truncate(time.Microsecond).Equal(a.CreatedAt.Truncate(time.Microsecond)) {
 		return verification.ProviderStatus{}, verification.ErrProof
 	}
 	return verification.ProviderStatus{ID: a.CallID, Phone: a.Phone, State: r.state()}, nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -12,10 +13,13 @@ import (
 )
 
 // Accounts removes user-owned data inside the tombstone transaction on primary.
-type Accounts struct{ db *DB }
+type Accounts struct {
+	db  *DB
+	now func() time.Time
+}
 
 // NewAccounts shares the transaction manager with deletion and outbox publication.
-func NewAccounts(db *DB) *Accounts { return &Accounts{db: db} }
+func NewAccounts(db *DB) *Accounts { return &Accounts{db: db, now: time.Now} }
 
 // Remove requires the caller to hold go-tombstone's user guard. NOWAIT avoids
 // inversion with auth replay (key lock, then user guard): the usecase rolls back
@@ -50,6 +54,11 @@ func (r *Accounts) Remove(ctx context.Context, id string) error {
 	// signed identity can outlive a partially restored database.
 	if _, err = tx.Exec(ctx, `DELETE FROM idempotency_keys WHERE scope=$1::uuid OR owner_id=$1::uuid`, id); err != nil {
 		return deletionError(err)
+	}
+	// Independent evidence survives deletion without keeping an account FK.
+	// Each receipt starts its policy retention once; repeated deletion cannot extend it.
+	if _, err = tx.Exec(ctx, `UPDATE phone_consent_receipt SET retain_until=$2 WHERE linked_user_id=$1::uuid AND retain_until IS NULL`, id, r.now().UTC().AddDate(3, 0, 0)); err != nil {
+		return fmt.Errorf("deletion: retain phone evidence: %w", err)
 	}
 	if _, err = tx.Exec(ctx, `DELETE FROM app_user WHERE id=$1`, id); err != nil {
 		return fmt.Errorf("deletion: remove account: %w", err)

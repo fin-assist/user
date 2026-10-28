@@ -20,7 +20,7 @@ func (*malformedCreationProvider) Name() string { return "test" }
 func (p *malformedCreationProvider) Create(_ context.Context, a verification.Attempt) (verification.Call, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	c := verification.Call{ID: "call:" + strconv.Itoa(int(a.ID)), Phone: a.Phone, StartedAt: a.CreatedAt, Numbers: []string{"+74951234567"}}
+	c := verification.Call{ID: "call:" + strconv.Itoa(int(a.ID)), Phone: a.Phone, StartedAt: a.FirstDispatchAt, ReceivedAt: time.Now().UTC(), State: verification.Pending, Campaign: a.Campaign, Numbers: []string{"+74951234567"}}
 	switch p.mode {
 	case "empty-id":
 		c.ID = ""
@@ -51,6 +51,7 @@ func TestAPIProviderMalformedRepliesCannotPublishVerificationSecrets(t *testing.
 		t.Run(mode, func(t *testing.T) {
 			p := &malformedCreationProvider{mode: mode}
 			env := apitest.StartWithPhone(t, p, creationSelector{})
+			seedDocuments(t, env)
 			key, phone := authKey(), "+79001234567"
 			got, err := startCall(t, env, key, phone)
 			if err == nil || got != nil {

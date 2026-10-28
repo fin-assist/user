@@ -99,7 +99,7 @@ func TestIntegrationHandlersCommitCachedSessionsAndSettingsAtomically(t *testing
 		}
 		return metadata.NewIncomingContext(ctx, metadata.Pairs("idempotency-key", keysByLabel[key]))
 	}
-	started, err := a.StartPhoneVerification(incoming("integration-start"), &userv1.StartPhoneVerificationRequest{Phone: "+79001234569"})
+	started, err := a.StartPhoneVerification(incoming("integration-start"), &userv1.StartPhoneVerificationRequest{Phone: "+79001234569", PdConsentAccepted: true, PdConsentVersion: "v1", AgeConfirmed: true})
 	if err != nil || started.GetVerificationToken() == "" {
 		t.Fatal(started, err)
 	}

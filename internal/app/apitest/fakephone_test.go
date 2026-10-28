@@ -18,7 +18,9 @@ import (
 
 func fakePhoneEnv(t *testing.T) *apitest.Env {
 	t.Helper()
-	return apitest.Start(t, func(c *config.Config) { c.Zvonok.Provider = "fake" })
+	env := apitest.Start(t, func(c *config.Config) { c.Zvonok.Provider = "fake" })
+	seedDocuments(t, env)
+	return env
 }
 
 func TestAPIFakePhoneAPINewExistingReplayDeletionAndNotify(t *testing.T) {
@@ -117,7 +119,7 @@ func TestAPIFakePhoneAPIConfirmationRollbackRecoversOwnAttempt(t *testing.T) {
 	var selected *string
 	var verified *time.Time
 	var pool []string
-	if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT id,created_at,provider_call_id,callback_number,allowed_phones_for_call,verified_at FROM phone_verification WHERE phone=$1`, phone).Scan(&id, &created, &callID, &selected, &pool, &verified); err != nil ||
+	if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT id,first_dispatch_at,provider_call_id,callback_number,allowed_phones_for_call,verified_at FROM phone_verification WHERE phone=$1`, phone).Scan(&id, &created, &callID, &selected, &pool, &verified); err != nil ||
 		callID != nil || selected != nil || len(pool) != 0 || verified != nil {
 		t.Fatal(id, callID, selected, pool, verified, err)
 	}
@@ -141,6 +143,7 @@ func TestAPIFakePhoneAPINamespaceRefusalAndSharedLimits(t *testing.T) {
 		c.Zvonok.Provider = "fake"
 		c.Limits[ratelimit.WatchIP] = ratelimit.Rule{Limit: 1, Window: time.Hour}
 	})
+	seedDocuments(t, env)
 	if out, err := startCall(t, env, authKey(), "+79990001234"); err == nil || out != nil || startHits(t, env) != 0 {
 		t.Fatal(out, err)
 	}
@@ -214,7 +217,7 @@ func TestAPIFakePhoneAPIAccountAppearsWhileStartWaitsForRequest(t *testing.T) {
 	done := make(chan reply, 1)
 	client := userv1.NewAuthServiceClient(env.Conn)
 	go func() {
-		out, err := client.StartPhoneVerification(authContext(ctx, key), &userv1.StartPhoneVerificationRequest{Phone: phone})
+		out, err := client.StartPhoneVerification(authContext(ctx, key), &userv1.StartPhoneVerificationRequest{Phone: phone, PdConsentAccepted: true, PdConsentVersion: "v1", AgeConfirmed: true})
 		done <- reply{out, err}
 	}()
 	for {

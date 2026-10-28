@@ -39,7 +39,7 @@ updates them in the same PR. A service made from the template rewrites the first
 
 FIN-255 uses go-grpc v0.2.0 server/client/reqctx, go-migrate v0.2.0 and go-worker v0.1.0 directly; no local transport/context/runner copies. go-postgres v0.3.0 owns pool lifecycle; routing and business transaction mapping remain service-owned. Workers receive the logger, SystemClock and explicit five-second restart delay. Shared tests belong to the libraries; service identity, ACL, SQL and RPC scenarios remain here.
 
-FIN-225 uses contracts/gen/go v0.5.0. Usecase-owned `domain.WithRequestRetry` marks only explicit refusal phases; `adapter/grpc/retryinfo` serializes that decision after mapping, and `adapter/idempotency.StartEngine` preserves callback advice before encoding. Never infer permission from a reason/status or decorate an old decoded cache. Positive V1 is restricted to the initial pre-effect limiter; unknown storage/COMMIT/provider outcomes stay unmarked. See `docs/errors.md`; this does not change keys, TTL or provider behavior.
+FIN-364 uses contracts/gen/go v0.7.0. Usecase-owned `domain.WithRequestRetry` marks only explicit refusal phases; `adapter/grpc/retryinfo` serializes that decision after mapping, and `adapter/idempotency.StartEngine` preserves callback advice before encoding. Never infer permission from a reason/status or decorate an old decoded cache. Positive advice also permits strictly read-only unknown recovery before its captured deadline. Terminal original dispatched duplicate/unknown keys carry false; storage/COMMIT failures do not inherit callback advice. See `docs/errors.md` and FIN-364 below.
 
 ## Current implementation (FIN-219)
 
@@ -106,7 +106,7 @@ fields own recovery and refundable windows. Library Resource binds the own reser
 and successful/busy caches to the request ID; busy keys never overwrite attempt fields. Completion takes key -> guard/user -> request;
 fresh claims take key -> limits -> guard/user -> request -> BindResource. Selector runs inside
 the completion transaction. Only ReleaseIfCurrent permits refund after a definite provider
-rejection, in the same transaction as release; uncertain outcomes keep their claim.
+rejection, in the same transaction as release; uncertain outcomes keep their claim only until the captured unknown deadline. Receipt and terminal key evidence survive independently.
 Deletion also purges successful and busy Start caches through phone links, including
 keys created before the account existed. Cleanup retains requests while a Resource cache is live. Purge locks request parents
 before its NOWAIT key snapshot; busy claims take KEY SHARE to close the uncommitted-link race.
@@ -273,6 +273,22 @@ Priorities when they pull apart, in this order:
   free text.
 - Document in moderation: a doc comment on exported identifiers of packages others use, comments where the logic is
   not obvious (accounting rules, idempotency, locks, transaction boundaries), not on every function.
+
+## FIN-364 registration evidence
+
+Start uses contracts/gen/go v0.7.0: separate age/PD declarations, all gates after key/limits/busy.
+Durable phone_consent_receipt commits before provider transfer; it has no account/request cascade.
+Receipt acceptance/age/IP/version are immutable and applicant-only until verified ownership.
+Unknown deadline comes from PHONE_VERIFICATION_UNKNOWN_TIMEOUT (default5m, startup1s..5m),
+captured once. Dispatch marker+first_dispatch_at atomic; one Create before dispatch_not_after,
+then only read-only Recover. Unknown deadline releases phone with accepted late-duplicate risk;
+terminal old key cannot repeat within original24h, evidence survives end+24h separately.
+Linked evidence survives deletion/revoke3years. No providerName branching in usecases.
+Admission/binding/open/positive conservative remaining are atomic; unique provider/campaign/ID
+covers live/archive. Zvonokε1s splits declared/public/busy; fakeε0. Terminal original dispatched
+provider duplicate caches429false until retry_at, then500false; predispatch busy keys keep usual
+cache semantics. Old pending/results without receipt invalidated by000005; established sessions
+persist even before first Refresh. Never reintroduce confirm retry or current-version Register gate.
 
 ## Tests
 

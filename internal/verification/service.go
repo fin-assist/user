@@ -43,18 +43,23 @@ type Outcome struct {
 
 // Request is primary state; nullable fields preserve the request lifecycle.
 type Request struct {
-	ID                      int32
-	Phone, Provider, CallID string
-	Hash                    token.Hash
-	CreatedAt, ExpiresAt    time.Time
-	VerifiedAt              *time.Time
-	IsNewUser               bool
-	UserID                  string
-	RegistrationHash        *token.Hash
-	Ciphertext              []byte
-	KeyID                   string
-	Closed                  bool
-	Released                bool
+	ID                                                 int32
+	Phone, Provider, CallID                            string
+	Hash                                               token.Hash
+	CreatedAt, ExpiresAt                               time.Time
+	VerifiedAt                                         *time.Time
+	IsNewUser                                          bool
+	UserID                                             string
+	RegistrationHash                                   *token.Hash
+	Ciphertext                                         []byte
+	KeyID                                              string
+	Closed                                             bool
+	Released                                           bool
+	Evidence                                           bool
+	Campaign                                           string
+	UnknownDeadline, FirstDispatchAt, DispatchNotAfter time.Time
+	DeclaredExpiry, KnownBusyUntil                     time.Time
+	StartTerminal                                      bool
 }
 
 // Proof must be obtained from the provider API by a trusted adapter, never from an
@@ -197,10 +202,10 @@ func (s *Service) confirm(ctx context.Context, p Proof, owner *string) (changed 
 			return ErrProof
 		}
 		now := s.now().UTC()
-		if r.VerifiedAt != nil || r.Closed || r.Released || !now.Before(r.ExpiresAt) {
+		if !r.Evidence || r.VerifiedAt != nil || r.Closed || r.Released || !now.Before(r.ExpiresAt) {
 			return nil
 		}
-		if now.Before(r.CreatedAt) {
+		if now.Before(r.FirstDispatchAt) {
 			return errors.New("verification: request created in the future")
 		}
 		out := Outcome{State: Verified, IsNewUser: id == "", UserID: id}
@@ -262,7 +267,7 @@ func (s *Service) snapshot(ctx context.Context, hash token.Hash, allowExpired bo
 			if err != nil {
 				return invalidMissing(err)
 			}
-			if subtle.ConstantTimeCompare(r.Hash[:], hash[:]) != 1 || r.Closed {
+			if subtle.ConstantTimeCompare(r.Hash[:], hash[:]) != 1 || r.Closed || !r.Evidence {
 				return domain.WithRequestRetry(finerr.InvalidToken(), false)
 			}
 			if r.UserID != before.UserID {

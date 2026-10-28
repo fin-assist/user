@@ -243,7 +243,7 @@ type phoneFixture struct {
 func fixture(t *testing.T) *phoneFixture {
 	t.Helper()
 	f := &phoneFixture{now: time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC), tx: &testTX{}, c: &testCodec{}, signer: &testSigner{}, n: &testNotifications{changed: make(chan struct{}, 1), done: make(chan struct{})}}
-	f.r = &testRepo{tx: f.tx, r: Request{ID: 1, Phone: "+79001234567", Provider: "test", CallID: "call-1", Hash: token.Sum("secret"), CreatedAt: f.now.Add(-time.Minute), ExpiresAt: f.now.Add(4 * time.Minute)}}
+	f.r = &testRepo{tx: f.tx, r: Request{ID: 1, Evidence: true, Phone: "+79001234567", Provider: "test", CallID: "call-1", Hash: token.Sum("secret"), CreatedAt: f.now.Add(-time.Minute), ExpiresAt: f.now.Add(4 * time.Minute)}}
 	f.a = &testAccounts{tx: f.tx}
 	f.g = &testGuard{tx: f.tx, alive: true}
 	f.s = New(f.tx, f.r, f.a, f.g, f.signer, f.c, f.n, func() time.Time { f.clockMu.Lock(); defer f.clockMu.Unlock(); return f.now }, func() (string, error) { f.tokens++; return "generated-secret", f.tokenErr }, 60*24*time.Hour, time.Hour)
@@ -352,7 +352,7 @@ func TestUnitConfirmRejectionsAndDependencyFailures(t *testing.T) {
 			case "lock-missing":
 				f.r.failure = mode
 			case "future":
-				f.r.r.CreatedAt = f.now.Add(time.Second)
+				f.r.r.FirstDispatchAt = f.now.Add(time.Second)
 			}
 			changed, err := f.s.Confirm(t.Context(), goodProof())
 			if changed || f.tokens != 0 || (mode == "future" && err == nil) || (mode != "future" && err != nil) {

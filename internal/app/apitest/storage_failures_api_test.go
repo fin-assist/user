@@ -184,7 +184,7 @@ func TestAPIProfileWritesDoNotExposePartialSettingsOrConsentAfterStorageFailure(
 	}
 }
 
-func TestAPIRegistrationRejectsUnpublishedConsentAndFutureProofBeforeAccountCreation(t *testing.T) {
+func TestAPIRegistrationRejectsFutureProofAndPreservesPinnedConsent(t *testing.T) {
 	env := apitest.Start(t)
 	seedDocuments(t, env)
 	seedRegistration(t, env, "guarded-public-registration", "+79001234567", time.Now().Add(time.Minute))
@@ -194,18 +194,6 @@ func TestAPIRegistrationRejectsUnpublishedConsentAndFutureProofBeforeAccountCrea
 		t.Fatal(got, err)
 	}
 	if _, err := env.App.DB.Primary().Exec(t.Context(), `UPDATE phone_verification SET verified_at=now();UPDATE consent_document SET is_current=false WHERE type='personal_data'`); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := c.Register(authContext(t.Context(), authKey()), in); got != nil || status.Code(err) != codes.Internal {
-		t.Fatal(got, err)
-	}
-	if _, err := env.App.DB.Primary().Exec(t.Context(), `UPDATE consent_document SET is_current=true WHERE type='personal_data';ALTER TABLE consent_document RENAME COLUMN is_current TO unavailable`); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := c.Register(authContext(t.Context(), authKey()), in); got != nil || status.Code(err) != codes.Internal {
-		t.Fatal(got, err)
-	}
-	if _, err := env.App.DB.Primary().Exec(t.Context(), `ALTER TABLE consent_document RENAME COLUMN unavailable TO is_current`); err != nil {
 		t.Fatal(err)
 	}
 	registered, err := c.Register(authContext(t.Context(), authKey()), in)

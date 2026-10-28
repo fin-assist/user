@@ -41,7 +41,7 @@ func profileDB(t *testing.T) (*DB, *profile.Service, *Profiles) {
 		t.Fatal(err)
 	}
 	t.Cleanup(db.Close)
-	_, err = db.Primary().Exec(t.Context(), `INSERT INTO consent_document(type,version,title,url,is_current) VALUES('assistant','v1','Old test','https://example.test/v1',false),('assistant','v2','Current test','https://example.test/v2',true);INSERT INTO app_user(id,phone) VALUES('019c7714-3b77-74d1-9866-e1f484aae2ab','+79001234567'),('019c7714-3b77-74d1-9866-e1f484aae2ac','+79001234568')`)
+	_, err = db.Primary().Exec(t.Context(), `INSERT INTO consent_document(type,version,title,url,is_current) VALUES('assistant','v1','Old test','https://example.test/v1',false),('assistant','v2','Current test','https://example.test/v2',true);INSERT INTO consent_document(type,version,title,url,is_current) VALUES('personal_data','v1','Test','https://example.test/pd',false);INSERT INTO app_user(id,phone) VALUES('019c7714-3b77-74d1-9866-e1f484aae2ab','+79001234567'),('019c7714-3b77-74d1-9866-e1f484aae2ac','+79001234568')`)
 	if err != nil {
 		t.Fatal(err)
 	}

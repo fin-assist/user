@@ -16,7 +16,7 @@ import (
 )
 
 func startRecord(key, phone string, now time.Time) verification.StartRecord {
-	return verification.StartRecord{Key: key, Hash: token.Sum("request:" + phone), Windows: make([]ratelimit.Window, 4), Request: verification.Request{Phone: phone, Provider: "test", Hash: token.Sum(key), CreatedAt: now, ExpiresAt: now.Add(verification.RequestTTL)}}
+	return verification.StartRecord{Key: key, Hash: token.Sum("request:" + phone), Consent: verification.Consent{Accepted: true, Version: "v1", AgeConfirmed: true}, ClientIP: "203.0.113.7", AcceptedAt: now, KeyExpiresAt: now.Add(24 * time.Hour), Windows: make([]ratelimit.Window, 4), Request: verification.Request{Phone: phone, Provider: "test", Hash: token.Sum(key), CreatedAt: now, UnknownDeadline: now.Add(verification.RequestTTL), ExpiresAt: now.Add(verification.RequestTTL)}}
 }
 
 const startKeyA = "019c7714-3b77-74d1-9866-000000000001"
@@ -246,6 +246,9 @@ func TestIntegrationStartRepositoryOwnershipBusyAndAtomicCompletion(t *testing.T
 	if _, err = repo.Find(t.Context(), a.Key); err != nil {
 		t.Fatal("busy key deleted owner's request", err)
 	}
+	if err = db.Run(t.Context(), func(ctx context.Context) error { var e error; a, _, e = repo.Dispatch(ctx, a, now); return e }); err != nil {
+		t.Fatal(err)
+	}
 	call := verification.Call{ID: "provider-call", StartedAt: now, Phone: a.Request.Phone, Numbers: []string{"+74951234567"}}
 	h := token.Sum("client secret")
 	rolled := errors.New("service rollback")
@@ -318,7 +321,7 @@ func TestIntegrationStartRepositoryRefundUsesPersistedOriginalWindows(t *testing
 		t.Fatal(err)
 	}
 	var hits, held, keys int
-	if err = db.Primary().QueryRow(t.Context(), `SELECT (SELECT sum(hits) FROM rate_limit_window),(SELECT count(*) FROM phone_verification WHERE released_at IS NULL),(SELECT count(*) FROM phone_verification WHERE start_key IS NOT NULL)`).Scan(&hits, &held, &keys); err != nil || hits != 0 || held != 0 || keys != 0 {
+	if err = db.Primary().QueryRow(t.Context(), `SELECT (SELECT sum(hits) FROM rate_limit_window),(SELECT count(*) FROM phone_verification WHERE released_at IS NULL),(SELECT count(*) FROM phone_verification WHERE start_key IS NOT NULL)`).Scan(&hits, &held, &keys); err != nil || hits != 0 || held != 0 || keys != 1 {
 		t.Fatal(hits, held, keys, err)
 	}
 	if _, err = db.Primary().Exec(t.Context(), `DELETE FROM rate_limit_window`); err != nil {
@@ -331,7 +334,7 @@ func TestIntegrationStartRepositoryRefundUsesPersistedOriginalWindows(t *testing
 func TestIntegrationStartRepositoryCorruptionAndCleanupMappingLifetime(t *testing.T) {
 	db, service, _, now := phoneState(t)
 	repo := NewVerificationStarts(db)
-	a := startRecord(startKeyA, "+79001234567", now.Add(-24*time.Hour-2*time.Second))
+	a := startRecord(startKeyA, "+79001234567", now.Add(-24*time.Hour+2*time.Second))
 	if err := db.Run(t.Context(), func(ctx context.Context) error { var err error; a, _, err = repo.Claim(ctx, a); return err }); err != nil {
 		t.Fatal(err)
 	}
@@ -344,7 +347,7 @@ func TestIntegrationStartRepositoryCorruptionAndCleanupMappingLifetime(t *testin
 	if _, err := repo.Find(t.Context(), a.Key); err != nil {
 		t.Fatal("live cache lost deletion mapping", err)
 	}
-	for _, sql := range []string{`UPDATE phone_verification SET start_request_hash='\x01'`, `UPDATE phone_verification SET start_request_hash=decode(repeat('01',32),'hex'),start_reserved_windows='null'`, `UPDATE phone_verification SET start_reserved_windows='[{}]'`} {
+	for _, sql := range []string{`UPDATE phone_consent_receipt SET request_hash='\x01'`, `UPDATE phone_consent_receipt SET request_hash=decode(repeat('01',32),'hex');UPDATE phone_verification SET start_reserved_windows='null'`, `UPDATE phone_verification SET start_reserved_windows='[{}]'`} {
 		if _, err := db.Primary().Exec(t.Context(), sql); err != nil {
 			t.Fatal(err)
 		}
@@ -355,6 +358,7 @@ func TestIntegrationStartRepositoryCorruptionAndCleanupMappingLifetime(t *testin
 	if _, err := db.Primary().Exec(t.Context(), `UPDATE idempotency_keys SET expires_at=$1`, now.Add(-time.Second)); err != nil {
 		t.Fatal(err)
 	}
+	repo.WithClock(func() time.Time { return now.Add(3 * time.Second) })
 	if _, err := service.Cleanup(t.Context(), 1000); err != nil {
 		t.Fatal(err)
 	}

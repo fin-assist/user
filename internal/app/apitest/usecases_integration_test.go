@@ -332,7 +332,7 @@ func TestIntegrationConcurrentRegistrationProofsPreserveExistingAccountSettings(
 	}
 }
 
-func TestIntegrationRegistrationChecksStoredProofAndCurrentConsentBeforeWrites(t *testing.T) {
+func TestIntegrationRegistrationChecksStoredProofAndPinnedConsentBeforeWrites(t *testing.T) {
 	env := apitest.Start(t)
 	seedDocuments(t, env)
 	publisher, err := outboxlib.NewPublisher(env.App.DB, time.Now)
@@ -360,14 +360,14 @@ func TestIntegrationRegistrationChecksStoredProofAndCurrentConsentBeforeWrites(t
 			t.Fatal(tc, err)
 		}
 	}
-	if _, err := env.App.DB.Primary().Exec(t.Context(), `UPDATE phone_verification SET verified_at=now();DELETE FROM consent_document WHERE type='personal_data'`); err != nil {
+	if _, err := env.App.DB.Primary().Exec(t.Context(), `UPDATE phone_verification SET verified_at=now();UPDATE consent_document SET is_current=false WHERE type='personal_data'`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := sessions.Register(t.Context(), in); err == nil {
-		t.Fatal("unpublished personal-data consent accepted")
+	if _, err := sessions.Register(t.Context(), in); err != nil {
+		t.Fatal("pinned consent rejected after document rotation", err)
 	}
 	var users int
-	if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT count(*) FROM app_user`).Scan(&users); err != nil || users != 0 {
+	if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT count(*) FROM app_user`).Scan(&users); err != nil || users != 1 {
 		t.Fatal(users, err)
 	}
 }

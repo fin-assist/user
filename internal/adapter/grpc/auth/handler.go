@@ -39,7 +39,7 @@ type Phone interface {
 
 // PhoneStart owns the multi-transaction external-effect protocol.
 type PhoneStart interface {
-	Start(context.Context, idempotency.Request, string, string) (verification.Started, error)
+	StartWithConsent(context.Context, idempotency.Request, string, string, verification.Consent) (verification.Started, error)
 }
 
 // Engine is the library surface used by this transport adapter.
@@ -99,7 +99,7 @@ func (h *Handler) StartPhoneVerification(ctx context.Context, in *userv1.StartPh
 		if err != nil {
 			return nil, retryinfo.Apply(err)
 		}
-		result, err = h.start.Start(ctx, request, in.GetPhone(), reqctx.ClientIP(ctx))
+		result, err = h.start.StartWithConsent(ctx, request, in.GetPhone(), reqctx.ClientIP(ctx), verification.Consent{Accepted: in.GetPdConsentAccepted(), Version: in.GetPdConsentVersion(), AgeConfirmed: in.GetAgeConfirmed()})
 		return nil, retryinfo.Apply(err)
 	})
 	if err != nil {

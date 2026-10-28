@@ -26,7 +26,7 @@ import (
 
 func seedDocuments(t *testing.T, env *apitest.Env) {
 	t.Helper()
-	_, err := env.App.DB.Primary().Exec(t.Context(), `INSERT INTO consent_document(type,version,title,url,is_current) VALUES ('personal_data','v1','PD consent','https://example.test/pd',true),('assistant','v2','Assistant consent','https://example.test/assistant',true)`)
+	_, err := env.App.DB.Primary().Exec(t.Context(), `INSERT INTO consent_document(type,version,title,url,is_current) VALUES ('personal_data','v1','PD consent','https://example.test/pd',true),('assistant','v2','Assistant consent','https://example.test/assistant',true) ON CONFLICT(type,version) DO NOTHING`)
 	if err != nil {
 		t.Fatal(err)
 	}

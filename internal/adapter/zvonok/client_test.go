@@ -29,10 +29,10 @@ func reply(status int, body string) *http.Response {
 	return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}
 }
 
-var testNow = time.Date(2026, 10, 24, 12, 0, 20, 0, time.UTC)
+var testNow = time.Now().UTC().Truncate(time.Millisecond)
 
 func attempt() verification.Attempt {
-	return verification.Attempt{ID: 1, Provider: "zvonok", Phone: "+79991234567", CreatedAt: testNow.Add(-10 * time.Second), ExpiresAt: testNow.Add(290 * time.Second)}
+	return verification.Attempt{ID: 1, Provider: "zvonok", Campaign: "123", Phone: "+79991234567", CreatedAt: testNow.Add(-10 * time.Second), FirstDispatchAt: testNow.Add(-10 * time.Second), DispatchNotAfter: testNow.Add(290 * time.Second), ExpiresAt: testNow.Add(290 * time.Second)}
 }
 func remote(id string, created time.Time, state string) string {
 	return fmt.Sprintf(`{"call_id":%s,"phone":"+79991234567","created":%q,"call_status":%q,"allowed_phones_for_call":["+74951234567","+74957654321"],"balance":"100.29"}`, id, created.Format(time.RFC3339Nano), state)
@@ -72,7 +72,7 @@ func TestUnitCreateMultipartAndPrivateReads(t *testing.T) {
 		return reply(200, `{"status":"ok","data":`+remote("1", attempt().CreatedAt.Add(time.Millisecond), "in_process")+`}`), nil
 	})
 	out, err := c.Create(t.Context(), attempt())
-	if err != nil || out.ID != "1" || out.StartedAt != attempt().CreatedAt || len(out.Numbers) != 2 || len(paths) != 2 {
+	if err != nil || out.ID != "1" || !out.StartedAt.Equal(attempt().CreatedAt.Add(time.Millisecond)) || len(out.Numbers) != 2 || len(paths) != 2 {
 		t.Fatal(out, err, paths)
 	}
 }
@@ -110,45 +110,37 @@ func TestUnitCreateAndRecoverIgnoreBalance(t *testing.T) {
 	}
 }
 
-func TestUnitRecoveryChecksIdentityAndTerminalRace(t *testing.T) {
+func TestUnitRecoveryChecksIdentityWithoutAnyWrite(t *testing.T) {
 	for _, tt := range []struct {
-		name, lookup, returned string
-		want                   error
-		newCall                bool
-		writes                 int
+		name, lookup string
+		want         error
 	}{
-		{"same", remote("1", attempt().CreatedAt, "in_process"), remote("1", attempt().CreatedAt, "in_process"), nil, false, 1},
-		{"lost-replacement", remote("1", attempt().CreatedAt, "pincode_ok") + "," + remote("2", testNow, "in_process"), remote("2", testNow, "in_process"), nil, true, 1},
-		{"terminal", remote("1", attempt().CreatedAt, "pincode_ok"), remote("2", testNow, "in_process"), nil, true, 1},
-		{"race", remote("1", attempt().CreatedAt, "in_process"), remote("2", testNow, "in_process"), nil, true, 1},
-		{"foreign", remote("1", attempt().CreatedAt.Add(-time.Second), "in_process"), "", verification.ErrProviderDuplicate, false, 0},
-		{"wrong-phone", strings.ReplaceAll(remote("1", attempt().CreatedAt, "in_process"), "+79991234567", "+79997654321"), "", errUnavailable, false, 0},
-		{"ambiguous", remote("1", attempt().CreatedAt, "in_process") + "," + remote("2", testNow, "in_process"), "", errUnavailable, false, 0},
-		{"unknown-state", remote("1", attempt().CreatedAt, "future_status"), "", errUnavailable, false, 0},
-		{"not-accepted", "", remote("2", testNow, "in_process"), nil, true, 1},
-		{"old-terminal", remote("1", attempt().CreatedAt.Add(-time.Minute), "expires"), remote("2", testNow, "in_process"), nil, true, 1},
+		{"same", remote("1", attempt().FirstDispatchAt, "in_process"), nil},
+		{"single-pending-after-terminal", remote("1", attempt().FirstDispatchAt, "pincode_ok") + "," + remote("2", testNow, "in_process"), nil},
+		{"terminal", remote("1", attempt().FirstDispatchAt, "pincode_ok"), verification.ErrProviderTerminal},
+		{"foreign", remote("1", attempt().FirstDispatchAt.Add(-ClockSkewTolerance-time.Nanosecond), "in_process"), verification.ErrProviderDuplicate},
+		{"wrong-phone", strings.ReplaceAll(remote("1", attempt().FirstDispatchAt, "in_process"), "+79991234567", "+79997654321"), errUnavailable},
+		{"ambiguous", remote("1", attempt().FirstDispatchAt, "in_process") + "," + remote("2", testNow, "in_process"), errUnavailable},
+		{"unknown-state", remote("1", attempt().FirstDispatchAt, "future_status"), errUnavailable},
+		{"not-found", "", errUnavailable},
+		{"old-terminal", remote("1", attempt().FirstDispatchAt.Add(-time.Minute), "expires"), errUnavailable},
+		{"missing-pool", strings.ReplaceAll(remote("1", attempt().FirstDispatchAt, "in_process"), `["+74951234567","+74957654321"]`, `[]`), errUnavailable},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			writes := 0
+			reads := 0
 			c := client(t, func(r *http.Request) (*http.Response, error) {
-				if r.Method == "GET" {
-					return reply(200, "["+tt.lookup+"]"), nil
+				if r.Method != http.MethodGet {
+					t.Fatal("recovery attempted a write")
 				}
-				writes++
-				return reply(200, `{"status":"ok","data":`+tt.returned+`}`), nil
+				reads++
+				return reply(200, "["+tt.lookup+"]"), nil
 			})
 			out, err := c.Recover(t.Context(), attempt())
-			if !errors.Is(err, tt.want) || writes != tt.writes {
-				t.Fatal(out, err, writes)
+			if !errors.Is(err, tt.want) || reads != 1 {
+				t.Fatal(out, err, reads)
 			}
-			if err == nil {
-				want := attempt().CreatedAt
-				if tt.newCall {
-					want = testNow
-				}
-				if out.StartedAt != want {
-					t.Fatal("lifetime", out.StartedAt, want)
-				}
+			if err == nil && (out.ClockSkewTolerance != time.Second || out.Campaign != "123" || out.ReceivedAt != testNow || out.State != verification.Pending) {
+				t.Fatal("untrusted recovery metadata", out)
 			}
 		})
 	}
@@ -178,7 +170,7 @@ func TestUnitHTTPFailuresCannotLeakSecretsOrAuthorizeRefunds(t *testing.T) {
 				}
 				return reply(tt.status, tt.body), nil
 			})
-			_, err := c.confirm(t.Context(), attempt(), "", attempt().CreatedAt)
+			_, err := c.confirm(t.Context(), attempt())
 			if !errors.Is(err, tt.want) || strings.Contains(err.Error(), "secret-key") || strings.Contains(err.Error(), "7999") {
 				t.Fatal(err)
 			}
@@ -209,6 +201,7 @@ func TestUnitStatusUsesAuthenticatedIdentityAndCurrentStatus(t *testing.T) {
 		})
 		a := attempt()
 		a.CallID = "1"
+		a.CreatedAt = testNow
 		out, err := c.Status(t.Context(), a)
 		if !errors.Is(err, tt.want) || out.State != tt.state {
 			t.Fatal(out, err)
@@ -233,7 +226,7 @@ func TestIntegrationRealHTTPDoesNotFollowRedirect(t *testing.T) {
 		copy.URL.Host = u.Host
 		return source.Client().Transport.RoundTrip(copy)
 	})
-	_, err := c.confirm(t.Context(), attempt(), "", attempt().CreatedAt)
+	_, err := c.confirm(t.Context(), attempt())
 	if err == nil || redirected != 0 {
 		t.Fatal(err, redirected)
 	}
@@ -253,14 +246,14 @@ func TestUnitMalformedCallIDsAndGateCancellation(t *testing.T) {
 	}
 }
 
-func TestUnitRecoveryRefusalCannotRefundPreviouslyAcceptedCall(t *testing.T) {
-	for _, status := range []int{400, 429} {
-		t.Run(fmt.Sprint(status), func(t *testing.T) {
+func TestUnitRecoveryReadRefusalCannotRefundPreviouslyAcceptedCall(t *testing.T) {
+	for _, code := range []int{400, 429, 503} {
+		t.Run(fmt.Sprint(code), func(t *testing.T) {
 			c := client(t, func(r *http.Request) (*http.Response, error) {
-				if r.Method == "GET" {
-					return reply(200, "["+remote("1", attempt().CreatedAt, "in_process")+"]"), nil
+				if r.Method != http.MethodGet {
+					t.Fatal("recovery attempted confirm")
 				}
-				return reply(status, `{"status":"error","data":"recovery refused"}`), nil
+				return reply(code, `{"status":"error","data":"recovery refused"}`), nil
 			})
 			_, err := c.Recover(t.Context(), attempt())
 			if !errors.Is(err, errUnavailable) || errors.Is(err, verification.ErrProviderRejected) {
@@ -318,7 +311,7 @@ func TestUnitRecoveryByKnownIDAndStaleHistoryPreservesCallLifetime(t *testing.T)
 			a.CallID = "1"
 			out, err := c.Recover(t.Context(), a)
 			if returned == "1" {
-				if err != nil || writes != 1 || out.StartedAt != a.CreatedAt {
+				if err != nil || writes != 0 || out.StartedAt != a.FirstDispatchAt {
 					t.Fatal(out, err, writes)
 				}
 			} else if err == nil || writes != 0 {
@@ -326,14 +319,14 @@ func TestUnitRecoveryByKnownIDAndStaleHistoryPreservesCallLifetime(t *testing.T)
 			}
 		})
 	}
-	// A temporarily empty history can still return the original call from confirm.
+	// Empty history never authorizes another confirm or invents the old pool.
 	c := client(t, func(r *http.Request) (*http.Response, error) {
 		if r.Method == http.MethodGet {
 			return reply(200, `[]`), nil
 		}
 		return reply(200, `{"status":"ok","data":`+remote("1", attempt().CreatedAt, "in_process")+`}`), nil
 	})
-	if out, err := c.Recover(t.Context(), attempt()); err != nil || out.StartedAt != attempt().CreatedAt {
+	if out, err := c.Recover(t.Context(), attempt()); !errors.Is(err, errUnavailable) || out.ID != "" {
 		t.Fatal(out, err)
 	}
 }

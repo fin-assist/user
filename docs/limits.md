@@ -135,3 +135,11 @@ configured_limit. Пример выдержки (`for`) — 5 минут; под
 Это описание выражений, не развёрнутые правила. Перенос в infra, проверка Prometheus
 и включение уведомлений учитываются отдельно. FIN-81 также требует своих глобальных
 лимитов, метрик конверсии и бюджетных алертов.
+
+FIN-364: ключ/replay/конфликт и собственное recovery предшествуют новому списанию.
+New-key quarantine/knownbusy429 считается как обычный duplicate phone/IP, один раз
+до retry_at; replay не списывает. Лимит проверяется до занятости/gates. Для неверного
+формата phone прямого RPC проверяются только IP окна, затем400; произвольный phone
+не становится subject счётчика. Cleanup/unknown timeout не возвращают квоту; definite
+first rejection возвращает только исходные окна под ReleaseIfCurrent. Original
+dispatched duplicate key terminal после кэша429, новый intent использует новый key.

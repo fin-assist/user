@@ -84,15 +84,15 @@ func (r *Auth) Logout(ctx context.Context, userID string, hash token.Hash) error
 
 // Registration reads an immutable verified result, optionally locking it for consumption.
 func (r *Auth) Registration(ctx context.Context, hash token.Hash, lock bool) (auth.Registration, error) {
-	q := `SELECT id,phone,verified_at,COALESCE(is_new_user,false),closed_at IS NOT NULL FROM phone_verification WHERE registration_token_hash=$1`
+	q := `SELECT v.id,v.phone,v.verified_at,COALESCE(v.is_new_user,false),v.closed_at IS NOT NULL,e.consent_version,e.consent_accepted_at,e.age_confirmed_at FROM phone_verification v JOIN phone_consent_receipt e ON e.attempt_id=v.consent_receipt_id WHERE v.registration_token_hash=$1`
 	if lock {
 		if _, ok := Tx(ctx); !ok {
 			return auth.Registration{}, errAuthTx
 		}
-		q += ` FOR UPDATE`
+		q += ` FOR UPDATE OF v`
 	}
 	var v auth.Registration
-	err := r.db.Writer(ctx).QueryRow(ctx, q, hash[:]).Scan(&v.ID, &v.Phone, &v.VerifiedAt, &v.IsNewUser, &v.Closed)
+	err := r.db.Writer(ctx).QueryRow(ctx, q, hash[:]).Scan(&v.ID, &v.Phone, &v.VerifiedAt, &v.IsNewUser, &v.Closed, &v.ConsentVersion, &v.ConsentAcceptedAt, &v.AgeConfirmedAt)
 	return v, authError(err)
 }
 
@@ -176,6 +176,13 @@ func (r *Auth) CloseVerification(ctx context.Context, id int32, user string, now
 		if !owned {
 			return auth.ErrMissing
 		}
+	}
+	var receipt bool
+	if err := r.db.Writer(ctx).QueryRow(ctx, `SELECT consent_receipt_id IS NOT NULL FROM phone_verification WHERE id=$1`, id).Scan(&receipt); err != nil {
+		return authError(err)
+	}
+	if receipt {
+		return linkPhoneReceipt(ctx, r.db, id, user, now)
 	}
 	return nil
 }

@@ -146,7 +146,7 @@ func TestUnitAuthenticationRepositoryMapsFailuresAndLocksIdentity(t *testing.T) 
 			if strings.Contains(q, "SELECT EXISTS") {
 				return unitRow{values: []any{true}}
 			}
-			if strings.Contains(q, "SELECT closed_at") {
+			if strings.Contains(q, "SELECT closed_at") || strings.Contains(q, "SELECT consent_receipt_id") {
 				return unitRow{values: []any{true}}
 			}
 			return unitRow{values: []any{"00000000-0000-0000-0000-000000000001"}}
@@ -164,6 +164,9 @@ func TestUnitAuthenticationRepositoryMapsFailuresAndLocksIdentity(t *testing.T) 
 			tx.exec = func(q string, args []any) (pgconn.CommandTag, error) {
 				if len(args) == 0 {
 					t.Fatal("missing bound arguments")
+				}
+				if strings.Contains(q, "UPDATE phone_consent_receipt") {
+					return pgconn.NewCommandTag("UPDATE 1"), nil
 				}
 				return pgconn.NewCommandTag(tag), nil
 			}
@@ -213,7 +216,7 @@ func TestUnitRegistrationRepositoryConsumesOnlyBoundOwnerAndTranslatesConstraint
 		tx.row = func(q string, args []any) pgx.Row {
 			switch {
 			case strings.Contains(q, "registration_token_hash"):
-				return unitRow{values: []any{int32(7), "+79001234567", &now, true, false}}
+				return unitRow{values: []any{int32(7), "+79001234567", &now, true, false, "v1", now, now}}
 			case strings.Contains(q, "consent_document"):
 				return unitRow{values: []any{"v1"}}
 			case strings.Contains(q, "auth_session"):

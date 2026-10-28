@@ -22,17 +22,17 @@ func TestIntegrationMigrationCLIReportsAndRepairsVersionWithoutCrossSourceRollba
 	invoke("up")
 	invoke("version")
 	before := out.String()
-	if !strings.Contains(before, "service\t4") || !strings.Contains(before, "idempotency\t") {
+	if !strings.Contains(before, "service\t5") || !strings.Contains(before, "idempotency\t") {
 		t.Fatal(before)
 	}
 	invoke("down", "service", "1")
 	invoke("version")
-	if !strings.Contains(out.String(), "service\t3") {
+	if !strings.Contains(out.String(), "service\t4") {
 		t.Fatal(out.String())
 	}
 	// Force clears a dirty marker at the known existing schema version. It must
 	// leave library version tables untouched and allow the pending upgrade.
-	invoke("force", "service", "3")
+	invoke("force", "service", "4")
 	invoke("up")
 	invoke("version")
 	if out.String() != before {

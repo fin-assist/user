@@ -40,6 +40,7 @@ func pendingPhoneAPI(t *testing.T, env *apitest.Env, raw, phone string, expires 
 	if err != nil {
 		t.Fatal(err)
 	}
+	seedPhoneEvidence(t, env.App.DB.Primary(), id)
 	return id
 }
 func confirmPhoneAPI(t *testing.T, env *apitest.Env, raw, phone string) {

@@ -17,7 +17,7 @@ import (
 
 func unitVerificationValues(now time.Time) []any {
 	h := token.Sum("secret")
-	return []any{int32(7), "+79001234567", h[:], "test", "call", now, now.Add(time.Minute), nil, false, "", nil, []byte("cipher"), "key", false, false}
+	return []any{int32(7), "+79001234567", h[:], "test", "call", now, now.Add(time.Minute), nil, false, "", nil, []byte("cipher"), "key", false, false, true, "", now.Add(time.Minute), now, now.Add(time.Minute), now.Add(time.Minute), now.Add(time.Minute), false}
 }
 
 func TestUnitVerificationRepositoryMapsRowsAndEnforcesTransactionGuard(t *testing.T) {
@@ -157,8 +157,8 @@ func TestUnitStartRepositoryPreservesOwnershipAndTranslatesBusyRaces(t *testing.
 		h := token.Sum("request")
 		record := verification.StartRecord{Key: "request-key", Hash: h, Request: verification.Request{ID: 7, Phone: "+79001234567", CreatedAt: now, ExpiresAt: now.Add(time.Minute)}}
 		tx.row = func(q string, args []any) pgx.Row {
-			if strings.Contains(q, "SELECT start_key") {
-				return unitRow{values: []any{record.Key, h[:], int32(7), []byte("[]")}}
+			if strings.Contains(q, "SELECT e.start_key") {
+				return unitRow{values: []any{record.Key, h[:], int32(7), []byte("[]"), "v1", "203.0.113.7", now, now.Add(24 * time.Hour), record.Request.Phone, record.Request.ExpiresAt}}
 			}
 			return unitRow{values: unitVerificationValues(now)}
 		}

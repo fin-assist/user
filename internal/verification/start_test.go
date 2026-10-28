@@ -78,8 +78,31 @@ type startRepoFake struct {
 	busy                                             time.Time
 	failure                                          string
 	claimed, completed, rejected, duplicated, forgot int
+	terminated                                       int
 }
 
+func (r *startRepoFake) FinalizeKey(context.Context, StartRecord) error { return nil }
+func (r *startRepoFake) CurrentPD(context.Context) (string, error)      { return "v1", nil }
+func (r *startRepoFake) Busy(context.Context, string, time.Time) (int32, time.Time, error) {
+	return 1, r.busy, nil
+}
+func (r *startRepoFake) Dispatch(_ context.Context, v StartRecord, now time.Time) (StartRecord, bool, error) {
+	first := v.Request.FirstDispatchAt.IsZero()
+	if first {
+		v.Request.FirstDispatchAt = now
+		v.Request.DispatchNotAfter = v.Request.UnknownDeadline
+	}
+	r.record = &v
+	return v, first, nil
+}
+func (r *startRepoFake) Terminate(_ context.Context, v StartRecord, _ time.Time) error {
+	r.terminated++
+	v.Request.StartTerminal = true
+	v.Request.Closed = true
+	v.Request.Released = true
+	r.record = &v
+	return nil
+}
 func (r *startRepoFake) Find(context.Context, string) (StartRecord, error) {
 	if r.failure == "find" {
 		return StartRecord{}, errDependency
@@ -224,7 +247,7 @@ type startFixtureData struct {
 func startFixture(t *testing.T) *startFixtureData {
 	t.Helper()
 	f := &startFixtureData{tx: &testTX{}, repo: &startRepoFake{}, engine: &startEngineFake{current: true}, counters: &startCounters{}, now: time.Date(2026, 10, 23, 20, 0, 0, 0, time.UTC)}
-	f.provider = &startProviderFake{tx: f.tx, name: "test", call: Call{ID: "call-1", Phone: "+79001234567", StartedAt: f.now, Numbers: []string{"+74951234567", "+74957654321"}}}
+	f.provider = &startProviderFake{tx: f.tx, name: "test", call: Call{ID: "call-1", Phone: "+79001234567", StartedAt: f.now, State: Pending, ReceivedAt: f.now, Numbers: []string{"+74951234567", "+74957654321"}}}
 	f.selector = &startSelectorFake{tx: f.tx}
 	f.accounts = &testAccounts{tx: f.tx}
 	f.guard = &testGuard{tx: f.tx, alive: true}
@@ -240,10 +263,10 @@ func startFixture(t *testing.T) *startFixtureData {
 	return f
 }
 func (f *startFixtureData) run(ctx context.Context) (Started, error) {
-	return f.s.Start(ctx, f.key, "+79001234567", "192.0.2.1")
+	return f.s.StartWithConsent(ctx, f.key, "+79001234567", "192.0.2.1", Consent{Accepted: true, Version: "v1", AgeConfirmed: true})
 }
 func (f *startFixtureData) unfinished() {
-	f.repo.record = &StartRecord{Key: f.key.Key, Hash: f.key.Hash, Request: Request{ID: 1, Phone: f.provider.call.Phone, Provider: "test", CreatedAt: f.now, ExpiresAt: f.now.Add(RequestTTL)}, Windows: make([]ratelimit.Window, 4)}
+	f.repo.record = &StartRecord{Key: f.key.Key, Hash: f.key.Hash, AcceptedAt: f.now, KeyExpiresAt: f.now.Add(24 * time.Hour), Request: Request{ID: 1, Phone: f.provider.call.Phone, Provider: "test", CreatedAt: f.now, UnknownDeadline: f.now.Add(RequestTTL), FirstDispatchAt: f.now, DispatchNotAfter: f.now.Add(RequestTTL), ExpiresAt: f.now.Add(RequestTTL)}, Windows: make([]ratelimit.Window, 4)}
 }
 
 type createdConfirmFunc func(context.Context, Proof, string) (bool, error)
@@ -300,6 +323,10 @@ func TestUnitStartCommitReplayAndRecoveredOwnAttempt(t *testing.T) {
 	}
 	f = startFixture(t)
 	f.provider.createErr = ErrProviderUnavailable
+	out, err = f.run(t.Context())
+	if !errors.Is(err, ErrProviderUnavailable) || out.Token != "" || f.provider.recovers != 0 {
+		t.Fatal("unknown dispatch must not retry within the same call", out, err)
+	}
 	out, err = f.run(t.Context())
 	if err != nil || out.Token == "" || f.provider.recovers != 1 {
 		t.Fatal(out, err)
@@ -394,7 +421,7 @@ func TestUnitStartErrorBranches(t *testing.T) {
 		"disabled":          func(f *startFixtureData) { f.s.provider = nil; f.s.selector = nil },
 		"recovery conflict": func(f *startFixtureData) { f.unfinished(); f.repo.record.Hash = token.Sum("other body") },
 		"recovery provider": func(f *startFixtureData) { f.unfinished(); f.repo.record.Request.Provider = "old" },
-		"forget":            func(f *startFixtureData) { f.unfinished(); f.repo.record.Windows = nil; f.repo.failure = "forget" },
+		"terminal":          func(f *startFixtureData) { f.unfinished(); f.repo.record.Request.StartTerminal = true },
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := startFixture(t)
@@ -422,7 +449,7 @@ func TestUnitStartCancelledAndExpiredKeyLink(t *testing.T) {
 	f = startFixture(t)
 	f.unfinished()
 	f.repo.record.Request.ExpiresAt = f.now
-	if _, err := f.run(t.Context()); err != nil || f.repo.forgot != 1 || f.provider.creates != 1 {
+	if _, err := f.run(t.Context()); !errors.Is(err, ErrProviderUnavailable) || f.repo.forgot != 0 || f.provider.creates != 0 {
 		t.Fatal(err)
 	}
 }
@@ -495,7 +522,11 @@ func TestUnitStartAdviceIsLimitedToInitialQuotaPhase(t *testing.T) {
 		}
 		_, err = f.run(t.Context())
 		advice = nil
-		if errors.As(err, &advice) {
+		if mode == "uncertain" {
+			if !errors.As(err, &advice) || !advice.RequestRetryPermission() {
+				t.Fatal("read-only recovery permission missing", err)
+			}
+		} else if errors.As(err, &advice) {
 			t.Fatal(mode, "invented permission", err)
 		}
 	}

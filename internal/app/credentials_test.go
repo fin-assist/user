@@ -74,7 +74,7 @@ func TestIntegrationAssemblyStartsWithSystemdCredentialModes(t *testing.T) {
 				Signing:  signingCfg,
 				DB:       config.DBConfig{PrimaryDSN: dsn, MaxConns: 2},
 				GRPC:     config.GRPCConfig{MaxRecvMsgSize: 4 << 20},
-				Phone:    config.PhoneConfig{ResultKeyFile: paths["phone-result"], ResultKeyID: "test", MaxStreams: 2, ResyncInterval: time.Second},
+				Phone:    config.PhoneConfig{ResultKeyFile: paths["phone-result"], ResultKeyID: "test", MaxStreams: 2, UnknownTimeout: 5 * time.Minute, ResyncInterval: time.Second},
 				Sessions: config.SessionsConfig{IdempotencyKeyFile: paths["auth-idempotency"], RefreshTTL: time.Hour, MaxConns: 2},
 				Outbox:   config.OutboxConfig{TimezoneTargets: []string{"assistant"}, DeletionTargets: []string{"bank-statement-data", "analytics", "assistant"}, MaxConns: 6, PollInterval: time.Second},
 				Peers:    map[string]string{"bank-statement-data": "passthrough:///127.0.0.1:1", "analytics": "passthrough:///127.0.0.1:1", "assistant": "passthrough:///127.0.0.1:1"},

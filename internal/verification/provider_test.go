@@ -8,9 +8,9 @@ import (
 
 func TestUnitCheckedProviderResponse(t *testing.T) {
 	now := time.Date(2026, 10, 23, 22, 0, 0, 0, time.UTC)
-	a := Attempt{ID: 1, Phone: "+79001234567", CreatedAt: now.Add(-time.Minute), ExpiresAt: now.Add(4 * time.Minute)}
+	a := Attempt{ID: 1, Phone: "+79001234567", CreatedAt: now.Add(-time.Minute), ExpiresAt: now.Add(4 * time.Minute), FirstDispatchAt: now.Add(-time.Minute), DispatchNotAfter: now.Add(4 * time.Minute)}
 	good := func() Call {
-		return Call{ID: "call-1", Phone: a.Phone, StartedAt: a.CreatedAt, Numbers: []string{"+74951234567", "+18005550123"}}
+		return Call{ID: "call-1", Phone: a.Phone, StartedAt: a.CreatedAt, State: Pending, ReceivedAt: now, Numbers: []string{"+74951234567", "+18005550123"}}
 	}
 	if err := validateCall(a, good(), now); err != nil {
 		t.Fatal(err)
@@ -40,8 +40,8 @@ func TestUnitCheckedProviderResponse(t *testing.T) {
 		t.Fatal("same call lifetime extended")
 	}
 	c.ID = "replacement"
-	if err := validateCall(a, c, now); err != nil {
-		t.Fatal("replacement rejected", err)
+	if err := validateCall(a, c, now); err == nil {
+		t.Fatal("replacement accepted for existing binding")
 	}
 	c = good()
 	if validateCall(a, c, a.ExpiresAt) == nil {

@@ -54,34 +54,41 @@ func TestIntegrationStartCommitsReservationBeforeProviderAndRecoversLostReply(t 
 	for _, mode := range []string{"ok", "lost", "unknown", "reject", "duplicate", "empty"} {
 		t.Run(mode, func(t *testing.T) {
 			env := apitest.Start(t)
+			seedDocuments(t, env)
 			p := &creationProvider{env: env, mode: mode}
 			starter := integrationStarter(t, env, p)
 			phone := "+79001234567"
 			request := idempotency.Request{Endpoint: userv1.AuthService_StartPhoneVerification_FullMethodName, Key: authKey(), Hash: token.Sum(phone)}
-			first, err := starter.Start(t.Context(), request, phone, "192.0.2.1")
+			first, err := starter.StartWithConsent(t.Context(), request, phone, "192.0.2.1", verification.Consent{Accepted: true, Version: "v1", AgeConfirmed: true})
 			switch mode {
 			case "ok", "lost":
+				if mode == "lost" {
+					if err == nil {
+						t.Fatal("lost response accepted")
+					}
+					first, err = starter.StartWithConsent(t.Context(), request, phone, "192.0.2.1", verification.Consent{Accepted: true, Version: "v1", AgeConfirmed: true})
+				}
 				if err != nil || first.Token == "" || first.CallbackNumber == "" {
 					t.Fatal(first, err)
 				}
-				replay, err := starter.Start(t.Context(), request, phone, "192.0.2.1")
+				replay, err := starter.StartWithConsent(t.Context(), request, phone, "192.0.2.1", verification.Consent{Accepted: true, Version: "v1", AgeConfirmed: true})
 				if err != nil || replay.Token != first.Token || replay.CallbackNumber != first.CallbackNumber {
 					t.Fatalf("replay changed committed secret: %+v %v", replay, err)
 				}
 				request.Hash = token.Sum("changed body")
-				if _, err := starter.Start(t.Context(), request, phone, "192.0.2.1"); apitest.Reason(err) != "IDEMPOTENCY_CONFLICT" {
+				if _, err := starter.StartWithConsent(t.Context(), request, phone, "192.0.2.1", verification.Consent{Accepted: true, Version: "v1", AgeConfirmed: true}); apitest.Reason(err) != "IDEMPOTENCY_CONFLICT" {
 					t.Fatal("conflicting body accepted", err)
 				}
 				request.Key = authKey()
 				request.Hash = token.Sum(phone)
-				if _, err := starter.Start(t.Context(), request, phone, "192.0.2.1"); apitest.Reason(err) != "RATE_LIMITED" {
+				if _, err := starter.StartWithConsent(t.Context(), request, phone, "192.0.2.1", verification.Consent{Accepted: true, Version: "v1", AgeConfirmed: true}); apitest.Reason(err) != "RATE_LIMITED" {
 					t.Fatal("parallel phone claim accepted", err)
 				}
 			case "duplicate":
 				if apitest.Reason(err) != "RATE_LIMITED" {
 					t.Fatal("duplicate not translated", err)
 				}
-				if _, err = starter.Start(t.Context(), request, phone, "192.0.2.1"); apitest.Reason(err) != "RATE_LIMITED" {
+				if _, err = starter.StartWithConsent(t.Context(), request, phone, "192.0.2.1", verification.Consent{Accepted: true, Version: "v1", AgeConfirmed: true}); apitest.Reason(err) != "RATE_LIMITED" {
 					t.Fatal("duplicate result not retained", err)
 				}
 			case "reject":
@@ -89,15 +96,15 @@ func TestIntegrationStartCommitsReservationBeforeProviderAndRecoversLostReply(t 
 					t.Fatal("definite refusal consumed reserve", err)
 				}
 				p.setMode("ok")
-				if recovered, err := starter.Start(t.Context(), request, phone, "192.0.2.1"); err != nil || recovered.Token == "" {
-					t.Fatal("released claim not retryable", recovered, err)
+				if recovered, err := starter.StartWithConsent(t.Context(), request, phone, "192.0.2.1", verification.Consent{Accepted: true, Version: "v1", AgeConfirmed: true}); err == nil || recovered.Token != "" {
+					t.Fatal("terminal rejection retried external effect", recovered, err)
 				}
 			default:
 				if err == nil {
 					t.Fatal("uncertain creation accepted")
 				}
 				p.setMode("ok")
-				if recovered, err := starter.Start(t.Context(), request, phone, "192.0.2.1"); err != nil || recovered.Token == "" {
+				if recovered, err := starter.StartWithConsent(t.Context(), request, phone, "192.0.2.1", verification.Consent{Accepted: true, Version: "v1", AgeConfirmed: true}); err != nil || recovered.Token == "" {
 					t.Fatal("own attempt not recoverable", recovered, err)
 				}
 			}
@@ -108,26 +115,28 @@ func TestIntegrationStartCommitsReservationBeforeProviderAndRecoversLostReply(t 
 		})
 	}
 	env := apitest.Start(t)
+	seedDocuments(t, env)
 	disabled := integrationStarter(t, env, nil)
 	request := idempotency.Request{Endpoint: userv1.AuthService_StartPhoneVerification_FullMethodName, Key: authKey(), Hash: token.Sum("disabled")}
-	if _, err := disabled.Start(t.Context(), request, "+79001234567", "192.0.2.1"); err == nil {
+	if _, err := disabled.StartWithConsent(t.Context(), request, "+79001234567", "192.0.2.1", verification.Consent{Accepted: true, Version: "v1", AgeConfirmed: true}); err == nil {
 		t.Fatal("disabled provider accepted")
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if _, err := disabled.Start(ctx, request, "bad phone", "192.0.2.1"); err == nil {
+	if _, err := disabled.StartWithConsent(ctx, request, "bad phone", "192.0.2.1", verification.Consent{Accepted: true, Version: "v1", AgeConfirmed: true}); err == nil {
 		t.Fatal("cancelled invalid input accepted")
 	}
 }
 
 func TestIntegrationFakeBackendUsesDurableAttemptAndCommonConfirmation(t *testing.T) {
 	env := apitest.Start(t)
+	seedDocuments(t, env)
 	p := fakephone.New()
 	starter := integrationStarter(t, env, p)
 	starter.SetImmediateConfirmation(env.App.Verifications)
 	phone := "+70000001111"
 	request := idempotency.Request{Endpoint: userv1.AuthService_StartPhoneVerification_FullMethodName, Key: authKey(), Hash: token.Sum(phone)}
-	first, err := starter.Start(t.Context(), request, phone, "203.0.113.9")
+	first, err := starter.StartWithConsent(t.Context(), request, phone, "203.0.113.9", verification.Consent{Accepted: true, Version: "v1", AgeConfirmed: true})
 	if err != nil || first.Token == "" {
 		t.Fatal(first, err)
 	}
@@ -138,7 +147,7 @@ func TestIntegrationFakeBackendUsesDurableAttemptAndCommonConfirmation(t *testin
 	// Reconstructing the provider and coordinator preserves the committed result.
 	restarted := integrationStarter(t, env, fakephone.New())
 	restarted.SetImmediateConfirmation(env.App.Verifications)
-	again, err := restarted.Start(t.Context(), request, phone, "203.0.113.9")
+	again, err := restarted.StartWithConsent(t.Context(), request, phone, "203.0.113.9", verification.Consent{Accepted: true, Version: "v1", AgeConfirmed: true})
 	if err != nil || again.Token != first.Token || again.CallbackNumber != first.CallbackNumber {
 		t.Fatal(again, err)
 	}
@@ -147,7 +156,7 @@ func TestIntegrationFakeBackendUsesDurableAttemptAndCommonConfirmation(t *testin
 	phone = "+79001234567"
 	request.Key = authKey()
 	request.Hash = token.Sum(phone)
-	if out, err := restarted.Start(t.Context(), request, phone, "203.0.113.9"); err == nil || out.Token != "" {
+	if out, err := restarted.StartWithConsent(t.Context(), request, phone, "203.0.113.9", verification.Consent{Accepted: true, Version: "v1", AgeConfirmed: true}); err == nil || out.Token != "" {
 		t.Fatal(out, err)
 	}
 	var results int
@@ -158,10 +167,11 @@ func TestIntegrationFakeBackendUsesDurableAttemptAndCommonConfirmation(t *testin
 
 func TestIntegrationPhoneAdviceSurvivesCachedValidationButDoesNotUpgradeBusyReplay(t *testing.T) {
 	env := apitest.Start(t)
+	seedDocuments(t, env)
 	starter := integrationStarter(t, env, &creationProvider{})
 	request := idempotency.Request{Endpoint: userv1.AuthService_StartPhoneVerification_FullMethodName, Key: authKey(), Hash: token.Sum("invalid")}
 	for range 2 {
-		_, err := starter.Start(t.Context(), request, "invalid", "192.0.2.1")
+		_, err := starter.StartWithConsent(t.Context(), request, "invalid", "192.0.2.1", verification.Consent{Accepted: true, Version: "v1", AgeConfirmed: true})
 		rest, ok := finerr.ToREST(retryinfo.Apply(err))
 		if !ok || rest.Code != "VALIDATION_ERROR" || rest.RequestRetryable == nil || *rest.RequestRetryable {
 			t.Fatal("cached validation lost false", rest, err)
@@ -176,10 +186,10 @@ func TestIntegrationPhoneAdviceSurvivesCachedValidationButDoesNotUpgradeBusyRepl
 	request.Key = authKey()
 	request.Hash = token.Sum("duplicate")
 	for range 2 {
-		_, err := starter.Start(t.Context(), request, "+79001234567", "192.0.2.1")
+		_, err := starter.StartWithConsent(t.Context(), request, "+79001234567", "192.0.2.1", verification.Consent{Accepted: true, Version: "v1", AgeConfirmed: true})
 		rest, ok := finerr.ToREST(retryinfo.Apply(err))
-		if !ok || rest.Code != "RATE_LIMITED" || rest.RequestRetryable != nil {
-			t.Fatal("old busy outcome gained advice", rest, err)
+		if !ok || rest.Code != "RATE_LIMITED" || (rest.RequestRetryable == nil || *rest.RequestRetryable) {
+			t.Fatal("terminal dispatched busy outcome lost false", rest, err)
 		}
 	}
 }

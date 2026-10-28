@@ -197,15 +197,17 @@ func (l *Limiter) Check(ctx context.Context, op Operation, phone, ip string) (De
 		return Decision{}, Receipt{}, errors.New("rate limits: trusted client IP required")
 	}
 	ip = addr.Unmap().String()
-	if op == Start && !validPhone(phone) {
-		return Decision{}, Receipt{}, errors.New("rate limits: valid phone required")
-	}
 	now := l.now().UTC()
 	windows := make([]Window, 0, len(selected))
 	for _, scope := range selected {
 		rule := l.rules[scope]
 		subject := ip
 		if scope == VerificationPhoneShort || scope == VerificationPhoneLong {
+			// Direct RPC format errors still encounter the IP ceilings first.
+			// Invalid phone input cannot create arbitrary phone-counter subjects.
+			if !validPhone(phone) {
+				continue
+			}
 			subject = phone
 		}
 		start := now.Truncate(rule.Window)

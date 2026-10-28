@@ -67,7 +67,9 @@ func (p *zvonokHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		var calls []zvonokCall
 		if c, ok := p.calls[values.Get("phone")]; ok {
-			c.Numbers = nil
+			if p.mode == "read-missing-pool" {
+				c.Numbers = nil
+			}
 			calls = append(calls, c)
 		}
 		if calls == nil {
@@ -80,7 +82,9 @@ func (p *zvonokHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.lookups++
 		for _, c := range p.calls {
 			if strconv.FormatInt(c.ID, 10) == values.Get("call_id") {
-				c.Numbers = nil
+				if p.mode == "read-missing-pool" {
+					c.Numbers = nil
+				}
 				_ = json.NewEncoder(w).Encode([]zvonokCall{c})
 				return
 			}
@@ -138,6 +142,7 @@ func zvonokEnv(t *testing.T, mode string) (*apitest.Env, *zvonokHTTP) {
 		c.Zvonok = config.ZvonokConfig{Provider: "zvonok", PublicKey: "test-private-key", CampaignID: "123", CallbackAddr: "127.0.0.1:0", PollInterval: time.Second, TrustedProxies: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}}
 		c.Phone.ResyncInterval = time.Second
 	})
+	seedDocuments(t, env)
 	return env, p
 }
 func callbackHTTP(t *testing.T, env *apitest.Env, id int64, ips ...string) int {
@@ -194,6 +199,9 @@ func zvonokStartRecoveryPoolAndReplay(t *testing.T, balance json.RawMessage) {
 	p.balance = balance
 	p.mu.Unlock()
 	key, phone := authKey(), "+79991234567"
+	if first, err := startCall(t, env, key, phone); err == nil || first != nil {
+		t.Fatal("lost write response must remain unknown until read-only retry", first, err)
+	}
 	first, err := startCall(t, env, key, phone)
 	if err != nil {
 		t.Fatal(err)
@@ -205,7 +213,7 @@ func zvonokStartRecoveryPoolAndReplay(t *testing.T, balance json.RawMessage) {
 	p.mu.Lock()
 	adds, calls := p.adds, len(p.calls)
 	p.mu.Unlock()
-	if adds != 2 || calls != 1 {
+	if adds != 1 || calls != 1 {
 		t.Fatal("duplicate provider call", adds, calls)
 	}
 	var pool []string
@@ -260,7 +268,7 @@ func unknownZvonokOutcome(t *testing.T, mode string) {
 	}
 }
 
-func TestAPIZvonokAPIExplicitRejectionRefundsAndAllowsRetry(t *testing.T) {
+func TestAPIZvonokAPIExplicitRejectionRefundsAndAllowsNewIntent(t *testing.T) {
 	env, p := zvonokEnv(t, "reject")
 	key := authKey()
 	if _, err := startCall(t, env, key, "+79991234567"); err == nil {
@@ -272,7 +280,10 @@ func TestAPIZvonokAPIExplicitRejectionRefundsAndAllowsRetry(t *testing.T) {
 	p.mu.Lock()
 	p.mode = ""
 	p.mu.Unlock()
-	if _, err := startCall(t, env, key, "+79991234567"); err != nil {
+	if _, err := startCall(t, env, key, "+79991234567"); err == nil {
+		t.Fatal("terminal original key was dispatched again")
+	}
+	if _, err := startCall(t, env, authKey(), "+79991234567"); err != nil {
 		t.Fatal(err)
 	}
 	if startHits(t, env) != 1 {

@@ -15,7 +15,7 @@ import (
 
 type startFunc func(context.Context, idempotency.Request, string, string) (verification.Started, error)
 
-func (f startFunc) Start(ctx context.Context, r idempotency.Request, phone, ip string) (verification.Started, error) {
+func (f startFunc) StartWithConsent(ctx context.Context, r idempotency.Request, phone, ip string, _ verification.Consent) (verification.Started, error) {
 	return f(ctx, r, phone, ip)
 }
 func TestUnitStartMappingRecalculatesRemainingTime(t *testing.T) {

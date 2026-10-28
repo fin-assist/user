@@ -38,6 +38,7 @@ var Vars = []Var{
 	{Name: "JWT_ISSUER", Command: "serve", Default: "", Doc: "iss access JWT, обязателен; одинаков у всех потребителей (у них — `AUTH_USER_ISSUER`); этот же iss user проверяет у входящих access-токенов"},
 	{Name: "JWT_AUDIENCE", Command: "serve", Default: "", Doc: "aud access JWT, обязателен; одинаков у всех потребителей (у них — `AUTH_USER_AUDIENCE`); эту же aud user проверяет у входящих access-токенов"},
 	{Name: "AUTH_IDEMPOTENCY_KEY_FILE", Command: "serve", Default: "", Doc: "файл 0600 с 32 raw-байтами AES-256 для шифрования ответов Register/Refresh; обязателен, общий для реплик; сохранять ключ не менее 24 ч после последней записи"},
+	{Name: "PHONE_VERIFICATION_UNKNOWN_TIMEOUT", Command: "serve", Default: "5m", Doc: "локальный срок неизвестного исхода (Go duration, 1s..5m); абсолютный deadline фиксируется один раз при приёме; provider TTL 5m не меняется"},
 	{Name: "PHONE_RESULT_KEY_FILE", Command: "serve", Doc: "файл 0600 с 32 raw-байтами AES-256 для результата подтверждения; обязателен, общий для реплик, отличается от AUTH_IDEMPOTENCY_KEY_FILE; хранить до истечения всех 15-минутных результатов"},
 	{Name: "PHONE_RESULT_KEY_ID", Command: "serve", Default: "primary", Doc: "ID ключа результата: 1–64 символа A-Z/a-z/0-9/._-; сохраняется вместе с ciphertext"},
 	{Name: "PHONE_WATCH_MAX_STREAMS", Command: "serve", Default: "1024", Doc: "предел одновременно ожидающих Watch на экземпляр (1–100000); отдельный от 60 попыток/мин на IP; насыщение видно в метриках"},

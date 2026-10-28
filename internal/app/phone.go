@@ -48,8 +48,8 @@ func wirePhone(ctx context.Context, a *App, authDB *postgres.DB, authGuard *tomb
 	if err != nil {
 		return nil, nil, err
 	}
-	a.Verifications = verification.New(a.DB, postgres.NewVerifications(a.DB), postgres.NewAuth(a.DB), a.Tombstones, a.Signing, codec, notifications, time.Now, token.New, a.Cfg.Sessions.RefreshTTL, a.Cfg.Phone.ResyncInterval)
-	a.authConfirmation = verification.New(authDB, postgres.NewVerifications(authDB), postgres.NewAuth(authDB), authGuard, a.Signing, codec, notifications, time.Now, token.New, a.Cfg.Sessions.RefreshTTL, a.Cfg.Phone.ResyncInterval)
+	a.Verifications = verification.New(a.DB, postgres.NewVerifications(a.DB, a.Cfg.Zvonok.CampaignID), postgres.NewAuth(a.DB), a.Tombstones, a.Signing, codec, notifications, time.Now, token.New, a.Cfg.Sessions.RefreshTTL, a.Cfg.Phone.ResyncInterval)
+	a.authConfirmation = verification.New(authDB, postgres.NewVerifications(authDB, a.Cfg.Zvonok.CampaignID), postgres.NewAuth(authDB), authGuard, a.Signing, codec, notifications, time.Now, token.New, a.Cfg.Sessions.RefreshTTL, a.Cfg.Phone.ResyncInterval)
 	if a.Cfg.Env == config.EnvProd {
 		guard, err := verification.NewProductionProofGuard(a.Log, reg)
 		if err != nil {
@@ -82,7 +82,7 @@ func wirePhone(ctx context.Context, a *App, authDB *postgres.DB, authGuard *tomb
 			notifications.Close()
 			return nil, nil, errors.New("phone: multiple configured backends")
 		}
-		numbers, err := verification.NewNumbers(callbackNumberRepository{postgres.NewVerifications(authDB), postgres.NewVerifications(a.DB)}, a.Log, reg)
+		numbers, err := verification.NewNumbers(callbackNumberRepository{postgres.NewVerifications(authDB, a.Cfg.Zvonok.CampaignID), postgres.NewVerifications(a.DB, a.Cfg.Zvonok.CampaignID)}, a.Log, reg)
 		if err != nil {
 			notifications.Close()
 			return nil, nil, err
@@ -113,8 +113,8 @@ func wirePhone(ctx context.Context, a *App, authDB *postgres.DB, authGuard *tomb
 			return fail(err)
 		}
 		closeBackend = provider.Close
-		repo := postgres.NewVerifications(a.DB)
-		numbers, err := verification.NewNumbers(callbackNumberRepository{postgres.NewVerifications(authDB), repo}, a.Log, reg)
+		repo := postgres.NewVerifications(a.DB, a.Cfg.Zvonok.CampaignID)
+		numbers, err := verification.NewNumbers(callbackNumberRepository{postgres.NewVerifications(authDB, a.Cfg.Zvonok.CampaignID), repo}, a.Log, reg)
 		if err != nil {
 			return fail(err)
 		}

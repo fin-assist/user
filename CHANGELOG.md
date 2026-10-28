@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 - FIN-372: CI и линтеры используют общий источник `fin-assist/go-ci` по неизменяемому SHA; локальные команды и тесты скриптов используют проверенный кэш. Обновление и откат синхронизируют pins и копию bootstrap в одном PR. Runtime и публичный API не меняются.
+- FIN-364: contracts/gen/go v0.7.0; отдельные серверные проверки14+/PD/версии перед передачей телефона, immutable durable receipt, привязка только после verified, pinned версия/время в Register. Миграция000005 отделяет evidence/binding от account/request cascade и инвалидирует старые pending/results, сохраняя уже выданные sessions.
+- FIN-364: single-dispatch marker, read-only recovery, PHONE_VERIFICATION_UNKNOWN_TIMEOUT=5m (startup1s..5m), immutable deadline/release с принятым риском позднего дубля; old-key terminal24h и receipt end+24h раздельно, linked evidence3года после удаления/отзыва. Уникальный provider binding и консервативные Zvonok public/busy deadlines учитывают clock tolerance1s, без повторного confirm и переноса старого подтверждения.
+
 
 - FIN-148: CI сохраняет stage-бинарь из проверенного образа с SHA, manifest и контрольной суммой.
 

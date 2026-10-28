@@ -111,7 +111,7 @@ func (c *Checker) check(ctx context.Context, r Request, source string) (err erro
 	defer func() { c.checks.WithLabelValues(source, result).Inc() }()
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	a := Attempt{ID: r.ID, Phone: r.Phone, Provider: r.Provider, CallID: r.CallID, CreatedAt: r.CreatedAt, ExpiresAt: r.ExpiresAt}
+	a := Attempt{ID: r.ID, Phone: r.Phone, Provider: r.Provider, CallID: r.CallID, Campaign: r.Campaign, FirstDispatchAt: r.FirstDispatchAt, DispatchNotAfter: r.DispatchNotAfter, CreatedAt: r.CreatedAt, ExpiresAt: r.ExpiresAt}
 	p, err := c.provider.Status(ctx, a)
 	if err != nil {
 		if errors.Is(err, ErrProof) {

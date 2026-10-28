@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"time"
+	"unicode/utf8"
 
 	"github.com/fin-assist/contracts/gen/go/finerr"
 	idempotency "github.com/fin-assist/go-idempotency"
@@ -30,15 +31,30 @@ type Started struct {
 // only through idempotency Resource metadata and never overwrite this identity.
 // Windows contains four refundable slots while creation is unfinished.
 type StartRecord struct {
-	Key     string
-	Hash    [32]byte
-	Request Request
-	Windows []ratelimit.Window
+	Key                      string
+	Hash                     [32]byte
+	Request                  Request
+	Windows                  []ratelimit.Window
+	Consent                  Consent
+	ClientIP                 string
+	AcceptedAt, KeyExpiresAt time.Time
+}
+
+// Consent is the separate pre-transfer declaration, pinned to its original receipt.
+type Consent struct {
+	Accepted     bool
+	Version      string
+	AgeConfirmed bool
 }
 
 // Starts mutates workflow state only in the caller's primary transaction.
 type Starts interface {
 	Find(context.Context, string) (StartRecord, error)
+	Busy(context.Context, string, time.Time) (int32, time.Time, error)
+	CurrentPD(context.Context) (string, error)
+	Dispatch(context.Context, StartRecord, time.Time) (StartRecord, bool, error)
+	Terminate(context.Context, StartRecord, time.Time) error
+	FinalizeKey(context.Context, StartRecord) error
 	Forget(context.Context, string) error
 	Claim(context.Context, StartRecord) (StartRecord, time.Time, error)
 	Complete(context.Context, StartRecord, Call, token.Hash) error
@@ -64,19 +80,20 @@ type StartLimits interface {
 
 // Starter coordinates creation without holding a database transaction over a call.
 type Starter struct {
-	tx         Transactions
-	repo       Starts
-	engine     StartEngine
-	limits     StartLimits
-	accounts   Accounts
-	guard      Guard
-	provider   Provider
-	selector   NumberSelector
-	now        func() time.Time
-	newToken   func() (string, error)
-	log        *slog.Logger
-	duplicates prometheus.Counter
-	immediate  CreationConfirmation
+	tx             Transactions
+	repo           Starts
+	engine         StartEngine
+	limits         StartLimits
+	accounts       Accounts
+	guard          Guard
+	provider       Provider
+	selector       NumberSelector
+	now            func() time.Time
+	newToken       func() (string, error)
+	log            *slog.Logger
+	duplicates     prometheus.Counter
+	immediate      CreationConfirmation
+	unknownTimeout time.Duration
 }
 
 // CreationConfirmation reuses the account identity already resolved and locked
@@ -102,12 +119,26 @@ func NewStarter(tx Transactions, repo Starts, engine StartEngine, limits StartLi
 	if err := reg.Register(c); err != nil {
 		return nil, err
 	}
-	return &Starter{tx: tx, repo: repo, engine: engine, limits: limits, accounts: accounts, guard: guard, provider: provider, selector: selector, now: now, newToken: newToken, log: log, duplicates: c}, nil
+	return &Starter{tx: tx, repo: repo, engine: engine, limits: limits, accounts: accounts, guard: guard, provider: provider, selector: selector, now: now, newToken: newToken, log: log, duplicates: c, unknownTimeout: RequestTTL}, nil
 }
 
 // Start accepts a library-extracted key, whole-input hash and a trusted client IP.
 // The durable record authorizes recovery only for its original key and body.
 func (s *Starter) Start(ctx context.Context, key idempotency.Request, phone, ip string) (Started, error) {
+	return s.StartWithConsent(ctx, key, phone, ip, Consent{})
+}
+
+// SetUnknownTimeout configures new attempts only; persisted deadlines are immutable.
+func (s *Starter) SetUnknownTimeout(d time.Duration) error {
+	if d < time.Second || d > RequestTTL {
+		return errors.New("verification: invalid unknown timeout")
+	}
+	s.unknownTimeout = d
+	return nil
+}
+
+// StartWithConsent preserves key precedence and commits evidence before dispatch.
+func (s *Starter) StartWithConsent(ctx context.Context, key idempotency.Request, phone, ip string, consent Consent) (Started, error) {
 	completion, done := s.engine.WithCompletion(ctx)
 	defer done()
 	completion, stop := context.WithTimeout(completion, 10*time.Second)
@@ -124,8 +155,6 @@ func (s *Starter) Start(ctx context.Context, key idempotency.Request, phone, ip 
 	var result idempotency.Result
 	var record StartRecord
 	var receipt ratelimit.Receipt
-	var fresh bool
-	var forget bool
 	err := s.tx.Run(preflight, func(tx context.Context) error {
 		var err error
 		reservation, result, err = s.engine.Reserve(tx, key)
@@ -147,29 +176,22 @@ func (s *Starter) Start(ctx context.Context, key idempotency.Request, phone, ip 
 			}
 			return nil
 		}
-		if !validStartPhone(phone) {
-			result, err = s.engine.DoReserved(tx, reservation, func(context.Context) (idempotency.Response, error) {
-				return idempotency.Response{}, domain.WithRequestRetry(finerr.ValidationError(&errdetails.BadRequest_FieldViolation{Field: "phone", Reason: "INVALID_FORMAT"}), false)
-			})
-			return err
-		}
-		if s.provider == nil {
-			return ErrProviderUnavailable
-		}
 		record, err = s.repo.Find(tx, key.Key)
 		if err == nil {
-			if len(record.Windows) == 4 && record.Request.ExpiresAt.After(s.now()) && !record.Request.Released {
-				if record.Hash != key.Hash {
-					return domain.WithRequestRetry(finerr.IdempotencyConflict(), false)
-				}
-				if record.Request.Provider != s.provider.Name() || record.Request.CallID != "" {
-					return ErrProviderUnavailable
-				}
-				return s.engine.BindResource(tx, reservation, startResource(record.Request.ID))
+			if record.Hash != key.Hash {
+				return domain.WithRequestRetry(finerr.IdempotencyConflict(), false)
 			}
-			// Clear only an expired/finished attempt identity; its request and
-			// independently cached library resource links remain intact.
-			forget = true
+			if record.Request.StartTerminal || record.Request.Closed || record.Request.Released || !record.Request.ExpiresAt.After(s.now()) {
+				if err := s.repo.Terminate(tx, record, s.now().UTC()); err != nil {
+					return err
+				}
+				result.Err = terminalStartError()
+				return s.engine.Release(tx, reservation)
+			}
+			if record.Request.Provider != s.providerName() || record.Request.CallID != "" {
+				return terminalStartError()
+			}
+			return s.engine.BindResource(tx, reservation, startResource(record.Request.ID))
 		} else if !errors.Is(err, ErrMissing) {
 			return err
 		}
@@ -182,21 +204,48 @@ func (s *Starter) Start(ctx context.Context, key idempotency.Request, phone, ip 
 			result.Err = domain.WithRequestRetry(finerr.RateLimited(decision.RetryAt), true)
 			return s.engine.Release(tx, reservation)
 		}
+		// Preserve Guard -> user -> request ordering even when Busy releases
+		// an expired holder; otherwise concurrent account deletion can invert it.
 		if _, err = s.owner(tx, phone); err != nil {
 			return err
 		}
-		if forget {
-			if err = s.repo.Forget(tx, key.Key); err != nil {
-				return err
-			}
+		holder, busy, err := s.repo.Busy(tx, phone, s.now().UTC())
+		if err != nil {
+			return err
+		}
+		if !busy.IsZero() {
+			result, err = s.engine.DoReserved(tx, reservation, func(context.Context) (idempotency.Response, error) {
+				retry := ceilMinute(busy)
+				return idempotency.Response{DuplicateRetryAt: retry, Resource: startResource(holder)}, finerr.RateLimited(retry)
+			})
+			return err
+		}
+		if gate := validateConsent(phone, consent); gate != nil {
+			result, err = s.engine.DoReserved(tx, reservation, func(context.Context) (idempotency.Response, error) { return idempotency.Response{}, gate })
+			return err
+		}
+		version, err := s.repo.CurrentPD(tx)
+		if err != nil {
+			return err
+		}
+		if version == "" {
+			return ErrProviderUnavailable
+		}
+		if version != consent.Version {
+			result, err = s.engine.DoReserved(tx, reservation, func(context.Context) (idempotency.Response, error) {
+				return idempotency.Response{}, domain.WithRequestRetry(finerr.ConsentOutdated(), false)
+			})
+			return err
+		}
+		if s.provider == nil {
+			return ErrProviderUnavailable
 		}
 		raw, err := s.newToken()
 		if err != nil {
 			return err
 		}
 		now := s.now().UTC()
-		record = StartRecord{Key: key.Key, Hash: key.Hash, Windows: receipt.ReservedWindows(), Request: Request{Phone: phone, Provider: s.provider.Name(), Hash: token.Sum(raw), CreatedAt: now, ExpiresAt: now.Add(RequestTTL)}}
-		var busy time.Time
+		record = StartRecord{Key: key.Key, Hash: key.Hash, Consent: consent, ClientIP: ip, AcceptedAt: now, KeyExpiresAt: now.Add(24 * time.Hour), Windows: receipt.ReservedWindows(), Request: Request{Phone: phone, Provider: s.provider.Name(), Campaign: s.providerCampaign(), Evidence: true, Hash: token.Sum(raw), CreatedAt: now, ExpiresAt: now.Add(s.unknownTimeout), UnknownDeadline: now.Add(s.unknownTimeout)}}
 		record, busy, err = s.repo.Claim(tx, record)
 		if err != nil {
 			return err
@@ -208,7 +257,6 @@ func (s *Starter) Start(ctx context.Context, key idempotency.Request, phone, ip 
 			})
 			return err
 		}
-		fresh = true
 		return s.engine.BindResource(tx, reservation, startResource(record.Request.ID))
 	})
 	if errors.Is(err, idempotency.ErrNotStored) {
@@ -235,32 +283,55 @@ func (s *Starter) Start(ctx context.Context, key idempotency.Request, phone, ip 
 		defer cancel()
 		_ = s.tx.Run(cleanup, func(tx context.Context) error { return s.engine.Release(tx, reservation) })
 	}()
-	a := Attempt{ID: record.Request.ID, Phone: record.Request.Phone, Provider: record.Request.Provider, CallID: record.Request.CallID, CreatedAt: record.Request.CreatedAt, ExpiresAt: record.Request.ExpiresAt}
-	network, cancel := context.WithTimeout(completion, 7*time.Second)
-	defer cancel()
-	first, cancelFirst := context.WithTimeout(network, 3*time.Second)
-	var call Call
-	if fresh {
-		call, err = s.provider.Create(first, a)
-	} else {
-		call, err = s.provider.Recover(first, a)
+	var firstDispatch bool
+	err = s.tx.Run(completion, func(tx context.Context) error {
+		var e error
+		record, firstDispatch, e = s.repo.Dispatch(tx, record, s.now().UTC())
+		return e
+	})
+	if err != nil {
+		if errors.Is(err, ErrMissing) && !s.now().Before(record.Request.UnknownDeadline) {
+			return Started{}, s.terminate(completion, record)
+		}
+		return Started{}, terminalStartError()
 	}
-	cancelFirst()
-	if err != nil && !errors.Is(err, ErrProviderRejected) && !errors.Is(err, ErrProviderDuplicate) && network.Err() == nil {
+	a := Attempt{ID: record.Request.ID, Phone: record.Request.Phone, Provider: record.Request.Provider, CallID: record.Request.CallID, Campaign: record.Request.Campaign, CreatedAt: record.AcceptedAt, ExpiresAt: record.Request.UnknownDeadline, FirstDispatchAt: record.Request.FirstDispatchAt, DispatchNotAfter: record.Request.DispatchNotAfter}
+	network, cancel := context.WithTimeout(completion, a.DispatchNotAfter.Sub(s.now()))
+	defer cancel()
+	var call Call
+	if firstDispatch {
+		if !s.now().Before(a.DispatchNotAfter) {
+			return Started{}, s.terminate(completion, record)
+		}
+		call, err = s.provider.Create(network, a)
+	} else {
 		call, err = s.provider.Recover(network, a)
 	}
 	if err != nil {
-		if errors.Is(err, ErrProviderRejected) {
+		if !s.now().Before(record.Request.UnknownDeadline) {
+			return Started{}, s.terminate(completion, record)
+		}
+		if firstDispatch && errors.Is(err, ErrProviderRejected) {
 			return Started{}, s.reject(completion, reservation, record)
 		}
 		if errors.Is(err, ErrProviderDuplicate) {
-			return Started{}, s.duplicate(completion, reservation, record, requestedAt)
+			return Started{}, s.duplicate(completion, reservation, record, requestedAt, err)
 		}
-		return Started{}, ErrProviderUnavailable
+		if errors.Is(err, ErrProviderTerminal) {
+			return Started{}, s.terminate(completion, record)
+		}
+		if !s.now().Before(record.Request.UnknownDeadline) {
+			return Started{}, s.terminate(completion, record)
+		}
+		return Started{}, domain.WithRequestRetry(errors.Join(ErrProviderUnavailable, finerr.InternalError()), true)
 	}
 	if err = validateCall(a, call, s.now()); err != nil {
-		return Started{}, err
+		if !s.now().Before(record.Request.UnknownDeadline) {
+			return Started{}, s.terminate(completion, record)
+		}
+		return Started{}, domain.WithRequestRetry(errors.Join(ErrProviderUnavailable, finerr.InternalError()), true)
 	}
+	var completionFailure error
 	err = s.tx.Run(completion, func(tx context.Context) error {
 		var err error
 		result, err = s.engine.DoReserved(tx, reservation, func(effect context.Context) (idempotency.Response, error) {
@@ -273,6 +344,7 @@ func (s *Starter) Start(ctx context.Context, key idempotency.Request, phone, ip 
 				return idempotency.Response{}, err
 			}
 			if err = s.repo.Complete(effect, record, call, token.Sum(raw)); err != nil {
+				completionFailure = err
 				return idempotency.Response{}, err
 			}
 			selected, err := s.selector.Select(effect, record.Request.ID, slices.Clone(call.Numbers))
@@ -291,12 +363,21 @@ func (s *Starter) Start(ctx context.Context, key idempotency.Request, phone, ip 
 					return idempotency.Response{}, ErrProviderUnavailable
 				}
 			}
-			body, err := json.Marshal(Started{raw, selected, call.StartedAt.Add(RequestTTL)})
+			body, err := json.Marshal(Started{raw, selected, call.PublicExpiry()})
 			return idempotency.Response{Body: body, OwnerID: owner}, err
 		})
+		if err == nil {
+			err = s.repo.FinalizeKey(tx, record)
+		}
 		return err
 	})
 	if err != nil {
+		if completionFailure != nil {
+			err = completionFailure
+		}
+		if errors.Is(err, ErrProviderDuplicate) {
+			return Started{}, s.duplicate(completion, reservation, record, requestedAt, err)
+		}
 		return Started{}, err
 	}
 	return decodeStarted(result)
@@ -364,26 +445,46 @@ func (s *Starter) reject(ctx context.Context, reservation idempotency.Reservatio
 		return s.repo.Reject(tx, record, s.now().UTC())
 	})
 	if err != nil {
+		if errors.Is(err, ErrMissing) {
+			return terminalStartError()
+		}
 		return err
 	}
 	refund()
-	return ErrProviderUnavailable
+	return terminalStartError()
 }
 
-func (s *Starter) duplicate(ctx context.Context, reservation idempotency.Reservation, record StartRecord, requestedAt time.Time) error {
+func (s *Starter) duplicate(ctx context.Context, reservation idempotency.Reservation, record StartRecord, requestedAt time.Time, cause error) error {
+	if !s.now().Before(record.Request.UnknownDeadline) {
+		return s.terminate(ctx, record)
+	}
+	var effectFailure error
 	var result idempotency.Result
-	retry := ceilMinute(requestedAt.Add(RequestTTL))
+	busy := requestedAt.Add(RequestTTL)
+	var duplicate *ProviderDuplicateError
+	if errors.As(cause, &duplicate) {
+		busy = duplicate.BusyUntil
+	}
+	if !busy.After(s.now()) {
+		return s.terminate(ctx, record)
+	}
+	retry := ceilMinute(busy)
+	record.Request.KnownBusyUntil = busy
 	err := s.tx.Run(ctx, func(tx context.Context) error {
 		var err error
 		result, err = s.engine.DoReserved(tx, reservation, func(effect context.Context) (idempotency.Response, error) {
 			if err := s.repo.Duplicate(effect, record, s.now().UTC()); err != nil {
+				effectFailure = err
 				return idempotency.Response{}, err
 			}
-			return idempotency.Response{DuplicateRetryAt: retry}, finerr.RateLimited(retry)
+			return idempotency.Response{DuplicateRetryAt: retry}, domain.WithRequestRetry(finerr.RateLimited(retry), false)
 		})
 		return err
 	})
 	if err != nil {
+		if errors.Is(effectFailure, ErrMissing) {
+			return terminalStartError()
+		}
 		return err
 	}
 	s.duplicates.Inc()
@@ -418,4 +519,46 @@ func validStartPhone(s string) bool {
 		}
 	}
 	return true
+}
+
+func terminalStartError() error {
+	return domain.WithRequestRetry(errors.Join(ErrProviderUnavailable, finerr.InternalError()), false)
+}
+func (s *Starter) terminate(ctx context.Context, r StartRecord) error {
+	if err := s.tx.Run(ctx, func(tx context.Context) error { return s.repo.Terminate(tx, r, s.now().UTC()) }); err != nil {
+		return err
+	}
+	return terminalStartError()
+}
+func (s *Starter) providerName() string {
+	if s.provider == nil {
+		return ""
+	}
+	return s.provider.Name()
+}
+func (s *Starter) providerCampaign() string {
+	if p, ok := s.provider.(interface{ Campaign() string }); ok {
+		return p.Campaign()
+	}
+	return ""
+}
+func validateConsent(phone string, c Consent) error {
+	var fields []*errdetails.BadRequest_FieldViolation
+	if !validStartPhone(phone) {
+		fields = append(fields, &errdetails.BadRequest_FieldViolation{Field: "phone", Reason: "INVALID_FORMAT"})
+	}
+	if !c.AgeConfirmed {
+		fields = append(fields, &errdetails.BadRequest_FieldViolation{Field: "age_confirmed", Reason: "REQUIRED"})
+	}
+	n := utf8.RuneCountInString(c.Version)
+	if n < 1 || n > 64 || !utf8.ValidString(c.Version) {
+		fields = append(fields, &errdetails.BadRequest_FieldViolation{Field: "pd_consent_version", Reason: "INVALID_FORMAT"})
+	}
+	if len(fields) > 0 {
+		return domain.WithRequestRetry(finerr.ValidationError(fields...), false)
+	}
+	if !c.Accepted {
+		return domain.WithRequestRetry(finerr.ConsentRequired(), false)
+	}
+	return nil
 }

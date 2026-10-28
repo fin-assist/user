@@ -96,10 +96,10 @@ func TestAPIServeFromEnvironmentPublishesSigningKeysAndStops(t *testing.T) {
 		t.Fatal(versionErr)
 	}
 	versionBytes, err := os.ReadFile(capture.Name())
-	if err != nil || !bytes.Contains(versionBytes, []byte("service\t4 (dirty)")) {
+	if err != nil || !bytes.Contains(versionBytes, []byte("service\t5 (dirty)")) {
 		t.Fatal(string(versionBytes), err)
 	}
-	if err := run(t.Context(), []string{"migrate", "force", "service", "4"}); err != nil {
+	if err := run(t.Context(), []string{"migrate", "force", "service", "5"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := operatorDB.Close(t.Context()); err != nil {
@@ -108,10 +108,10 @@ func TestAPIServeFromEnvironmentPublishesSigningKeysAndStops(t *testing.T) {
 	// A deploy may roll back only the service source and then reapply it before
 	// serving. The executable's commands must preserve library migration versions.
 	var versions bytes.Buffer
-	if err := runMigrate(t.Context(), []string{"version"}, &versions); err != nil || !strings.Contains(versions.String(), "service\t4") {
+	if err := runMigrate(t.Context(), []string{"version"}, &versions); err != nil || !strings.Contains(versions.String(), "service\t5") {
 		t.Fatal(versions.String(), err)
 	}
-	for _, args := range [][]string{{"down", "service", "1"}, {"force", "service", "3"}, {"up"}} {
+	for _, args := range [][]string{{"down", "service", "1"}, {"force", "service", "4"}, {"up"}} {
 		if err := runMigrate(t.Context(), args, &versions); err != nil {
 			t.Fatal(args, err)
 		}
@@ -168,7 +168,7 @@ func TestAPIServeFromEnvironmentPublishesSigningKeysAndStops(t *testing.T) {
 	// their requests are masked in the actual debug logger.
 	client := userv1.NewAuthServiceClient(conn)
 	bank := metadata.NewOutgoingContext(requestCtx, metadata.Pairs("x-service-authorization", "Bearer dev:bank-bff", "x-client-ip", "203.0.113.1", "idempotency-key", "019c7714-3b77-74d1-9866-e1f484aae2ab", "x-private-token", "metadata-secret", "trace-bin", "binary-secret"))
-	started, err := client.StartPhoneVerification(bank, &userv1.StartPhoneVerificationRequest{Phone: "+70000001111"})
+	started, err := client.StartPhoneVerification(bank, &userv1.StartPhoneVerificationRequest{Phone: "+70000001111", PdConsentAccepted: true, PdConsentVersion: "v1", AgeConfirmed: true})
 	if err != nil {
 		t.Fatal(err)
 	}

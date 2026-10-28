@@ -68,6 +68,10 @@ func wireSessions(ctx context.Context, a *App, reg prometheus.Registerer) ([]wor
 		closeAll()
 		return nil, nil, err
 	}
+	if err := starts.SetUnknownTimeout(a.Cfg.Phone.UnknownTimeout); err != nil {
+		closeAll()
+		return nil, nil, err
+	}
 	if a.Cfg.Zvonok.Provider == "fake" {
 		starts.SetImmediateConfirmation(a.authConfirmation)
 	}

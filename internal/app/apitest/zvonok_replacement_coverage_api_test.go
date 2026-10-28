@@ -54,7 +54,7 @@ func TestAPIZvonokRecoversNewestOwnedReplacementWithoutExtendingItsLifetime(t *t
 						return
 					}
 					old := map[string]any{"call_id": 41, "phone": values.Get("phone"), "created": firstCreated, "call_status": "expires"}
-					fresh := map[string]any{"call_id": 42, "phone": values.Get("phone"), "created": firstCreated.Add(time.Millisecond), "status": "in_process"}
+					fresh := map[string]any{"call_id": 42, "phone": values.Get("phone"), "created": firstCreated.Add(time.Millisecond), "status": "in_process", "allowed_phones_for_call": []string{"+74951234567"}}
 					calls := []any{old, fresh}
 					if newestFirst {
 						calls = []any{fresh, old}
@@ -87,6 +87,7 @@ func TestAPIZvonokRecoversNewestOwnedReplacementWithoutExtendingItsLifetime(t *t
 			env := apitest.StartWithOptions(t, []app.Option{app.WithZvonokTransport(zvonokHTTPTransport{target, provider.Client().Transport})}, func(c *config.Config) {
 				c.Zvonok = config.ZvonokConfig{Provider: "zvonok", PublicKey: "replacement-test-key", CampaignID: "123", CallbackAddr: "127.0.0.1:0", PollInterval: time.Second}
 			})
+			seedDocuments(t, env)
 			key, phone := authKey(), "+79991234567"
 			if out, err := startCall(t, env, key, phone); err == nil || out != nil || startHits(t, env) != 1 {
 				t.Fatalf("unknown write did not retain exactly one reservation: %v %v", out, err)
@@ -101,7 +102,7 @@ func TestAPIZvonokRecoversNewestOwnedReplacementWithoutExtendingItsLifetime(t *t
 			}
 			var callID string
 			var created, expires time.Time
-			if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT provider_call_id,created_at,expires_at FROM phone_verification WHERE phone=$1`, phone).Scan(&callID, &created, &expires); err != nil || callID != "42" || !created.Equal(wantCreated) || !expires.Equal(created.Add(verification.RequestTTL)) || !expires.Equal(out.GetExpiresAt().AsTime().Truncate(time.Microsecond)) {
+			if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT provider_call_id,created_at,expires_at FROM phone_verification WHERE phone=$1`, phone).Scan(&callID, &created, &expires); err != nil || callID != "42" || !created.Equal(wantCreated) || !expires.Equal(created.Add(verification.RequestTTL-time.Second)) || !expires.Equal(out.GetExpiresAt().AsTime().Truncate(time.Microsecond)) {
 				t.Fatalf("predecessor identity or extended lifetime persisted: id=%s created=%s expires=%s err=%v", callID, created, expires, err)
 			}
 			mu.Lock()
@@ -113,7 +114,7 @@ func TestAPIZvonokRecoversNewestOwnedReplacementWithoutExtendingItsLifetime(t *t
 			}
 			mu.Lock()
 			defer mu.Unlock()
-			if confirms != 2 || confirms != beforeConfirms || reads != beforeReads {
+			if confirms != 1 || confirms != beforeConfirms || reads != beforeReads {
 				t.Fatalf("replay performed provider I/O: confirms=%d reads=%d", confirms, reads)
 			}
 		})

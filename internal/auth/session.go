@@ -32,11 +32,13 @@ type Link struct {
 
 // Registration is the verified new-user result that Register consumes once.
 type Registration struct {
-	ID         int32
-	Phone      string
-	VerifiedAt *time.Time
-	IsNewUser  bool
-	Closed     bool
+	ID                                int32
+	Phone                             string
+	VerifiedAt                        *time.Time
+	IsNewUser                         bool
+	Closed                            bool
+	ConsentVersion                    string
+	ConsentAcceptedAt, AgeConfirmedAt time.Time
 }
 
 // Repository provides only primary reads and transaction-bound mutations.

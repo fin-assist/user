@@ -21,6 +21,7 @@ func TestUnitDurableAttemptRecoveryAndPoolIsolation(t *testing.T) {
 		t.Fatal(first, err)
 	}
 	p = New() // No process-local mapping or timer survives a restart.
+	p.now = func() time.Time { return now }
 	recovered, err := p.Recover(t.Context(), a)
 	if err != nil || !reflect.DeepEqual(first, recovered) {
 		t.Fatal(recovered, err)
@@ -58,7 +59,6 @@ func TestUnitRejectsNonSyntheticAndInvalidAttemptsWithoutNetwork(t *testing.T) {
 		func(a *verification.Attempt) { a.Provider = "zvonok" },
 		func(a *verification.Attempt) { a.CreatedAt = now.Add(time.Second) },
 		func(a *verification.Attempt) { a.ExpiresAt = now },
-		func(a *verification.Attempt) { a.ExpiresAt = now.Add(time.Minute) },
 		func(a *verification.Attempt) { a.CallID = "foreign" },
 	} {
 		a := valid

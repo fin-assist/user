@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"time"
+	"unicode/utf8"
 
 	"github.com/fin-assist/contracts/gen/go/finerr"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
@@ -34,19 +35,17 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (out Registere
 		if !domain.ValidTimezone(zone) {
 			return domain.WithRequestRetry(finerr.ValidationError(&errdetails.BadRequest_FieldViolation{Field: "timezone", Reason: "INVALID_FORMAT"}), false)
 		}
+		n := utf8.RuneCountInString(in.ConsentVersion)
+		if n < 1 || n > 64 || !utf8.ValidString(in.ConsentVersion) {
+			return domain.WithRequestRetry(finerr.ValidationError(&errdetails.BadRequest_FieldViolation{Field: "pd_consent_version", Reason: "INVALID_FORMAT"}), false)
+		}
 		if !in.Accepted {
 			return domain.WithRequestRetry(finerr.ConsentRequired(), false)
 		}
-		version, err := s.repo.CurrentPD(ctx)
-		if err != nil {
-			return err
-		}
-		if version == "" {
-			return errors.New("auth: personal-data document not published")
-		}
-		if in.ConsentVersion != version {
+		if in.ConsentVersion != v.ConsentVersion {
 			return domain.WithRequestRetry(finerr.ConsentOutdated(), false)
 		}
+		version := v.ConsentVersion
 		id, created, err := s.repo.CreateUser(ctx, v.Phone, zone, now)
 		if err != nil {
 			return err
@@ -75,7 +74,7 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (out Registere
 			return errors.New("auth: future verification timestamp")
 		}
 		if created {
-			if err := s.repo.GrantPD(ctx, id, version, now); err != nil {
+			if err := s.repo.GrantPD(ctx, id, version, v.ConsentAcceptedAt); err != nil {
 				return err
 			}
 			if err := s.events.TimezoneChanged(ctx, id, zone, 1); err != nil {
@@ -99,7 +98,7 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (out Registere
 }
 
 func usableRegistration(v Registration, now time.Time) error {
-	if v.VerifiedAt == nil || !v.IsNewUser || v.Closed {
+	if v.VerifiedAt == nil || !v.IsNewUser || v.Closed || v.ConsentVersion == "" || v.ConsentAcceptedAt.IsZero() || v.AgeConfirmedAt.IsZero() {
 		return domain.WithRequestRetry(finerr.InvalidToken(), false)
 	}
 	if !now.Before(v.VerifiedAt.Add(15 * time.Minute)) {

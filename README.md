@@ -48,7 +48,7 @@ Logout идемпотентен без ключа, требует access-ток�
 владельца токена (FIN-285).
 Start связывает резерв и ответы с заявкой через Resource (FIN-230), включая отказы
 по занятости номера, чтобы удалить все связанные ключи вместе с данными аккаунта.
-Регистрация атомарно сохраняет согласие на ПДн, первую сессию и начальный timezone.
+Start до передачи сохраняет отдельный receipt согласия и14+, Register атомарно связывает исходное доказательство, первую сессию и timezone.
 Две подтверждённые заявки одного нового номера получают один аккаунт и отдельные
 сессии; настройки и согласия уже созданного аккаунта сохраняются. Детали —
 [docs/auth.md](docs/auth.md).
@@ -247,3 +247,20 @@ FIN-255 добавляет integration-сценарии записи насто�
 
 
 Если новая ревизия меняет `common/bootstrap.py`, в том же PR нужно синхронизировать его точную копию `scripts/common_ci.py`; Renovate сам обновляет только SHA. При откате возвращаются вместе pins и соответствующая копия bootstrap. До синхронизации byte-equality guard оставляет PR красным. Ручное изменение копии не считается bot-only обновлением по FIN-211.
+## FIN-364: порядок включения
+
+Сервис использует owner contracts/gen/go v0.7.0 (merge928bac). Сначала остановить phone
+Start на старых репликах, применить000005 и обновить все user/BFF реплики, затем включить
+новый Android с отдельными consent/14+ полями. Старые pending/undelivered results без
+receipt инвалидируются; уже выданные persisted sessions сохраняются, независимо от
+первого Refresh. Не откатывать на код с повторным confirm; rollback не восстанавливает
+старые секреты. Production Zvonok по-прежнему ждёт FIN-81; fake только dev/stage.
+
+PHONE_VERIFICATION_UNKNOWN_TIMEOUT=5m задаёт локальный unknown срок (startup1s..5m).
+Captured deadline каждой attempt immutable. По нему номер освобождается с принятым
+владельцем риском позднего дубля; receipt хранится отдельно ещё24h. Provider TTL фиксирован
+5m; Zvonokε1s даёт public=declared−ε и knownbusy=declared+ε, fakeε0. Original key terminal
+после исхода/срока, normal key window24h от первого приёма; новый intent после429 использует
+новый key. Linked account evidence хранится отдельно3года после удаления/отзыва. Никакие
+Watch/Refresh IP-события в receipt не добавляются. Детали, DB-права, cleanup и concurrency —
+[verification.md](docs/verification.md), [schema.md](docs/schema.md).
