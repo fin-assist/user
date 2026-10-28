@@ -214,17 +214,11 @@ func TestUnitStartRepositoryPreservesOwnershipAndTranslatesBusyRaces(t *testing.
 				}
 			}
 		}
-		if err := r.Forget(ctx, record.Key); err != nil {
-			t.Fatal(err)
-		}
-		if err := r.Forget(t.Context(), record.Key); err == nil {
-			t.Fatal("forget outside transaction")
-		}
 		if _, _, err := r.Claim(t.Context(), record); err == nil {
 			t.Fatal("claim outside transaction")
 		}
 		tx.exec = func(string, []any) (pgconn.CommandTag, error) { return pgconn.CommandTag{}, errUnitStorage }
-		for _, call := range []func() error{func() error { return r.Forget(ctx, record.Key) }, func() error { return r.Complete(ctx, record, verification.Call{}, h) }, func() error { return r.Reject(ctx, record, now) }, func() error { return r.Duplicate(ctx, record, now) }, func() error { _, _, e := r.Claim(ctx, record); return e }} {
+		for _, call := range []func() error{func() error { return r.Complete(ctx, record, verification.Call{}, h) }, func() error { return r.Reject(ctx, record, now) }, func() error { return r.Duplicate(ctx, record, now) }, func() error { _, _, e := r.Claim(ctx, record); return e }} {
 			if err := call(); err == nil {
 				t.Fatal("write failure hidden")
 			}

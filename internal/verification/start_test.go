@@ -27,6 +27,7 @@ type startEngineFake struct {
 	reserveErr, finishErr        error
 	current                      bool
 	reserves, finishes, releases int
+	completionTimeout            time.Duration
 }
 
 func (e *startEngineFake) BindResource(_ context.Context, _ idempotency.Reservation, r idempotency.Resource) error {
@@ -35,7 +36,11 @@ func (e *startEngineFake) BindResource(_ context.Context, _ idempotency.Reservat
 }
 
 func (e *startEngineFake) WithCompletion(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	timeout := e.completionTimeout
+	if timeout == 0 {
+		timeout = 30 * time.Second
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), timeout)
 }
 func (e *startEngineFake) Reserve(context.Context, idempotency.Request) (idempotency.Reservation, idempotency.Result, error) {
 	e.reserves++
@@ -74,12 +79,15 @@ func (e *startEngineFake) ReleaseIfCurrent(context.Context, idempotency.Reservat
 }
 
 type startRepoFake struct {
-	record                                           *StartRecord
-	busy                                             time.Time
-	failure                                          string
-	claimed, completed, rejected, duplicated, forgot int
-	terminated                                       int
-	finalizeErr                                      error
+	record                                   *StartRecord
+	busy                                     time.Time
+	failure                                  string
+	claimed, completed, rejected, duplicated int
+	dispatchErr                              error
+	dispatchMarkOnError                      bool
+	onDispatch                               func()
+	terminated                               int
+	finalizeErr                              error
 }
 
 func (r *startRepoFake) FinalizeKey(context.Context, StartRecord) error { return r.finalizeErr }
@@ -88,13 +96,19 @@ func (r *startRepoFake) Busy(context.Context, string, time.Time) (int32, time.Ti
 	return 1, r.busy, nil
 }
 func (r *startRepoFake) Dispatch(_ context.Context, v StartRecord, now time.Time) (StartRecord, bool, error) {
+	if r.onDispatch != nil {
+		r.onDispatch()
+	}
 	first := v.Request.FirstDispatchAt.IsZero()
+	if r.dispatchErr != nil && !r.dispatchMarkOnError {
+		return v, false, r.dispatchErr
+	}
 	if first {
 		v.Request.FirstDispatchAt = now
 		v.Request.DispatchNotAfter = v.Request.UnknownDeadline
 	}
 	r.record = &v
-	return v, first, nil
+	return v, first, r.dispatchErr
 }
 func (r *startRepoFake) Terminate(_ context.Context, v StartRecord, _ time.Time) error {
 	r.terminated++
@@ -112,14 +126,6 @@ func (r *startRepoFake) Find(context.Context, string) (StartRecord, error) {
 		return StartRecord{}, ErrMissing
 	}
 	return *r.record, nil
-}
-func (r *startRepoFake) Forget(context.Context, string) error {
-	r.forgot++
-	if r.failure == "forget" {
-		return errDependency
-	}
-	r.record = nil
-	return nil
 }
 func (r *startRepoFake) Claim(_ context.Context, v StartRecord) (StartRecord, time.Time, error) {
 	r.claimed++
@@ -450,7 +456,7 @@ func TestUnitStartCancelledAndExpiredKeyLink(t *testing.T) {
 	f = startFixture(t)
 	f.unfinished()
 	f.repo.record.Request.ExpiresAt = f.now
-	if _, err := f.run(t.Context()); !errors.Is(err, ErrProviderUnavailable) || f.repo.forgot != 0 || f.provider.creates != 0 {
+	if _, err := f.run(t.Context()); !errors.Is(err, ErrProviderUnavailable) || f.provider.creates != 0 {
 		t.Fatal(err)
 	}
 }

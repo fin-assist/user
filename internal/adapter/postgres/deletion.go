@@ -21,6 +21,12 @@ type Accounts struct {
 // NewAccounts shares the transaction manager with deletion and outbox publication.
 func NewAccounts(db *DB) *Accounts { return &Accounts{db: db, now: time.Now} }
 
+// WithClock supplies the application clock for consent-evidence retention.
+func (r *Accounts) WithClock(now func() time.Time) *Accounts {
+	r.now = now
+	return r
+}
+
 // Remove requires the caller to hold go-tombstone's user guard. NOWAIT avoids
 // inversion with auth replay (key lock, then user guard): the usecase rolls back
 // and retries rather than holding the guard while waiting for that key.

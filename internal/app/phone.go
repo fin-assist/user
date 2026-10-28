@@ -21,6 +21,7 @@ import (
 )
 
 func wirePhone(ctx context.Context, a *App, authDB *postgres.DB, authGuard *tombstone.Store, reg prometheus.Registerer) ([]worker.Job, func(), error) {
+	now := a.clock()
 	if err := a.Cfg.Zvonok.Validate(a.Cfg.Env); err != nil {
 		return nil, nil, err
 	}
@@ -48,8 +49,8 @@ func wirePhone(ctx context.Context, a *App, authDB *postgres.DB, authGuard *tomb
 	if err != nil {
 		return nil, nil, err
 	}
-	a.Verifications = verification.New(a.DB, postgres.NewVerifications(a.DB, a.Cfg.Zvonok.CampaignID), postgres.NewAuth(a.DB), a.Tombstones, a.Signing, codec, notifications, time.Now, token.New, a.Cfg.Sessions.RefreshTTL, a.Cfg.Phone.ResyncInterval)
-	a.authConfirmation = verification.New(authDB, postgres.NewVerifications(authDB, a.Cfg.Zvonok.CampaignID), postgres.NewAuth(authDB), authGuard, a.Signing, codec, notifications, time.Now, token.New, a.Cfg.Sessions.RefreshTTL, a.Cfg.Phone.ResyncInterval)
+	a.Verifications = verification.New(a.DB, postgres.NewVerifications(a.DB, a.Cfg.Zvonok.CampaignID), postgres.NewAuth(a.DB), a.Tombstones, a.Signing, codec, notifications, now, token.New, a.Cfg.Sessions.RefreshTTL, a.Cfg.Phone.ResyncInterval)
+	a.authConfirmation = verification.New(authDB, postgres.NewVerifications(authDB, a.Cfg.Zvonok.CampaignID), postgres.NewAuth(authDB), authGuard, a.Signing, codec, notifications, now, token.New, a.Cfg.Sessions.RefreshTTL, a.Cfg.Phone.ResyncInterval)
 	if a.Cfg.Env == config.EnvProd {
 		guard, err := verification.NewProductionProofGuard(a.Log, reg)
 		if err != nil {

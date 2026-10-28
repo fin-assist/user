@@ -133,18 +133,6 @@ func decodeStartRecord(key string, hash, windows []byte) (verification.StartReco
 	return out, nil
 }
 
-func (r *VerificationStarts) Forget(ctx context.Context, key string) error {
-	if _, ok := Tx(ctx); !ok {
-		return errVerificationTx
-	}
-	// Clear only the old attempt identity; cached resource links are independent.
-	_, err := r.db.Writer(ctx).Exec(ctx, `UPDATE phone_verification SET start_key=NULL,start_request_hash=NULL,start_reserved_windows=NULL WHERE start_key=$1`, key)
-	if err != nil {
-		return fmt.Errorf("verification start: forget attempt: %w", err)
-	}
-	return nil
-}
-
 func (r *VerificationStarts) Claim(ctx context.Context, v verification.StartRecord) (verification.StartRecord, time.Time, error) {
 	if _, ok := Tx(ctx); !ok {
 		return v, time.Time{}, errVerificationTx

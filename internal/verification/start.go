@@ -55,7 +55,6 @@ type Starts interface {
 	Dispatch(context.Context, StartRecord, time.Time) (StartRecord, bool, error)
 	Terminate(context.Context, StartRecord, time.Time) error
 	FinalizeKey(context.Context, StartRecord) error
-	Forget(context.Context, string) error
 	Claim(context.Context, StartRecord) (StartRecord, time.Time, error)
 	Complete(context.Context, StartRecord, Call, token.Hash) error
 	Reject(context.Context, StartRecord, time.Time) error
@@ -293,10 +292,20 @@ func (s *Starter) StartWithConsent(ctx context.Context, key idempotency.Request,
 		if errors.Is(err, ErrMissing) && !s.now().Before(record.Request.UnknownDeadline) {
 			return Started{}, s.terminate(completion, record)
 		}
-		return Started{}, terminalStartError()
+		if errors.Is(err, ErrMissing) {
+			return Started{}, terminalStartError()
+		}
+		// Storage/COMMIT uncertainty does not prove a terminal workflow state.
+		// The same key can discover whether the marker committed before recovery.
+		return Started{}, err
 	}
 	a := Attempt{ID: record.Request.ID, Phone: record.Request.Phone, Provider: record.Request.Provider, CallID: record.Request.CallID, Campaign: record.Request.Campaign, CreatedAt: record.AcceptedAt, ExpiresAt: record.Request.UnknownDeadline, FirstDispatchAt: record.Request.FirstDispatchAt, DispatchNotAfter: record.Request.DispatchNotAfter}
-	network, cancel := context.WithTimeout(completion, a.DispatchNotAfter.Sub(s.now()))
+	// Reserve the last three seconds of the original completion budget for the
+	// transaction that binds the call, selects a number and publishes the result.
+	// Preflight and marker waits consume the network budget, never this reserve.
+	network, cancelNetwork := context.WithDeadline(completion, deadline.Add(-3*time.Second))
+	defer cancelNetwork()
+	network, cancel := context.WithTimeout(network, a.DispatchNotAfter.Sub(s.now()))
 	defer cancel()
 	var call Call
 	if firstDispatch {

@@ -33,7 +33,15 @@ unknown_deadline; конфигурация, restart и replay его не пер
 Только победитель первой записи вправе сделать один Create до границы, с ограниченным
 контекстом; crash после marker допускает только read-only Recover. Нет повторного
 confirm даже при потерянном ответе. Recover без достаточного status/pool остаётся
-unknown. Общий бюджет завершения 10s; конкретный HTTP timeout у адаптера 3s.
+unknown. Общий бюджет завершения 10s: сеть получает не более оставшегося бюджета минус3s,
+зарезервированные для завершающей транзакции; конкретный HTTP timeout у адаптера3s.
+Сбой Dispatch storage/COMMIT не доказывает terminal: возвращается исходная ошибка
+без RequestRetryInfo, чтобы повтор того же ключа мог выяснить durable marker.
+Business clock задаётся в assembly через `app.WithClock` (по умолчанию time.Now):
+Starter, key engine, verification/session/profile и retention repositories используют
+одну функцию. Репозиторий берёт свежее время после PostgreSQL parent/unique/key
+ожиданий перед окончательным admission; snapshot до ожидания не подходит.
+Signing и отдельный clock лимитера `WithLimitClock` этим seam не изменяются.
 
 До unknown_deadline новый ключ получает обычный cached duplicate429 до
 ceilMinute(deadline), с однократным списанием phone/IP; replay не списывает, чистый

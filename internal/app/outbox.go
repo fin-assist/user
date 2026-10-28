@@ -48,7 +48,7 @@ func wireOutbox(ctx context.Context, a *App, reg prometheus.Registerer) (*events
 		closeAll()
 		return nil, worker.Job{}, nil, err
 	}
-	publisher, err := outboxlib.NewPublisher(a.DB, time.Now)
+	publisher, err := outboxlib.NewPublisher(a.DB, a.clock())
 	if err != nil {
 		return fail(err)
 	}
@@ -81,7 +81,7 @@ func wireOutbox(ctx context.Context, a *App, reg prometheus.Registerer) (*events
 		}
 		routes[events.DeletionTopic][target] = send
 	}
-	dispatcher, err := outboxlib.NewDispatcher(outboxlib.Options{Pool: pool.Primary(), Routes: routes, Now: time.Now, Logger: a.Log, Registerer: reg, PollInterval: a.Cfg.Outbox.PollInterval})
+	dispatcher, err := outboxlib.NewDispatcher(outboxlib.Options{Pool: pool.Primary(), Routes: routes, Now: a.clock(), Logger: a.Log, Registerer: reg, PollInterval: a.Cfg.Outbox.PollInterval})
 	if err != nil {
 		return fail(err)
 	}

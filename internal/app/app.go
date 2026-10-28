@@ -50,6 +50,7 @@ type App struct {
 	zvonokTransport http.RoundTripper
 	// limitNow is the clock of the authentication rate limiter (time.Now by default).
 	limitNow func() time.Time
+	now      func() time.Time
 
 	closers []func()
 }
@@ -80,7 +81,7 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger, reg prometheu
 		option(a)
 	}
 	fail := func(err error) (*App, error) { a.Close(); return nil, err }
-	a.Tombstones, err = tombstone.New(db, db.Primary(), time.Now)
+	a.Tombstones, err = tombstone.New(db, db.Primary(), a.clock())
 	if err != nil {
 		return fail(err)
 	}
@@ -108,6 +109,19 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger, reg prometheu
 
 // Option supplies trusted assembly dependencies before any handler is registered.
 type Option func(*App)
+
+// WithClock supplies the business clock used by verification, sessions, profile
+// changes and consent-evidence retention. The limiter has its own window clock.
+func WithClock(now func() time.Time) Option {
+	return func(a *App) { a.now = now }
+}
+
+func (a *App) clock() func() time.Time {
+	if a.now != nil {
+		return a.now
+	}
+	return time.Now
+}
 
 // WithPhoneBackend installs the provider and transactional number selector. The
 // default executable keeps creation disabled; PHONE_PROVIDER=fake or zvonok opts

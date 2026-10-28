@@ -206,7 +206,7 @@ func TestIntegrationStartRepositoryOwnershipBusyAndAtomicCompletion(t *testing.T
 		t.Fatal(err)
 	}
 	for _, fn := range []func(context.Context) error{
-		func(ctx context.Context) error { return repo.Forget(ctx, a.Key) }, func(ctx context.Context) error { _, _, err := repo.Claim(ctx, a); return err },
+		func(ctx context.Context) error { _, _, err := repo.Claim(ctx, a); return err },
 		func(ctx context.Context) error { return repo.Complete(ctx, a, verification.Call{}, token.Hash{}) }, func(ctx context.Context) error { return repo.Reject(ctx, a, now) }, func(ctx context.Context) error { return repo.Duplicate(ctx, a, now) },
 	} {
 		if err := fn(t.Context()); !errors.Is(err, errVerificationTx) {
@@ -238,9 +238,6 @@ func TestIntegrationStartRepositoryOwnershipBusyAndAtomicCompletion(t *testing.T
 		}
 		return err
 	}); err != nil {
-		t.Fatal(err)
-	}
-	if err = db.Run(t.Context(), func(ctx context.Context) error { return repo.Forget(ctx, b.Key) }); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = repo.Find(t.Context(), a.Key); err != nil {

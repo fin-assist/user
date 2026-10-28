@@ -70,7 +70,7 @@ create an ignored .local key through `cmd/dev-key` (not shipped in the service i
 Profile writes take the tombstone guard and the user row lock in one primary transaction.
 Assistant consent is effective only for the current document version; Status is primary-only,
 assistant-only SYSTEM per grpc-api.md 3.3, despite the mixed-model comment in the proto.
-go-outbox v0.2.0 publishes timezone changes through `NewPublisher(a.DB, time.Now)` in the
+go-outbox v0.2.0 publishes timezone changes through `NewPublisher(a.DB, a.clock())` in the
 caller-owned transaction; Publish requires its callback context and does not commit.
 The dispatcher runs as `worker.Job{Name: "outbox", Run: dispatcher.Run}` with a service
 lifecycle context, never a go-postgres transaction context (`postgres.ErrForeignTransaction`).
@@ -255,7 +255,11 @@ Priorities when they pull apart, in this order:
   notifications are code; `docs/schema.md`, «Инварианты в коде сервиса», lists them.
 - Clients of other services: `client.Dial` with `Retry` listing only reads and methods idempotent by construction;
   the context carries the deadline.
-- Time: "now" in business logic comes from an injected clock (`func() time.Time` or an interface passed by `wire()`),
+- Time: `app.WithClock` supplies one business clock (default `time.Now`) through assembly to verification,
+  sessions, repositories, profile/deletion retention, guards and event publishers. Signing and `WithLimitClock`
+  retain their separate clock boundaries. Admission repositories sample this function after blocking PostgreSQL
+  locks/writes; do not replace it with a timestamp captured before the wait.
+  "now" in business logic comes from an injected clock (`func() time.Time` or an interface passed by `wire()`),
   never `time.Now()` inside a usecase or repository query: tests pin the date, and month and year boundaries must be
   testable. Calendar days and months are computed in the user's profile time zone (grpc-api.md 8), never in
   `time.Local` or the server's zone; `now()` in SQL only for technical columns (`created_at`, outbox schedule).
