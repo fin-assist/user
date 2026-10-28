@@ -10,7 +10,7 @@ Runner — опубликованный `github.com/fin-assist/go-migrate v0.2.0
 
 ## Что бывает в схеме
 
-Решение владельца 19.10.2026 (FIN-112): в схеме — только `PRIMARY KEY`, `UNIQUE` (в том числе частичные уникальные индексы), `FOREIGN KEY` с каскадами, `NOT NULL` и `DEFAULT`. `CHECK`, `EXCLUDE`, триггеры и функции не используются: правила валидации и логика — в коде сервиса ([schema.md](schema.md), «Инварианты в коде сервиса»; тест `TestSchemaHasNoRulesOrLogic`). Ширина целочисленного ключа — по числу строк за жизнь таблицы, поэтому правило squawk `prefer-bigint-over-int` выключено (`.squawk.toml`).
+Решение владельца 19.10.2026 (FIN-112): в схеме — только `PRIMARY KEY`, `UNIQUE` (в том числе частичные уникальные индексы), `FOREIGN KEY` с каскадами, `NOT NULL` и `DEFAULT`. `CHECK`, `EXCLUDE`, триггеры и функции не используются: правила валидации и логика — в коде сервиса ([schema.md](schema.md), «Инварианты в коде сервиса»; тест `TestSchemaHasNoRulesOrLogic`). Ширина целочисленного ключа — по числу строк за жизнь таблицы, поэтому правило squawk `prefer-bigint-over-int` выключено (`.finassist-ci/generated/.squawk.toml`).
 
 ## Файлы
 
@@ -37,7 +37,7 @@ golang-migrate отправляет файл целиком одним запр�
 
 Команда `migrate` ставит на соединение `lock_timeout` и `statement_timeout` и ограничивает ожидание параллельного запуска того же источника: переменные `MIGRATE_LOCK_TIMEOUT`, `MIGRATE_STATEMENT_TIMEOUT`, `MIGRATE_WAIT_TIMEOUT`, значения по умолчанию — в [config.md](config.md), «`migrate`» (таблица генерируется из кода).
 
-Долгая миграция (бэкфилл, индекс на большой таблице) поднимает таймаут у себя: `SET LOCAL statement_timeout = '2h';`. Повторять таймауты в каждом файле не нужно — поэтому правила squawk `require-lock-timeout` и `require-statement-timeout` выключены в `.squawk.toml`.
+Долгая миграция (бэкфилл, индекс на большой таблице) поднимает таймаут у себя: `SET LOCAL statement_timeout = '2h';`. Повторять таймауты в каждом файле не нужно — поэтому правила squawk `require-lock-timeout` и `require-statement-timeout` выключены в `.finassist-ci/generated/.squawk.toml`.
 
 Упал по `lock_timeout` — значит, таблицу держала долгая транзакция сервиса. Файл откатился целиком, его можно запустить снова (после `force`, см. ниже).
 
@@ -110,7 +110,7 @@ service migrate force <source> <version>  # выставить версию и �
 ## Проверки в CI
 
 - `go test ./...` с PostgreSQL в Docker (testcontainers): для каждой миграции сервиса — «вверх → вниз → вверх» на чистой базе (`migrations/migrations_test.go`), плюс тесты самого запуска.
-- Squawk по **новым** up-файлам PR (`.squawk.toml`). Down-файлы проверяет «вверх → вниз → вверх».
+- Squawk по **новым** up-файлам PR (`.finassist-ci/generated/.squawk.toml`). Down-файлы проверяет «вверх → вниз → вверх».
 - Существующие файлы в `migrations/` не меняются.
 
 Локально без Docker — свой PostgreSQL:

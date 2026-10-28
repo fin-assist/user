@@ -168,7 +168,7 @@ CI (`.github/workflows/ci.yml`):
 | Job | Что |
 |---|---|
 | `go` | `go mod tidy` без изменений, `go vet`, `go test -race` с PostgreSQL 18 в Docker (testcontainers), включая «вверх → вниз → вверх» для миграций; тесты скриптов; три независимых порога 80% statements (unit/integration/API), дополнительный combined; отчёты и артефакты в Actions |
-| `lint` | golangci-lint (`.golangci.yml`), в том числе `forbidigo` против обхода `finerr` и `depguard` против фреймворков, ORM и DI-контейнеров |
+| `lint` | golangci-lint (`.finassist-ci/generated/.golangci.yml`), в том числе `forbidigo` против обхода `finerr` и `depguard` против фреймворков, ORM и DI-контейнеров |
 | `image` | сборка образа и запуск бинаря в нём |
 | `migrations` (PR) | существующие миграции не изменены, squawk по новым |
 
@@ -236,3 +236,9 @@ FIN-255 добавляет integration-сценарии записи насто�
 ## Артефакты stage
 
 [Получение и проверка бинарей](docs/stage-artifacts.md) (FIN-148): CI извлекает бинарь из проверенного образа, сохраняет SHA и контрольную сумму; фактическая выкладка остаётся FIN-149.
+
+## Общий Go CI и линтеры (FIN-372)
+
+Общие команды и тесты скриптов требуют Python 3.11+ с PyYAML; остальная обвязка покрытия по-прежнему использует Go, Bash и jq.
+
+`.finassist-ci.json` закрепляет общий источник полным SHA и объявляет профиль/исключения. CI вызывает reusable workflows того же SHA; `make lint`, `make fmt`, `make lint-config` и `make lint-migrations BASE_REF=origin/main` используют его через `scripts/common_ci.py`. Конфигурации создаются в игнорируемом `.finassist-ci/generated/`; локальные копии правил не редактируются. Первый локальный вызов требует доступ к GitHub. Обновление workflow и manifest pin приходит одним PR Renovate; откат возвращает прежние SHA вместе. [Источник, профили, обновление и откат](https://github.com/fin-assist/go-service-template/blob/main/docs/shared-go-ci.md). Проверки тестов/coverage, PostgreSQL 18, race и совместимость сохраняются.
