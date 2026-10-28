@@ -1,13 +1,16 @@
 package postgres
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
 	"time"
 
+	tombstone "github.com/fin-assist/go-tombstone"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/fin-assist/user/internal/adapter/verificationcrypto"
 	"github.com/fin-assist/user/internal/token"
 	"github.com/fin-assist/user/internal/verification"
 	"github.com/fin-assist/user/migrations"
@@ -292,6 +295,11 @@ func TestIntegrationKnownBusyResourceSurvivesWorkingDeletionWithoutOwningForeign
 	if _, err := db.Primary().Exec(t.Context(), `DELETE FROM phone_verification WHERE id=$1`, a.Request.ID); err != nil {
 		t.Fatal(err)
 	}
+	archived, err := repo.Find(t.Context(), a.Key)
+	if err != nil || !archived.Request.Closed || !archived.Request.StartTerminal || archived.Hash != a.Hash {
+		t.Fatal("working deletion lost original terminal-key protection", err)
+	}
+
 	if err := db.Run(t.Context(), func(ctx context.Context) error {
 		id, until, e := repo.Busy(ctx, a.Request.Phone, now)
 		if e == nil && (id != a.Request.ID || !until.Equal(a.Request.KnownBusyUntil)) {
@@ -324,5 +332,52 @@ func TestIntegrationKnownBusyResourceSurvivesWorkingDeletionWithoutOwningForeign
 	var facts, proof int
 	if err := db.Primary().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM phone_known_busy),(SELECT count(*) FROM phone_consent_receipt WHERE attempt_id=$1)`, a.Request.ID).Scan(&facts, &proof); err != nil || facts != 0 || proof != 1 {
 		t.Fatal("busy expiry changed evidence retention", facts, proof, err)
+	}
+}
+
+func TestIntegrationLinkedEvidenceKeepsLiveKeysThenCleansOnlyWorkingState(t *testing.T) {
+	db, _, _ := profileDB(t)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	clock := func() time.Time { return now }
+	starts := NewVerificationStarts(db).WithClock(clock)
+	requests := NewVerifications(db)
+	guard, err := tombstone.New(db, db.Primary(), clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	codec, err := verificationcrypto.New(bytes.Repeat([]byte{42}, 32), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := verification.New(db, requests, NewAuth(db), guard, phoneSigner{}, codec, noPhoneNotifications{}, clock, token.New, 60*24*time.Hour, time.Second)
+	a := dispatchEvidence(t, db, starts, claimEvidence(t, db, starts, startKeyA, "+79001234567", now), now)
+	call := verification.Call{ID: "linked-call", Phone: a.Request.Phone, StartedAt: now, State: verification.Pending, Numbers: []string{"+74951234567"}}
+	if err := db.Run(t.Context(), func(ctx context.Context) error { return starts.Complete(ctx, a, call, token.Sum("linked-secret")) }); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := service.Confirm(t.Context(), verification.Proof{Provider: "test", CallID: call.ID, Phone: a.Request.Phone}); err != nil || !changed {
+		t.Fatal("real linked proof failed", changed, err)
+	}
+	now = now.Add(25 * time.Hour)
+	const key = "019c7714-3b77-74d1-9866-000000000021"
+	if _, err := db.Primary().Exec(t.Context(), `INSERT INTO idempotency_keys(scope,endpoint,key,request_hash,expires_at,resource_type,resource_id) VALUES('00000000-0000-0000-0000-000000000000','/finassist.user.v1.AuthService/Register',$1,$2,$3,'phone_verification',$4::integer::text)`, key, a.Hash[:], now.Add(time.Minute), a.Request.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Cleanup(t.Context(), 1000); err != nil {
+		t.Fatal(err)
+	}
+	var working int
+	if err := db.Primary().QueryRow(t.Context(), `SELECT count(*) FROM phone_verification WHERE id=$1`, a.Request.ID).Scan(&working); err != nil || working != 1 {
+		t.Fatal("live linked key lost working parent before its own lifetime", working, err)
+	}
+	if _, err := db.Primary().Exec(t.Context(), `UPDATE idempotency_keys SET expires_at=$2 WHERE key=$1`, key, now.Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Cleanup(t.Context(), 1000); err != nil {
+		t.Fatal(err)
+	}
+	var proof, keys, sessions, unlinked int
+	if err := db.Primary().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM phone_verification WHERE id=$1),(SELECT count(*) FROM phone_consent_receipt WHERE attempt_id=$1 AND linked_user_id=$2::uuid AND retain_until IS NULL),(SELECT count(*) FROM idempotency_keys WHERE key=$3),(SELECT count(*) FROM auth_session WHERE user_id=$2::uuid),(SELECT count(*) FROM auth_session WHERE user_id=$2::uuid AND phone_verification_id IS NULL)`, a.Request.ID, profileID, key).Scan(&working, &proof, &keys, &sessions, &unlinked); err != nil || working != 0 || proof != 1 || keys != 0 || sessions != 1 || unlinked != 1 {
+		t.Fatal("working cleanup changed account proof/session", working, proof, keys, sessions, unlinked, err)
 	}
 }
