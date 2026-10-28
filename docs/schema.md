@@ -374,3 +374,13 @@ TestPhoneConfirmationAtomicReplayAndPrimaryReads, API-тесты verification_te
 7. ~~Имя таблицы~~ — закрыт: `app_user`, решение владельца 19.10.2026 (`user` зарезервирован в SQL).
 8. ~~ПДн в `rate_limit_window.subject`~~ — закрыт: хранить текстом, не HMAC, решение владельца 19.10.2026.
 9. ~~Лимит «по устройству»~~ — закрыт: на будущее, сейчас схема его не заводит (в контракте только `x-client-ip`), решение владельца 19.10.2026.
+
+FIN-364: кэшируемые отказы Register после проверки пригодного registration_token
+получают Resource исходной attempt. На evidence cutoff связанные Start/Register
+keys удаляются вместе с working state/receipt, даже если Register cache ещё live;
+их время жизни ограничено min(common key window, proof retention). До cutoff
+живые кэши linked account сохраняются по обычному правилу. Очистка блокирует parents,
+затем только адресные resource keys NOWAIT; занятый key откатывает стадию целиком,
+без инверсии ожиданий и частичного удаления proof. UUID, повторно принятый с новым
+resource, не затрагивается. Известная занятость хранит origin_attempt_id для адресной
+очистки даже после удаления working row; это связь ресурсов, не ownership чужого ID.

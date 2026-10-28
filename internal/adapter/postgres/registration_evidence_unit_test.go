@@ -3,6 +3,9 @@ package postgres
 import (
 	"context"
 	"errors"
+	"reflect"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -94,6 +97,92 @@ func TestUnitKnownBusyLookupKeepsFiniteDeadlineWithoutProviderOwnership(t *testi
 		tx.exec = func(string, []any) (pgconn.CommandTag, error) { return pgconn.CommandTag{}, errUnitStorage }
 		if _, _, e := repo.Busy(ctx, "+79001234567", now); !errors.Is(e, errUnitStorage) {
 			t.Fatal("write failure hidden", e)
+		}
+	})
+}
+
+func TestUnitEvidenceResourceCleanupLocksBeforeErasureAndPreservesErrors(t *testing.T) {
+	db := &DB{}
+	repo := NewVerifications(db)
+	now := time.Now().UTC()
+	tx := &unitTx{}
+	withUnitTransaction(t, db, tx, func(ctx context.Context) {
+		for _, failAt := range []int{0, 1, 2, 3, 4, 5} {
+			queries := 0
+			var stages []string
+			tx.query = func(string, []any) (pgx.Rows, error) {
+				queries++
+				if queries == failAt {
+					return nil, errUnitStorage
+				}
+				switch queries {
+				case 1:
+					return &unitRows{data: [][]any{{int32(7), false}, {int32(8), true}}}, nil
+				case 4:
+					return &unitRows{data: [][]any{{int32(9)}}}, nil
+				default:
+					return &unitRows{}, nil
+				}
+			}
+			tx.exec = func(q string, args []any) (pgconn.CommandTag, error) {
+				switch {
+				case strings.Contains(q, "DELETE FROM idempotency_keys"):
+					if queries < 2 {
+						t.Fatal("keys erased before locks")
+					}
+					if args[2].(bool) {
+						stages = append(stages, "expired-keys")
+					} else {
+						stages = append(stages, "cutoff-keys")
+					}
+					return pgconn.NewCommandTag("DELETE 1"), nil
+				case strings.Contains(q, "DELETE FROM phone_verification"):
+					if queries < 3 {
+						t.Fatal("working state erased before every resource lock")
+					}
+					stages = append(stages, "working")
+					return pgconn.NewCommandTag("DELETE 2"), nil
+				case strings.Contains(q, "DELETE FROM phone_consent_receipt"):
+					if queries < 5 {
+						t.Fatal("proof erased before independent resource lock")
+					}
+					stages = append(stages, "receipt")
+					return pgconn.NewCommandTag("DELETE 1"), nil
+				default:
+					t.Fatal("unexpected mutation")
+					return pgconn.CommandTag{}, nil
+				}
+			}
+			n, err := repo.DeleteOldRequests(ctx, now, 1000)
+			if failAt == 0 {
+				if err != nil || n != 3 || !reflect.DeepEqual(stages, []string{"expired-keys", "cutoff-keys", "working", "cutoff-keys", "receipt"}) {
+					t.Fatal("cleanup phases", n, stages, err)
+				}
+			} else if !errors.Is(err, errUnitStorage) || slices.Contains(stages, "receipt") {
+				t.Fatal("failure erased proof", failAt, stages, err)
+			}
+		}
+		// A streaming failure is as fatal as a failed query; no proof deletion follows.
+		tx.query = func(string, []any) (pgx.Rows, error) { return &unitRows{err: errUnitStorage}, nil }
+		if _, err := repo.DeleteOldRequests(ctx, now, 1000); !errors.Is(err, errUnitStorage) {
+			t.Fatal("row failure hidden", err)
+		}
+		tx.query = func(string, []any) (pgx.Rows, error) { return &unitRows{}, nil }
+		tx.exec = func(string, []any) (pgconn.CommandTag, error) { return pgconn.CommandTag{}, errUnitStorage }
+		if _, err := repo.DeleteOldRequests(ctx, now, 1000); !errors.Is(err, errUnitStorage) {
+			t.Fatal("delete failure hidden", err)
+		}
+		tx.query = func(string, []any) (pgx.Rows, error) { return nil, errUnitStorage }
+		if err := repo.purgeVerificationKeys(ctx, []string{"7"}, now, true); !errors.Is(err, errUnitStorage) {
+			t.Fatal(err)
+		}
+		tx.query = func(string, []any) (pgx.Rows, error) { return &unitRows{err: errUnitStorage}, nil }
+		if err := repo.purgeVerificationKeys(ctx, []string{"7"}, now, true); !errors.Is(err, errUnitStorage) {
+			t.Fatal(err)
+		}
+		tx.query = func(string, []any) (pgx.Rows, error) { return &unitRows{}, nil }
+		if err := repo.purgeVerificationKeys(ctx, []string{"7"}, now, true); !errors.Is(err, errUnitStorage) {
+			t.Fatal(err)
 		}
 	})
 }

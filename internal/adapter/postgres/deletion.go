@@ -93,7 +93,7 @@ func (r *Accounts) purgeStartKeys(ctx context.Context, phone string) error {
 	if err != nil {
 		return deletionError(err)
 	}
-	rows, err := q.Query(ctx, `SELECT 1 FROM idempotency_keys k JOIN phone_verification v ON k.resource_type='phone_verification' AND k.resource_id=v.id::text WHERE v.phone=$1 AND k.scope='00000000-0000-0000-0000-000000000000'::uuid AND k.endpoint=$2 FOR UPDATE OF k NOWAIT`, phone, startPhoneVerificationEndpoint)
+	rows, err := q.Query(ctx, `SELECT 1 FROM idempotency_keys k JOIN phone_verification v ON k.resource_type='phone_verification' AND k.resource_id=v.id::text WHERE v.phone=$1 AND k.scope='00000000-0000-0000-0000-000000000000'::uuid AND k.endpoint=ANY($2::text[]) FOR UPDATE OF k NOWAIT`, phone, verificationKeyEndpoints())
 	if err != nil {
 		return deletionError(err)
 	}
@@ -104,7 +104,7 @@ func (r *Accounts) purgeStartKeys(ctx context.Context, phone string) error {
 	if err != nil {
 		return deletionError(err)
 	}
-	_, err = q.Exec(ctx, `DELETE FROM idempotency_keys k USING phone_verification v WHERE k.resource_type='phone_verification' AND k.resource_id=v.id::text AND v.phone=$1 AND k.scope='00000000-0000-0000-0000-000000000000'::uuid AND k.endpoint=$2`, phone, startPhoneVerificationEndpoint)
+	_, err = q.Exec(ctx, `DELETE FROM idempotency_keys k USING phone_verification v WHERE k.resource_type='phone_verification' AND k.resource_id=v.id::text AND v.phone=$1 AND k.scope='00000000-0000-0000-0000-000000000000'::uuid AND k.endpoint=ANY($2::text[])`, phone, verificationKeyEndpoints())
 	if err != nil {
 		return deletionError(err)
 	}

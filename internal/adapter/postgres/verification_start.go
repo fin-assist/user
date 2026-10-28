@@ -79,7 +79,7 @@ func (r *VerificationStarts) Busy(ctx context.Context, phone string, now time.Ti
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return 0, until, err
 	}
-	err = q.QueryRow(ctx, `SELECT COALESCE((SELECT id FROM phone_verification WHERE phone=$1 ORDER BY id DESC LIMIT 1),0),busy_until FROM phone_known_busy WHERE phone=$1 AND busy_until>$2`, phone, now).Scan(&id, &until)
+	err = q.QueryRow(ctx, `SELECT origin_attempt_id,busy_until FROM phone_known_busy WHERE phone=$1 AND busy_until>$2`, phone, now).Scan(&id, &until)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, time.Time{}, nil
 	}
@@ -252,7 +252,7 @@ func (r *VerificationStarts) Duplicate(ctx context.Context, v verification.Start
 		return verification.ErrMissing
 	}
 	if v.Request.KnownBusyUntil.After(now) {
-		_, err = r.db.Writer(ctx).Exec(ctx, `INSERT INTO phone_known_busy(phone,busy_until) VALUES($1,$2) ON CONFLICT(phone) DO UPDATE SET busy_until=GREATEST(phone_known_busy.busy_until,EXCLUDED.busy_until)`, v.Request.Phone, v.Request.KnownBusyUntil)
+		_, err = r.db.Writer(ctx).Exec(ctx, `INSERT INTO phone_known_busy(phone,busy_until,origin_attempt_id) VALUES($1,$2,$3) ON CONFLICT(phone) DO UPDATE SET origin_attempt_id=CASE WHEN EXCLUDED.busy_until>phone_known_busy.busy_until THEN EXCLUDED.origin_attempt_id ELSE phone_known_busy.origin_attempt_id END,busy_until=GREATEST(phone_known_busy.busy_until,EXCLUDED.busy_until)`, v.Request.Phone, v.Request.KnownBusyUntil, v.Request.ID)
 		if err != nil {
 			return err
 		}

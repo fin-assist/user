@@ -114,3 +114,13 @@ PostgreSQL: реальные запросы/блокировки, FK, primary п
 звено. API: подпись JWT, регистрация/initial timezone, replay/конфликт, ошибки и лимиты,
 конкурентные Register/Refresh, reuse, Logout, отмена после эффекта, откат при ошибке
 сохранения ответа, SQL-ошибки без утечки и tombstone перед выдачей cached-секрета.
+
+FIN-364: кэшируемые отказы Register после проверки пригодного registration_token
+получают Resource исходной attempt. На evidence cutoff связанные Start/Register
+keys удаляются вместе с working state/receipt, даже если Register cache ещё live;
+их время жизни ограничено min(common key window, proof retention). До cutoff
+живые кэши linked account сохраняются по обычному правилу. Очистка блокирует parents,
+затем только адресные resource keys NOWAIT; занятый key откатывает стадию целиком,
+без инверсии ожиданий и частичного удаления proof. UUID, повторно принятый с новым
+resource, не затрагивается. Известная занятость хранит origin_attempt_id для адресной
+очистки даже после удаления working row; это связь ресурсов, не ownership чужого ID.

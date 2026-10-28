@@ -35,6 +35,7 @@ CREATE TABLE phone_provider_binding (
 CREATE INDEX phone_provider_binding_attempt_idx ON phone_provider_binding(attempt_id);
 CREATE TABLE phone_known_busy (
     phone text PRIMARY KEY,
+    origin_attempt_id integer NOT NULL REFERENCES phone_consent_receipt(attempt_id) ON DELETE CASCADE,
     busy_until timestamptz NOT NULL
 );
 ALTER TABLE phone_verification

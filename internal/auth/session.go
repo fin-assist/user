@@ -97,8 +97,10 @@ type RegisterInput struct {
 
 // Registered identifies the account and its newly-created session.
 type Registered struct {
-	Pair   Pair
-	UserID string
+	// VerificationID identifies an already-authenticated proof on cacheable refusals.
+	VerificationID int32
+	Pair           Pair
+	UserID         string
 }
 
 // Service has no runtime goroutines; clocks and token generation are injected.

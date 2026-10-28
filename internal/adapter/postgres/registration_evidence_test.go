@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/fin-assist/user/internal/token"
 	"github.com/fin-assist/user/internal/verification"
 	"github.com/fin-assist/user/migrations"
@@ -214,5 +216,113 @@ func TestIntegrationEvidenceMigrationRollbackRefusesRetainedReceipts(t *testing.
 	}
 	if _, err = repo.Find(t.Context(), a.Key); err != nil {
 		t.Fatal("failed rollback changed working schema", err)
+	}
+}
+
+func TestIntegrationEvidenceCutoffPurgesResourcesWithoutAuthCleanup(t *testing.T) {
+	db, _, _ := profileDB(t)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	repo := NewVerificationStarts(db)
+	a := claimEvidence(t, db, repo, startKeyA, "+79001234567", now)
+	live := claimEvidence(t, db, repo, startKeyB, "+79001234569", now)
+	old := "019c7714-3b77-74d1-9866-000000000011"
+	busy := "019c7714-3b77-74d1-9866-000000000012"
+	reused := "019c7714-3b77-74d1-9866-000000000013"
+	for _, key := range []string{old, busy, reused} {
+		resource := a.Request.ID
+		if key == reused {
+			resource = live.Request.ID
+		}
+		if _, err := db.Primary().Exec(t.Context(), `INSERT INTO idempotency_keys(scope,endpoint,key,request_hash,expires_at,resource_type,resource_id) VALUES('00000000-0000-0000-0000-000000000000',$1,$2,$3,$4,'phone_verification',$5::integer::text)`, startPhoneVerificationEndpoint, key, a.Hash[:], now.Add(-time.Second), resource); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Primary().Exec(t.Context(), `UPDATE phone_verification SET expires_at=$2 WHERE id=$1`, a.Request.ID, now.Add(-25*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Primary().Exec(t.Context(), `UPDATE phone_consent_receipt SET attempt_end=$2,retain_until=$3 WHERE attempt_id=$1`, a.Request.ID, now.Add(-25*time.Hour), now); err != nil {
+		t.Fatal(err)
+	}
+	blocker, err := db.Primary().Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = blocker.Rollback(context.Background()) }()
+	if _, err = blocker.Exec(t.Context(), `SELECT 1 FROM idempotency_keys WHERE key=$1 FOR UPDATE`, old); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	err = db.Run(ctx, func(ctx context.Context) error {
+		_, e := NewVerifications(db).DeleteOldRequests(ctx, now, 1000)
+		return e
+	})
+	var pg *pgconn.PgError
+	if !errors.As(err, &pg) || pg.Code != "55P03" {
+		t.Fatal("cleanup waited for a key while holding its parent", err)
+	}
+	var proof, working int
+	if err = db.Primary().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM phone_consent_receipt WHERE attempt_id=$1),(SELECT count(*) FROM phone_verification WHERE id=$1)`, a.Request.ID).Scan(&proof, &working); err != nil || proof != 1 || working != 1 {
+		t.Fatal("partial cleanup committed before key purge", proof, working, err)
+	}
+	if err = blocker.Rollback(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Run(t.Context(), func(ctx context.Context) error {
+		_, e := NewVerifications(db).DeleteOldRequests(ctx, now, 1000)
+		return e
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var oldKeys, newKeys int
+	if err = db.Primary().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM idempotency_keys WHERE key IN($1,$2)),(SELECT count(*) FROM idempotency_keys WHERE key=$3),(SELECT count(*) FROM phone_consent_receipt WHERE attempt_id=$4),(SELECT count(*) FROM phone_verification WHERE id=$4)`, old, busy, reused, a.Request.ID).Scan(&oldKeys, &newKeys, &proof, &working); err != nil || oldKeys != 0 || newKeys != 1 || proof != 0 || working != 0 {
+		t.Fatal("cutoff left derived keys or erased a new resource", oldKeys, newKeys, proof, working, err)
+	}
+}
+
+func TestIntegrationKnownBusyResourceSurvivesWorkingDeletionWithoutOwningForeignCall(t *testing.T) {
+	db, _, _ := profileDB(t)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	repo := NewVerificationStarts(db)
+	a := dispatchEvidence(t, db, repo, claimEvidence(t, db, repo, startKeyA, "+79001234567", now), now)
+	a.Request.KnownBusyUntil = now.Add(time.Minute)
+	if err := db.Run(t.Context(), func(ctx context.Context) error { return repo.Duplicate(ctx, a, now) }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Primary().Exec(t.Context(), `DELETE FROM phone_verification WHERE id=$1`, a.Request.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Run(t.Context(), func(ctx context.Context) error {
+		id, until, e := repo.Busy(ctx, a.Request.Phone, now)
+		if e == nil && (id != a.Request.ID || !until.Equal(a.Request.KnownBusyUntil)) {
+			t.Fatal("busy resource lost its independent origin", id, until)
+		}
+		return e
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var bindings int
+	if err := db.Primary().QueryRow(t.Context(), `SELECT count(*) FROM phone_provider_binding WHERE attempt_id=$1`, a.Request.ID).Scan(&bindings); err != nil || bindings != 0 {
+		t.Fatal("known busy fact fabricated foreign-call ownership", bindings, err)
+	}
+	after := now.Add(time.Minute)
+	if err := db.Run(t.Context(), func(ctx context.Context) error {
+		_, until, e := repo.Busy(ctx, a.Request.Phone, after)
+		if e == nil && !until.IsZero() {
+			t.Fatal("finite busy fact extended")
+		}
+		return e
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Run(t.Context(), func(ctx context.Context) error {
+		_, e := NewVerifications(db).CleanupResults(ctx, after, 1000)
+		return e
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var facts, proof int
+	if err := db.Primary().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM phone_known_busy),(SELECT count(*) FROM phone_consent_receipt WHERE attempt_id=$1)`, a.Request.ID).Scan(&facts, &proof); err != nil || facts != 0 || proof != 1 {
+		t.Fatal("busy expiry changed evidence retention", facts, proof, err)
 	}
 }

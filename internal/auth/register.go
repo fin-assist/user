@@ -28,6 +28,7 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (out Registere
 		if err := usableRegistration(v, now); err != nil {
 			return err
 		}
+		out.VerificationID = v.ID
 		zone := "Europe/Moscow"
 		if in.Timezone != nil {
 			zone = *in.Timezone
@@ -91,7 +92,7 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (out Registere
 		if err := s.repo.CloseVerification(ctx, v.ID, id, now); err != nil {
 			return missingToken(err)
 		}
-		out = Registered{UserID: id, Pair: pair}
+		out = Registered{UserID: id, Pair: pair, VerificationID: v.ID}
 		return nil
 	})
 	return out, err

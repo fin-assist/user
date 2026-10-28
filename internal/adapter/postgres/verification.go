@@ -149,15 +149,95 @@ func (r *Verifications) DeleteOldRequests(ctx context.Context, now time.Time, ba
 	if batch < 1 || batch > 1000 {
 		return 0, errors.New("verification: invalid cleanup batch")
 	}
-	tag, err := r.db.Writer(ctx).Exec(ctx, `DELETE FROM phone_verification WHERE id IN (SELECT v.id FROM phone_verification v WHERE v.expires_at<=$1 AND v.expires_at<=$2 AND (v.verified_at IS NULL OR v.closed_at IS NOT NULL OR v.verified_at<=$3) AND NOT EXISTS (SELECT 1 FROM auth_session s WHERE s.phone_verification_id=v.id) AND NOT EXISTS (SELECT 1 FROM idempotency_keys k WHERE k.resource_type='phone_verification' AND k.resource_id=v.id::text AND k.scope='00000000-0000-0000-0000-000000000000'::uuid AND k.endpoint=$5 AND k.expires_at>$2) LIMIT $4 FOR UPDATE OF v SKIP LOCKED)`, now.Add(-24*time.Hour), now, now.Add(-verification.ResultTTL), batch, startPhoneVerificationEndpoint)
+	q := r.db.Writer(ctx)
+	// Lock parents first, then take key locks only with NOWAIT. A key owner can be
+	// waiting for this request; waiting here would invert the auth lock order.
+	rows, err := q.Query(ctx, `SELECT v.id,COALESCE(e.retain_until<=$2,false) FROM phone_verification v LEFT JOIN phone_consent_receipt e ON e.attempt_id=v.consent_receipt_id WHERE v.expires_at<=$1 AND v.expires_at<=$2 AND (v.verified_at IS NULL OR v.closed_at IS NOT NULL OR v.verified_at<=$3) AND NOT EXISTS(SELECT 1 FROM auth_session s WHERE s.phone_verification_id=v.id) AND (e.retain_until<=$2 OR NOT EXISTS(SELECT 1 FROM idempotency_keys k WHERE k.resource_type='phone_verification' AND k.resource_id=v.id::text AND k.scope='00000000-0000-0000-0000-000000000000'::uuid AND k.endpoint=ANY($5::text[]) AND k.expires_at>$2)) LIMIT $4 FOR UPDATE OF v SKIP LOCKED`, now.Add(-24*time.Hour), now, now.Add(-verification.ResultTTL), batch, verificationKeyEndpoints())
+	if err != nil {
+		return 0, fmt.Errorf("verification: lock old requests: %w", err)
+	}
+	var ids, expiredProof, ordinary []string
+	for rows.Next() {
+		var id int32
+		var cutoff bool
+		if err = rows.Scan(&id, &cutoff); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		value := strconv.FormatInt(int64(id), 10)
+		ids = append(ids, value)
+		if cutoff {
+			expiredProof = append(expiredProof, value)
+		} else {
+			ordinary = append(ordinary, value)
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return 0, err
+	}
+	if err = r.purgeVerificationKeys(ctx, ordinary, now, true); err != nil {
+		return 0, err
+	}
+	if err = r.purgeVerificationKeys(ctx, expiredProof, now, false); err != nil {
+		return 0, err
+	}
+	tag, err := q.Exec(ctx, `DELETE FROM phone_verification WHERE id::text=ANY($1::text[])`, ids)
 	if err != nil {
 		return 0, fmt.Errorf("verification: remove old requests: %w", err)
 	}
-	erased, err := r.db.Writer(ctx).Exec(ctx, `DELETE FROM phone_consent_receipt WHERE attempt_id IN(SELECT e.attempt_id FROM phone_consent_receipt e WHERE e.retain_until<=$1 AND NOT EXISTS(SELECT 1 FROM phone_verification v WHERE v.consent_receipt_id=e.attempt_id) LIMIT $2 FOR UPDATE OF e SKIP LOCKED)`, now, batch)
+	// Account deletion may already have removed the working parent. Its independent
+	// receipt must still purge all derived resources on its own retention boundary.
+	rows, err = q.Query(ctx, `SELECT e.attempt_id FROM phone_consent_receipt e WHERE e.retain_until<=$1 AND NOT EXISTS(SELECT 1 FROM phone_verification v WHERE v.consent_receipt_id=e.attempt_id) LIMIT $2 FOR UPDATE OF e SKIP LOCKED`, now, batch)
+	if err != nil {
+		return 0, err
+	}
+	var receipts []string
+	for rows.Next() {
+		var id int32
+		if err = rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		receipts = append(receipts, strconv.FormatInt(int64(id), 10))
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return 0, err
+	}
+	if err = r.purgeVerificationKeys(ctx, receipts, now, false); err != nil {
+		return 0, err
+	}
+	erased, err := q.Exec(ctx, `DELETE FROM phone_consent_receipt WHERE attempt_id::text=ANY($1::text[])`, receipts)
 	if err != nil {
 		return 0, err
 	}
 	return tag.RowsAffected() + erased.RowsAffected(), nil
+}
+
+func verificationKeyEndpoints() []string {
+	return []string{startPhoneVerificationEndpoint, "/finassist.user.v1.AuthService/Register"}
+}
+func (r *Verifications) purgeVerificationKeys(ctx context.Context, ids []string, now time.Time, expiredOnly bool) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	q := r.db.Writer(ctx)
+	rows, err := q.Query(ctx, `SELECT 1 FROM idempotency_keys WHERE scope='00000000-0000-0000-0000-000000000000'::uuid AND endpoint=ANY($1::text[]) AND resource_type='phone_verification' AND resource_id=ANY($2::text[]) AND (NOT $3 OR expires_at<=$4) FOR UPDATE NOWAIT`, verificationKeyEndpoints(), ids, expiredOnly, now)
+	if err != nil {
+		return fmt.Errorf("verification: lock retained key resources: %w", err)
+	}
+	for rows.Next() {
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	_, err = q.Exec(ctx, `DELETE FROM idempotency_keys WHERE scope='00000000-0000-0000-0000-000000000000'::uuid AND endpoint=ANY($1::text[]) AND resource_type='phone_verification' AND resource_id=ANY($2::text[]) AND (NOT $3 OR expires_at<=$4)`, verificationKeyEndpoints(), ids, expiredOnly, now)
+	return err
 }
 
 // linkPhoneReceipt runs only after verified phone ownership and under the request lock.
