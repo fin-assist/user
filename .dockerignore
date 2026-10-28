@@ -6,3 +6,6 @@ docs
 
 # Local private signing material
 .local/
+
+# FIN-372 shared source cache must stay out of the build context
+.finassist-ci/

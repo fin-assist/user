@@ -1,6 +1,5 @@
 # Common commands; CI runs the same steps (.github/workflows/ci.yml).
 SHELL := /bin/bash
-GOLANGCI_LINT_VERSION := v2.15.0
 GO_TEST_COVERAGE_VERSION := v2.20.1
 TEST_TIMEOUT ?= 8m
 COVERAGE := go run github.com/vladopajic/go-test-coverage/v2@$(GO_TEST_COVERAGE_VERSION)
@@ -62,11 +61,11 @@ cover: collect-unit collect-integration collect-api ## collect all profiles befo
 	@status=0; for level in unit integration api; do $(MAKE) check-$$level || status=1; done; \
 	$(MAKE) cover-combined || status=1; exit "$$status"
 
-lint: ## golangci-lint of the pinned version
-	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run ./...
+lint: ## shared pinned golangci-lint and rendered configuration
+	@common=$$(python3 -B scripts/common_ci.py) && python3 -B "$$common/lint.py" lint --root "$(CURDIR)"
 
-fmt:
-	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) fmt ./...
+fmt: ## format using the same pinned linter and configuration
+	@common=$$(python3 -B scripts/common_ci.py) && python3 -B "$$common/lint.py" fmt --root "$(CURDIR)"
 
 image: ## the service image
 	docker build -t user:dev .
@@ -97,3 +96,12 @@ dev-key:
 	@go run ./cmd/dev-key .local/jwt-signing.pem
 	@go run ./cmd/dev-key --aes .local/auth-idempotency.key
 	@go run ./cmd/dev-key --aes .local/phone-result.key
+
+# FIN-372: shared lint source, identical locally and in CI.
+BASE_REF ?= origin/main
+.PHONY: lint-config lint-migrations
+lint-config: ## render the declared shared linter profile without running Go
+	python3 -B scripts/common_ci.py render
+
+lint-migrations: ## immutable SQL and Squawk on added up migrations
+	@common=$$(python3 -B scripts/common_ci.py) && python3 -B "$$common/lint.py" migrations --root "$(CURDIR)" --base "$(BASE_REF)"

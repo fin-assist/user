@@ -5,6 +5,8 @@ import json
 import os
 import re
 import subprocess
+import sys
+import yaml
 from pathlib import Path
 import tempfile
 import unittest
@@ -132,27 +134,67 @@ class StageArtifactTest(unittest.TestCase):
             self.assertEqual(run.call_args.kwargs["timeout"], 60)
 
     def test_workflow_extracts_from_smoke_tested_image(self):
-        workflow = Path(".github/workflows/ci.yml").read_text()
-        built = re.findall(r"-t ([a-z-]+:ci) \.", workflow)
-        extracted = re.findall(r"scripts/stage_artifact.py ([a-z-]+) ([a-z-]+:ci) ", workflow)
-        module = re.search(r"^module github.com/fin-assist/(\S+)", Path("go.mod").read_text()).group(1)
+        root = Path(__file__).resolve().parents[1]
+        common = Path(subprocess.check_output(
+            [sys.executable, str(root / "scripts/common_ci.py")], text=True, timeout=180).strip())
+        manifest = json.loads((root / ".finassist-ci.json").read_text())
+        caller = yaml.safe_load((root / ".github/workflows/ci.yml").read_text())["jobs"]["image-check"]
+        module = re.search(r"^module github.com/fin-assist/(\S+)", (root / "go.mod").read_text()).group(1)
         service = "service" if module == "go-service-template" else module
-        image = "service:ci" if service == "user" else service + ":ci"
-        expected = [(service, image)]
-        if service == "assistant":
-            expected.append(("fake-llm", "fake-llm:ci"))
-        self.assertEqual(extracted, expected, "every expected artifact must use its smoke-tested image")
-        self.assertTrue(built, "workflow must build an image")
-        for service, image in extracted:
-            self.assertIn(image, built)
-            smoke = workflow.index(f"docker run --rm {image}")
-            extract = workflow.index(f"scripts/stage_artifact.py {service} {image} ")
-            self.assertLess(workflow.index(f"-t {image} ."), smoke)
-            self.assertLess(smoke, extract)
-            if service == "bank-bff":
-                self.assertLess(workflow.index("docker stop --time"), extract)
-            dockerfile = Path("Dockerfile.fake-llm" if service == "fake-llm" else "Dockerfile").read_text()
-            self.assertRegex(dockerfile, rf"(?m)^COPY --from=build /out/{re.escape(service)} /{re.escape(service)}$")
+        fake = service == "assistant"
+        self.assertEqual(caller["with"]["service"], service)
+        self.assertEqual(caller["with"].get("fake_llm", False), fake)
+        self.assertEqual(caller["with"]["revision"], manifest["revision"])
+        self.assertEqual(caller["uses"], "fin-assist/go-ci/.github/workflows/shared-image.yml@" + manifest["revision"])
+
+        shared = yaml.safe_load((common.parent / ".github/workflows/shared-image.yml").read_text())
+        steps = shared["jobs"]["image"]["steps"]
+        build_step = next(step for step in steps if step.get("id") == "image")
+        extract = next(step for step in steps if step.get("name") == "Extract stage binary from the tested image")
+        self.assertIn("common/scripts/image_smoke.py", build_step["run"])
+        self.assertLess(steps.index(build_step), steps.index(extract))
+        self.assertEqual(extract["env"]["IMAGE_TAG"], "${{ steps.image.outputs.image_tag }}")
+        self.assertIn('scripts/stage_artifact.py "$SERVICE" "$IMAGE_TAG"', extract["run"])
+        fake_extract = next(step for step in steps if step.get("name") == "Extract stage fake provider from its tested image")
+        self.assertEqual(fake_extract["if"], "inputs.fake_llm")
+        self.assertLess(steps.index(build_step), steps.index(fake_extract))
+        self.assertIn("scripts/stage_artifact.py fake-llm fake-llm:ci", fake_extract["run"])
+
+        spec = importlib.util.spec_from_file_location("shared_image_smoke", common / "scripts/image_smoke.py")
+        smoke = importlib.util.module_from_spec(spec)
+        with patch.object(sys, "dont_write_bytecode", True):
+            spec.loader.exec_module(smoke)
+        calls = []
+        revision = "a" * 40
+
+        def run(arguments, **options):
+            calls.append(arguments)
+            if arguments[:2] == ["docker", "port"]:
+                return "127.0.0.1:12345"
+            if arguments[:2] == ["docker", "logs"]:
+                return revision
+            if arguments[:2] == ["docker", "inspect"]:
+                return "0"
+            if arguments[0] == "curl":
+                return "404" if "%{http_code}" in arguments else "go_goroutines"
+            return "usage: USER_GRPC_ADDR loopback listen address"
+
+        with patch.object(sys, "dont_write_bytecode", True):
+            image = smoke.build_images(service, fake, revision, environ={}, run=run)
+        expected_image = ("service" if service == "user" else service) + ":ci"
+        self.assertEqual(image, expected_image)
+        expected = [(service, image)] + ([("fake-llm", "fake-llm:ci")] if fake else [])
+        for binary, tag in expected:
+            build = next(i for i, args in enumerate(calls) if args[:2] == ["docker", "build"] and tag in args)
+            tested = next(i for i, args in enumerate(calls) if args[:3] == ["docker", "run", "--rm"] and tag in args)
+            self.assertLess(build, tested)
+            dockerfile = root / ("Dockerfile.fake-llm" if binary == "fake-llm" else "Dockerfile")
+            self.assertRegex(dockerfile.read_text(), rf"(?m)^COPY --from=build /out/{re.escape(binary)} /{re.escape(binary)}$")
+        if service == "bank-bff":
+            self.assertTrue(any(args[:2] == ["docker", "stop"] for args in calls))
+        # The helper import must not invalidate the next local or CI bootstrap.
+        subprocess.run([sys.executable, str(root / "scripts/common_ci.py")], check=True,
+                       capture_output=True, text=True, timeout=180)
 
     def test_existing_directory_not_overwritten(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(stage, "docker", self.docker):

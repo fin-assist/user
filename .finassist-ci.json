@@ -1,0 +1,6 @@
+{
+  "revision": "ecca25f4c7a74f6d2fa6040aa79d39ccda272e96",
+  "profile": "service",
+  "gosec_g115": false,
+  "squawk_smallint": false
+}

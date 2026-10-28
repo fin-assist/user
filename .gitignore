@@ -20,3 +20,6 @@ api.out
 *.breakdown
 *.report.txt
 test-names.txt
+
+# FIN-372 pinned shared source and generated configs
+.finassist-ci/
