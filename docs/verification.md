@@ -165,8 +165,12 @@ PII/hash/key/token/ciphertext связанных старых working rows; др
 не затрагиваются. Архивный key не продлевает lookup. Отдельные права доступа описаны
 в [schema.md](schema.md); клиентских методов чтения evidence нет.
 
-Миграция000005 добавляет receipts/binding/known-busy/metadata, без CHECK/triggers/functions.
-Она инвалидирует старые pending и ещё выдаваемые verified результаты без evidence.
+Миграции000005–000008 доводят service schema до версии8 без CHECK/triggers/functions.
+000005 добавляет receipts/binding/known-busy/metadata и nullable working FK NOT VALID;
+000006 отдельно валидирует FK. 000007 строит triple UNIQUE INDEX CONCURRENTLY одной
+командой, 000008 атомарно заменяет прежний global constraint через USING INDEX,
+сохраняя canonical имя runtime mapping. 000005 инвалидирует старые pending и ещё
+выдаваемые verified результаты без evidence.
 Уже выданные до cutover persisted refresh/access sessions сохраняются, даже если первый
 Refresh ещё не выполнялся. Старые Watch/registration tokens не возобновляют результат.
 Rollback схемы не восстанавливает эти секреты; upgrade/downgrade требует остановленного
@@ -234,7 +238,13 @@ Start проверяется на трёх уровнях: валидация о
 Runtime-провайдеры, публикация утверждённых документов, infra и работающий стенд
 не подменяются этими тестами и остаются самостоятельными условиями запуска.
 
-Down000005 под exclusive table lock отказывает при любом сохранённом receipt; откат пустой схемы проходит up/down/up. После ошибки source dirty проверяется оператором, evidence не удаляется.
+Down000008 и down000005 под exclusive receipt-table lock отказывают при любом
+сохранённом proof. Offline down000008 восстанавливает standalone index000007 перед
+прежним global constraint, поэтому down(8)→up(8) сохраняет индекс для attach;
+межкампанийные коллизии также запрещают downgrade. Down000007 отдельно удаляет индекс
+CONCURRENTLY; down000006 — монотонный SELECT1; down000005 не меняет уникальность.
+Пустая схема проходит up/down/up. После CLI ошибки dirty source проверяется
+оператором; evidence не удаляется ради отката. Детали — [migrations.md](migrations.md).
 
 FIN-364: кэшируемые отказы Register после проверки пригодного registration_token
 получают Resource исходной attempt. На evidence cutoff связанные Start/Register

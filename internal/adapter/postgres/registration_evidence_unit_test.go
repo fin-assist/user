@@ -11,6 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/fin-assist/user/internal/verification"
 )
 
 func TestUnitEvidenceMarkerHasOneOwnerAndRequiresPrimaryTransaction(t *testing.T) {
@@ -53,6 +55,9 @@ func TestUnitEvidenceMarkerHasOneOwnerAndRequiresPrimaryTransaction(t *testing.T
 		}
 		if e := repo.Terminate(ctx, record, now); e != nil {
 			t.Fatal(e)
+		}
+		tx.row = func(string, []any) pgx.Row {
+			return unitRow{values: []any{now.Add(time.Minute), now.Add(time.Minute), now.Add(2 * time.Minute)}}
 		}
 		if e := repo.FinalizeKey(ctx, record); e != nil {
 			t.Fatal(e)
@@ -183,6 +188,52 @@ func TestUnitEvidenceResourceCleanupLocksBeforeErasureAndPreservesErrors(t *test
 		tx.query = func(string, []any) (pgx.Rows, error) { return &unitRows{}, nil }
 		if err := repo.purgeVerificationKeys(ctx, []string{"7"}, now, true); !errors.Is(err, errUnitStorage) {
 			t.Fatal(err)
+		}
+	})
+}
+
+func TestUnitCompletionDeadlineUsesUnknownPriorityAndStrictPublicRemainder(t *testing.T) {
+	now := time.Now().UTC()
+	unknown := now.Add(2 * time.Minute)
+	public := now.Add(30 * time.Second)
+	busy := now.Add(time.Minute)
+	if e := completionDeadline(unknown, public, busy, public.Add(-time.Nanosecond)); e != nil {
+		t.Fatal("positive subsecond remainder rejected", e)
+	}
+	var duplicate *verification.ProviderDuplicateError
+	if e := completionDeadline(unknown, public, busy, public); !errors.As(e, &duplicate) || !duplicate.BusyUntil.Equal(busy) {
+		t.Fatal("exact public deadline did not preserve active busy bound", e)
+	}
+	if e := completionDeadline(unknown, public, busy, busy); !errors.Is(e, verification.ErrProviderTerminal) {
+		t.Fatal("expired busy invented fence", e)
+	}
+	if e := completionDeadline(unknown, public, busy, unknown); !errors.Is(e, verification.ErrMissing) {
+		t.Fatal("unknown deadline priority lost", e)
+	}
+}
+
+func TestUnitFinalAdmissionSamplesClockAfterItsLastWrite(t *testing.T) {
+	db := &DB{}
+	now := time.Now().UTC()
+	deadline := now.Add(time.Second)
+	repo := NewVerificationStarts(db).WithClock(func() time.Time { return now })
+	tx := &unitTx{}
+	withUnitTransaction(t, db, tx, func(ctx context.Context) {
+		tx.row = func(string, []any) pgx.Row {
+			return unitRow{values: []any{deadline, deadline.Add(time.Minute), deadline.Add(2 * time.Minute)}}
+		}
+		tx.exec = func(string, []any) (pgconn.CommandTag, error) {
+			now = deadline
+			return pgconn.NewCommandTag("UPDATE 1"), nil
+		}
+		if e := repo.FinalizeKey(ctx, verification.StartRecord{}); !errors.Is(e, verification.ErrMissing) {
+			t.Fatal("last-write wait used stale admission time", e)
+		}
+		for _, cause := range []error{pgx.ErrNoRows, errUnitStorage} {
+			tx.row = func(string, []any) pgx.Row { return unitRow{err: cause} }
+			if e := repo.FinalizeKey(ctx, verification.StartRecord{}); e == nil {
+				t.Fatal("missing final admission row allowed result")
+			}
 		}
 	})
 }

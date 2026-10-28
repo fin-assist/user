@@ -100,3 +100,34 @@ func TestUnitLateProviderDuplicateCannotRefenceReleasedAttempt(t *testing.T) {
 		t.Fatal("late duplicate was not terminal", e, f.repo.duplicated, f.repo.terminated)
 	}
 }
+
+func TestUnitFinalAdmissionFailureCannotPublishProvisionalStart(t *testing.T) {
+	for _, kind := range []string{"missing", "terminal", "public-expired"} {
+		t.Run(kind, func(t *testing.T) {
+			f := startFixture(t)
+			switch kind {
+			case "missing":
+				f.repo.finalizeErr = ErrMissing
+			case "terminal":
+				f.repo.finalizeErr = ErrProviderTerminal
+			case "public-expired":
+				f.repo.finalizeErr = &ProviderDuplicateError{BusyUntil: f.now.Add(time.Minute)}
+			}
+			out, err := f.run(t.Context())
+			if err == nil || out != (Started{}) || f.provider.creates != 1 || f.provider.recovers != 0 {
+				t.Fatal("provisional result escaped final barrier", out, err)
+			}
+			var advice *domain.RequestRetryError
+			if !errors.As(err, &advice) || advice.RequestRetryPermission() {
+				t.Fatal("failed final admission allowed original-key retry", err)
+			}
+			if kind == "public-expired" {
+				if reason(err) != "RATE_LIMITED" || f.repo.duplicated != 1 {
+					t.Fatal("active busy bound was lost", err)
+				}
+			} else if !errors.Is(err, ErrProviderUnavailable) {
+				t.Fatal(err)
+			}
+		})
+	}
+}

@@ -7,8 +7,6 @@ DO $$ BEGIN
     END IF;
 END $$;
 -- Cutover invalidation cannot safely be undone; old phone results stay invalid.
-ALTER TABLE phone_verification DROP CONSTRAINT phone_verification_provider_call_key;
-ALTER TABLE phone_verification ADD CONSTRAINT phone_verification_provider_call_key UNIQUE(provider,provider_call_id);
 ALTER TABLE phone_verification DROP COLUMN start_terminal,DROP COLUMN campaign,
     DROP COLUMN known_busy_until,DROP COLUMN declared_provider_expiry,
     DROP COLUMN dispatch_not_after,DROP COLUMN first_dispatch_at,DROP COLUMN unknown_deadline,

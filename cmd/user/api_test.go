@@ -96,10 +96,10 @@ func TestAPIServeFromEnvironmentPublishesSigningKeysAndStops(t *testing.T) {
 		t.Fatal(versionErr)
 	}
 	versionBytes, err := os.ReadFile(capture.Name())
-	if err != nil || !bytes.Contains(versionBytes, []byte("service\t5 (dirty)")) {
+	if err != nil || !bytes.Contains(versionBytes, []byte("service\t8 (dirty)")) {
 		t.Fatal(string(versionBytes), err)
 	}
-	if err := run(t.Context(), []string{"migrate", "force", "service", "5"}); err != nil {
+	if err := run(t.Context(), []string{"migrate", "force", "service", "8"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := operatorDB.Close(t.Context()); err != nil {
@@ -108,10 +108,10 @@ func TestAPIServeFromEnvironmentPublishesSigningKeysAndStops(t *testing.T) {
 	// A deploy may roll back only the service source and then reapply it before
 	// serving. The executable's commands must preserve library migration versions.
 	var versions bytes.Buffer
-	if err := runMigrate(t.Context(), []string{"version"}, &versions); err != nil || !strings.Contains(versions.String(), "service\t5") {
+	if err := runMigrate(t.Context(), []string{"version"}, &versions); err != nil || !strings.Contains(versions.String(), "service\t8") {
 		t.Fatal(versions.String(), err)
 	}
-	for _, args := range [][]string{{"down", "service", "1"}, {"force", "service", "4"}, {"up"}} {
+	for _, args := range [][]string{{"down", "service", "1"}, {"force", "service", "7"}, {"up"}} {
 		if err := runMigrate(t.Context(), args, &versions); err != nil {
 			t.Fatal(args, err)
 		}

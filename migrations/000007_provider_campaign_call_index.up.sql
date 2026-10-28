@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS phone_verification_provider_campaign_call_uidx ON phone_verification(provider,campaign,provider_call_id);

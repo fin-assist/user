@@ -39,7 +39,7 @@ CREATE TABLE phone_known_busy (
     busy_until timestamptz NOT NULL
 );
 ALTER TABLE phone_verification
-    ADD COLUMN consent_receipt_id integer REFERENCES phone_consent_receipt(attempt_id),
+    ADD COLUMN consent_receipt_id integer,
     ADD COLUMN unknown_deadline timestamptz,
     ADD COLUMN first_dispatch_at timestamptz,
     ADD COLUMN dispatch_not_after timestamptz,
@@ -47,8 +47,8 @@ ALTER TABLE phone_verification
     ADD COLUMN known_busy_until timestamptz,
     ADD COLUMN campaign text NOT NULL DEFAULT '',
     ADD COLUMN start_terminal boolean NOT NULL DEFAULT false;
-ALTER TABLE phone_verification DROP CONSTRAINT phone_verification_provider_call_key;
-ALTER TABLE phone_verification ADD CONSTRAINT phone_verification_provider_call_key UNIQUE(provider,campaign,provider_call_id);
+ALTER TABLE phone_verification ADD CONSTRAINT phone_verification_consent_receipt_id_fkey
+    FOREIGN KEY(consent_receipt_id) REFERENCES phone_consent_receipt(attempt_id) NOT VALID;
 -- Invalidate pre-evidence pending/results, including undelivered verified pairs.
 -- Already-issued session chains survive regardless of first Refresh timing.
 UPDATE phone_verification SET closed_at=COALESCE(closed_at,expires_at),released_at=COALESCE(released_at,expires_at),

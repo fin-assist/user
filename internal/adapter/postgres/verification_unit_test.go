@@ -196,6 +196,12 @@ func TestUnitStartRepositoryPreservesOwnershipAndTranslatesBusyRaces(t *testing.
 				t.Fatal("race exhaustion or storage error hidden")
 			}
 		}
+		tx.row = func(q string, _ []any) pgx.Row {
+			if strings.Contains(q, "SELECT unknown_deadline") {
+				return unitRow{values: []any{now.Add(time.Minute)}}
+			}
+			return unitRow{err: errUnitStorage}
+		}
 		for _, tag := range []string{"UPDATE 0", "UPDATE 1"} {
 			tx.exec = func(string, []any) (pgconn.CommandTag, error) { return pgconn.NewCommandTag(tag), nil }
 			for _, call := range []func(context.Context) error{func(c context.Context) error { return r.Complete(c, record, verification.Call{StartedAt: now}, h) }, func(c context.Context) error { return r.Reject(c, record, now) }, func(c context.Context) error { return r.Duplicate(c, record, now) }} {

@@ -79,9 +79,10 @@ type startRepoFake struct {
 	failure                                          string
 	claimed, completed, rejected, duplicated, forgot int
 	terminated                                       int
+	finalizeErr                                      error
 }
 
-func (r *startRepoFake) FinalizeKey(context.Context, StartRecord) error { return nil }
+func (r *startRepoFake) FinalizeKey(context.Context, StartRecord) error { return r.finalizeErr }
 func (r *startRepoFake) CurrentPD(context.Context) (string, error)      { return "v1", nil }
 func (r *startRepoFake) Busy(context.Context, string, time.Time) (int32, time.Time, error) {
 	return 1, r.busy, nil

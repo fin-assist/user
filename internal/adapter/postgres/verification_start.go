@@ -110,6 +110,7 @@ func (r *VerificationStarts) Dispatch(ctx context.Context, v verification.StartR
 	}
 	v.Request.FirstDispatchAt = at
 	v.Request.DispatchNotAfter = until
+	v.Request.UnknownDeadline = until
 	return v, first, nil
 }
 func (r *VerificationStarts) Terminate(ctx context.Context, v verification.StartRecord, now time.Time) error {
@@ -199,9 +200,18 @@ func (r *VerificationStarts) Complete(ctx context.Context, v verification.StartR
 		return errVerificationTx
 	}
 	q := r.db.Writer(ctx)
+	// Sampling follows the parent lock; a queued UPDATE must not admit using
+	// a timestamp from before its wait.
+	unknown, err := r.lockUnfinished(ctx, v)
+	if err != nil {
+		return err
+	}
 	now := r.now().UTC()
-	if c.Campaign != v.Request.Campaign || !c.PublicExpiry().After(now) {
+	if c.Campaign != v.Request.Campaign {
 		return verification.ErrProviderUnavailable
+	}
+	if err = completionDeadline(unknown, c.PublicExpiry(), c.BusyUntil(), now); err != nil {
+		return err
 	}
 	// Row transition and unique binding share one transaction and roll back together.
 	tag, err := q.Exec(ctx, `UPDATE phone_verification v SET provider_call_id=$4,token_hash=$5,created_at=$6,expires_at=$7,declared_provider_expiry=$10,known_busy_until=$11,start_reserved_windows='[]'::jsonb WHERE id=$1 AND start_key=$2 AND start_request_hash=$3 AND provider=$8 AND token_hash=$9 AND provider_call_id IS NULL AND verified_at IS NULL AND closed_at IS NULL AND released_at IS NULL AND NOT start_terminal AND consent_receipt_id IS NOT NULL AND first_dispatch_at IS NOT NULL AND unknown_deadline>$12`, v.Request.ID, v.Key, v.Hash[:], c.ID, h[:], c.StartedAt, c.PublicExpiry(), v.Request.Provider, v.Request.Hash[:], c.StartedAt.Add(verification.RequestTTL), c.BusyUntil(), now)
@@ -221,6 +231,10 @@ func (r *VerificationStarts) Complete(ctx context.Context, v verification.StartR
 	if tag.RowsAffected() != 1 {
 		return &verification.ProviderDuplicateError{BusyUntil: c.BusyUntil()}
 	}
+	// The unique insertion can wait for another transaction with this provider ID.
+	if err = completionDeadline(unknown, c.PublicExpiry(), c.BusyUntil(), r.now().UTC()); err != nil {
+		return err
+	}
 	_, err = q.Exec(ctx, `UPDATE phone_consent_receipt SET attempt_end=$2,retain_until=CASE WHEN linked_user_id IS NULL THEN $3 ELSE retain_until END WHERE attempt_id=$1`, v.Request.ID, c.PublicExpiry(), c.PublicExpiry().Add(24*time.Hour))
 	return err
 }
@@ -228,6 +242,14 @@ func (r *VerificationStarts) Complete(ctx context.Context, v verification.StartR
 func (r *VerificationStarts) Reject(ctx context.Context, v verification.StartRecord, now time.Time) error {
 	if _, ok := Tx(ctx); !ok {
 		return errVerificationTx
+	}
+	unknown, err := r.lockUnfinished(ctx, v)
+	if err != nil {
+		return err
+	}
+	now = maxTime(now, r.now().UTC())
+	if !unknown.After(now) {
+		return verification.ErrMissing
 	}
 	tag, err := r.db.Writer(ctx).Exec(ctx, `UPDATE phone_verification v SET released_at=$4,start_terminal=true,closed_at=$4,start_reserved_windows='[]'::jsonb WHERE v.id=$1 AND v.start_key=$2 AND v.start_request_hash=$3 AND v.provider_call_id IS NULL AND v.verified_at IS NULL AND NOT v.start_terminal AND v.closed_at IS NULL AND v.released_at IS NULL AND v.unknown_deadline>$4`, v.Request.ID, v.Key, v.Hash[:], now)
 	if err != nil {
@@ -237,12 +259,27 @@ func (r *VerificationStarts) Reject(ctx context.Context, v verification.StartRec
 		return verification.ErrMissing
 	}
 	// The receipt preserves the terminal key even after library reservation release.
+	fresh := maxTime(now, r.now().UTC())
+	if !unknown.After(fresh) {
+		return verification.ErrMissing
+	}
 	return nil
 }
 
 func (r *VerificationStarts) Duplicate(ctx context.Context, v verification.StartRecord, now time.Time) error {
 	if _, ok := Tx(ctx); !ok {
 		return errVerificationTx
+	}
+	unknown, err := r.lockUnfinished(ctx, v)
+	if err != nil {
+		return err
+	}
+	now = maxTime(now, r.now().UTC())
+	if !unknown.After(now) {
+		return verification.ErrMissing
+	}
+	if !v.Request.KnownBusyUntil.IsZero() && !v.Request.KnownBusyUntil.After(now) {
+		return verification.ErrProviderTerminal
 	}
 	tag, err := r.db.Writer(ctx).Exec(ctx, `UPDATE phone_verification v SET released_at=$4,start_terminal=true,closed_at=$4,start_reserved_windows='[]'::jsonb WHERE v.id=$1 AND v.start_key=$2 AND v.start_request_hash=$3 AND v.provider_call_id IS NULL AND v.verified_at IS NULL AND NOT v.start_terminal AND v.closed_at IS NULL AND v.released_at IS NULL AND v.unknown_deadline>$4`, v.Request.ID, v.Key, v.Hash[:], now)
 	if err != nil {
@@ -257,14 +294,65 @@ func (r *VerificationStarts) Duplicate(ctx context.Context, v verification.Start
 			return err
 		}
 	}
+	fresh := maxTime(now, r.now().UTC())
+	if !unknown.After(fresh) {
+		return verification.ErrMissing
+	}
+	if !v.Request.KnownBusyUntil.IsZero() && !v.Request.KnownBusyUntil.After(fresh) {
+		return verification.ErrProviderTerminal
+	}
 	return nil
 }
 
-// FinalizeKey keeps the library's successful cache inside the original key window.
+// FinalizeKey is the final admission barrier after selector/confirmation/encoding.
+// The own request/key locks are already held; a fresh clock after the last write
+// prevents lock waits from publishing an outcome past its captured deadlines.
 func (r *VerificationStarts) FinalizeKey(ctx context.Context, v verification.StartRecord) error {
 	if _, ok := Tx(ctx); !ok {
 		return errVerificationTx
 	}
-	_, err := r.db.Writer(ctx).Exec(ctx, `UPDATE idempotency_keys SET expires_at=LEAST(expires_at,$3) WHERE key=$1 AND scope='00000000-0000-0000-0000-000000000000'::uuid AND endpoint=$2 AND done`, v.Key, startPhoneVerificationEndpoint, v.KeyExpiresAt)
-	return err
+	var unknown, public, busy time.Time
+	err := r.db.Writer(ctx).QueryRow(ctx, `SELECT unknown_deadline,expires_at,known_busy_until FROM phone_verification WHERE id=$1 AND start_key=$2 AND start_request_hash=$3 AND provider_call_id IS NOT NULL AND closed_at IS NULL AND released_at IS NULL AND NOT start_terminal FOR UPDATE`, v.Request.ID, v.Key, v.Hash[:]).Scan(&unknown, &public, &busy)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return verification.ErrMissing
+	}
+	if err != nil {
+		return fmt.Errorf("verification start: read final admission: %w", err)
+	}
+	_, err = r.db.Writer(ctx).Exec(ctx, `UPDATE idempotency_keys SET expires_at=LEAST(expires_at,$3) WHERE key=$1 AND scope='00000000-0000-0000-0000-000000000000'::uuid AND endpoint=$2 AND done`, v.Key, startPhoneVerificationEndpoint, v.KeyExpiresAt)
+	if err != nil {
+		return err
+	}
+	return completionDeadline(unknown, public, busy, r.now().UTC())
+}
+
+func completionDeadline(unknown, public, busy, now time.Time) error {
+	if !unknown.After(now) {
+		return verification.ErrMissing
+	}
+	if !public.After(now) {
+		if busy.After(now) {
+			return &verification.ProviderDuplicateError{BusyUntil: busy}
+		}
+		return verification.ErrProviderTerminal
+	}
+	return nil
+}
+
+func (r *VerificationStarts) lockUnfinished(ctx context.Context, v verification.StartRecord) (time.Time, error) {
+	var unknown time.Time
+	err := r.db.Writer(ctx).QueryRow(ctx, `SELECT unknown_deadline FROM phone_verification WHERE id=$1 AND start_key=$2 AND start_request_hash=$3 AND provider_call_id IS NULL AND verified_at IS NULL AND closed_at IS NULL AND released_at IS NULL AND NOT start_terminal AND consent_receipt_id IS NOT NULL FOR UPDATE`, v.Request.ID, v.Key, v.Hash[:]).Scan(&unknown)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return unknown, verification.ErrMissing
+	}
+	if err != nil {
+		return unknown, fmt.Errorf("verification start: lock unfinished attempt: %w", err)
+	}
+	return unknown, nil
+}
+func maxTime(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
 }

@@ -378,6 +378,15 @@ func (s *Starter) StartWithConsent(ctx context.Context, key idempotency.Request,
 		if errors.Is(err, ErrProviderDuplicate) {
 			return Started{}, s.duplicate(completion, reservation, record, requestedAt, err)
 		}
+		if errors.Is(err, ErrMissing) {
+			if !s.now().Before(record.Request.UnknownDeadline) {
+				return Started{}, s.terminate(completion, record)
+			}
+			return Started{}, terminalStartError()
+		}
+		if errors.Is(err, ErrProviderTerminal) {
+			return Started{}, s.terminate(completion, record)
+		}
 		return Started{}, err
 	}
 	return decodeStarted(result)
@@ -446,6 +455,9 @@ func (s *Starter) reject(ctx context.Context, reservation idempotency.Reservatio
 	})
 	if err != nil {
 		if errors.Is(err, ErrMissing) {
+			if !s.now().Before(record.Request.UnknownDeadline) {
+				return s.terminate(ctx, record)
+			}
 			return terminalStartError()
 		}
 		return err
@@ -483,7 +495,13 @@ func (s *Starter) duplicate(ctx context.Context, reservation idempotency.Reserva
 	})
 	if err != nil {
 		if errors.Is(effectFailure, ErrMissing) {
+			if !s.now().Before(record.Request.UnknownDeadline) {
+				return s.terminate(ctx, record)
+			}
 			return terminalStartError()
+		}
+		if errors.Is(effectFailure, ErrProviderTerminal) {
+			return s.terminate(ctx, record)
 		}
 		return err
 	}
