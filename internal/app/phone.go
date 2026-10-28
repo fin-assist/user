@@ -109,7 +109,7 @@ func wirePhone(ctx context.Context, a *App, authDB *postgres.DB, authGuard *tomb
 		if a.phoneProvider != nil || a.phoneSelector != nil {
 			return fail(errors.New("phone: multiple configured backends"))
 		}
-		provider, err := zvonok.New(a.Cfg.Zvonok.PublicKey, a.Cfg.Zvonok.CampaignID, postgres.NewZvonokGate(a.DB, a.Cfg.Zvonok.PublicKey), a.zvonokTransport, reg)
+		provider, err := zvonok.New(a.Cfg.Zvonok.PublicKey, a.Cfg.Zvonok.CampaignID, postgres.NewZvonokGate(a.DB, a.Cfg.Zvonok.PublicKey), a.zvonokTransport, reg, now)
 		if err != nil {
 			return fail(err)
 		}

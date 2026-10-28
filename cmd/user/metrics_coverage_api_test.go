@@ -75,6 +75,12 @@ func TestAPIDeploymentRebuildsBoundedCallbackMetricsFromStoredOutcomes(t *testin
 	}
 	client := &http.Client{Timeout: time.Second}
 	var body string
+	expected := []string{
+		`finassist_phone_callback_outcomes_24h{callback_number="+74950000001",outcome="confirmed"} 1`,
+		`finassist_phone_callback_outcomes_24h{callback_number="+74950000002",outcome="pending"} 1`,
+		`finassist_phone_callback_outcomes_24h{callback_number="+74950000003",outcome="expired"} 1`,
+		`finassist_phone_callback_outcomes_24h{callback_number="other",outcome="pending"} 1`,
+	}
 	for {
 		request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, "http://"+bound.HTTP.String()+"/metrics", nil)
 		if err != nil {
@@ -88,7 +94,13 @@ func TestAPIDeploymentRebuildsBoundedCallbackMetricsFromStoredOutcomes(t *testin
 				t.Fatalf("metrics response: status=%d err=%v", response.StatusCode, readErr)
 			}
 			body = string(data)
-			if strings.Contains(body, "finassist_phone_callback_overflow_requests_24h 1\n") {
+			// GaugeVec and overflow are collected independently. One HTTP scrape
+			// must contain the complete report, not just its final overflow gauge.
+			complete := strings.Contains(body, "finassist_phone_callback_overflow_requests_24h 1\n")
+			for _, line := range expected {
+				complete = complete && strings.Contains(body, line+"\n")
+			}
+			if complete {
 				break
 			}
 		}
@@ -100,13 +112,8 @@ func TestAPIDeploymentRebuildsBoundedCallbackMetricsFromStoredOutcomes(t *testin
 		case <-timer.C:
 		}
 	}
-	for _, line := range []string{
-		`finassist_phone_callback_outcomes_24h{callback_number="+74950000001",outcome="confirmed"} 1`,
-		`finassist_phone_callback_outcomes_24h{callback_number="+74950000002",outcome="pending"} 1`,
-		`finassist_phone_callback_outcomes_24h{callback_number="+74950000003",outcome="expired"} 1`,
-		`finassist_phone_callback_outcomes_24h{callback_number="other",outcome="pending"} 1`,
-	} {
-		if !strings.Contains(body, line) {
+	for _, line := range expected {
+		if !strings.Contains(body, line+"\n") {
 			t.Fatalf("rolling outcome missing from actual HTTP metrics: %s", line)
 		}
 	}

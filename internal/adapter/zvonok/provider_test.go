@@ -194,7 +194,7 @@ func TestUnitCreateMarkerCampaignAndDeadlineCannotBeBypassed(t *testing.T) {
 
 func TestUnitClockDiagnosticsAreBoundedAndContainNoIdentifiers(t *testing.T) {
 	registry := prometheus.NewRegistry()
-	c, err := New("secret-key", "123", gateFunc(func(context.Context) error { return nil }), nil, registry)
+	c, err := New("secret-key", "123", gateFunc(func(context.Context) error { return nil }), nil, registry, time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +262,7 @@ func TestIntegrationReadOnlyRecoveryUsesRealAuthenticatedHTTP(t *testing.T) {
 		copy.URL = &endpoint
 		return server.Client().Transport.RoundTrip(copy)
 	})
-	c, err := New("secret-key", "123", gateFunc(func(context.Context) error { return nil }), transport, prometheus.NewRegistry())
+	c, err := New("secret-key", "123", gateFunc(func(context.Context) error { return nil }), transport, prometheus.NewRegistry(), time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -44,14 +44,16 @@ type Client struct {
 
 // New pins the API endpoint, bounds HTTP work and disables redirects. A supplied
 // transport is a trusted assembly seam for HTTP integration tests, never a URL setting.
-func New(key, campaign string, gate Gate, transport http.RoundTripper, reg prometheus.Registerer) (*Client, error) {
-	if len(key) == 0 || len(key) > 4096 || strings.ContainsAny(key, "\r\n") || !digits.MatchString(campaign) || gate == nil {
+// now is the shared application clock for local admission and receive timestamps;
+// remote created values remain independently authenticated provider data.
+func New(key, campaign string, gate Gate, transport http.RoundTripper, reg prometheus.Registerer, now func() time.Time) (*Client, error) {
+	if len(key) == 0 || len(key) > 4096 || strings.ContainsAny(key, "\r\n") || !digits.MatchString(campaign) || gate == nil || now == nil {
 		return nil, errors.New("zvonok: invalid credentials, campaign or API gate")
 	}
 	if transport == nil {
 		transport = http.DefaultTransport.(*http.Transport).Clone()
 	}
-	c := &Client{key: key, campaign: campaign, gate: gate, now: time.Now,
+	c := &Client{key: key, campaign: campaign, gate: gate, now: now,
 		http:          &http.Client{Transport: transport, Timeout: 3 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 		requests:      prometheus.NewCounterVec(prometheus.CounterOpts{Name: "finassist_zvonok_requests_total", Help: "Zvonok V1 HTTP requests by fixed operation and sanitized outcome."}, []string{"operation", "outcome"}),
 		latency:       prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "finassist_zvonok_request_duration_seconds", Help: "Zvonok V1 request latency including the shared API gate.", Buckets: prometheus.DefBuckets}, []string{"operation"}),

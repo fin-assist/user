@@ -39,11 +39,10 @@ func remote(id string, created time.Time, state string) string {
 }
 func client(t *testing.T, f transportFunc) *Client {
 	t.Helper()
-	c, err := New("secret-key", "123", gateFunc(func(context.Context) error { return nil }), f, prometheus.NewRegistry())
+	c, err := New("secret-key", "123", gateFunc(func(context.Context) error { return nil }), f, prometheus.NewRegistry(), func() time.Time { return testNow })
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.now = func() time.Time { return testNow }
 	return c
 }
 
@@ -176,8 +175,11 @@ func TestUnitHTTPFailuresCannotLeakSecretsOrAuthorizeRefunds(t *testing.T) {
 			}
 		})
 	}
-	if _, err := New("", "123", nil, nil, prometheus.NewRegistry()); err == nil {
+	if _, err := New("", "123", nil, nil, prometheus.NewRegistry(), time.Now); err == nil {
 		t.Fatal("invalid settings")
+	}
+	if _, err := New("secret-key", "123", gateFunc(func(context.Context) error { return nil }), nil, prometheus.NewRegistry(), nil); err == nil {
+		t.Fatal("missing admission clock accepted")
 	}
 }
 

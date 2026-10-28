@@ -33,7 +33,7 @@ func TestIntegrationZvonokProviderUsesTLSProtocolForCreationRecoveryAndCheckedPr
 			if err != nil {
 				t.Fatal(err)
 			}
-			client, err := zvonok.New("test-private-key", "123", integrationProviderGate{}, zvonokHTTPTransport{target, srv.Client().Transport}, prometheus.NewRegistry())
+			client, err := zvonok.New("test-private-key", "123", integrationProviderGate{}, zvonokHTTPTransport{target, srv.Client().Transport}, prometheus.NewRegistry(), time.Now)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -102,7 +102,7 @@ func TestIntegrationCheckedProviderProofCommitsLocalVerification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client, err := zvonok.New("test-private-key", "123", integrationProviderGate{}, zvonokHTTPTransport{target, srv.Client().Transport}, prometheus.NewRegistry())
+	client, err := zvonok.New("test-private-key", "123", integrationProviderGate{}, zvonokHTTPTransport{target, srv.Client().Transport}, prometheus.NewRegistry(), time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}

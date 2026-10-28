@@ -43,9 +43,11 @@ Starter, key engine, verification/session/profile и retention repositories ис
 ожиданий перед окончательным admission; snapshot до ожидания не подходит.
 Auth handler считает expires_in и локальный fake backend строит call от тех же
 часов. Signing, отдельный clock лимитера `WithLimitClock`, operational polling cache
-и метрики outcome этим seam не изменяются. Внешние часы Zvonok остаются реальными:
-произвольный перенос business clock не эмулирует часы внешнего провайдера и не
-поддерживается для реальных Zvonok запросов; HTTP/context deadlines измеряют elapsed time.
+и метрики outcome этим seam не изменяются. Zvonok использует ту же функцию для
+локального admission/received_at; provider.created остаётся значением из аутентифицированного
+ответа и должен укладываться в фиксированный допуск. Тест с перенесённой датой должен
+возвращать согласованный provider.created; это не изменение удалённых часов. Контекст
+ограничивается оставшейся Duration до captured business deadline, HTTP timeout — elapsed time.
 
 До unknown_deadline новый ключ получает обычный cached duplicate429 до
 ceilMinute(deadline), с однократным списанием phone/IP; replay не списывает, чистый

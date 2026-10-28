@@ -6,6 +6,7 @@ import (
 	"time"
 
 	userv1 "github.com/fin-assist/contracts/gen/go/finassist/user/v1"
+
 	"github.com/fin-assist/user/internal/app"
 	"github.com/fin-assist/user/internal/app/apitest"
 	"github.com/fin-assist/user/internal/config"

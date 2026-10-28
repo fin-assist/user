@@ -95,7 +95,7 @@ func (c *Client) Create(ctx context.Context, a verification.Attempt) (verificati
 	if a.Campaign != c.campaign || a.FirstDispatchAt.IsZero() || a.DispatchNotAfter.IsZero() || !c.now().Before(a.DispatchNotAfter) {
 		return verification.Call{}, errUnavailable
 	}
-	ctx, cancel := context.WithDeadline(ctx, a.DispatchNotAfter)
+	ctx, cancel := context.WithTimeout(ctx, a.DispatchNotAfter.Sub(c.now()))
 	defer cancel()
 	calls, err := c.lookup(ctx, "phones/calls_by_phone", c.phoneHistory(a))
 	if err != nil {
@@ -132,7 +132,7 @@ func (c *Client) Recover(ctx context.Context, a verification.Attempt) (verificat
 	if a.Campaign != c.campaign || a.FirstDispatchAt.IsZero() || a.DispatchNotAfter.IsZero() || !c.now().Before(a.DispatchNotAfter) {
 		return verification.Call{}, errUnavailable
 	}
-	ctx, cancel := context.WithDeadline(ctx, a.DispatchNotAfter)
+	ctx, cancel := context.WithTimeout(ctx, a.DispatchNotAfter.Sub(c.now()))
 	defer cancel()
 	operation, values := "phones/calls_by_phone", c.phoneHistory(a)
 	if a.CallID != "" {
