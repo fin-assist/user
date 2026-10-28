@@ -206,7 +206,7 @@ func TestAPIFakePhoneAPIAccountAppearsWhileStartWaitsForRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	// NO KEY UPDATE allows the preflight Resource FK's KEY SHARE to finish.
-	// The completion UPDATE then waits after owner lookup has found no account.
+	// Completion admission waits on this parent after owner lookup found no account.
 	if err = blocker.QueryRow(ctx, `SELECT id FROM phone_verification WHERE start_key=$1 FOR NO KEY UPDATE`, key).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
@@ -224,8 +224,7 @@ func TestAPIFakePhoneAPIAccountAppearsWhileStartWaitsForRequest(t *testing.T) {
 		var waiting bool
 		err = env.App.DB.Primary().QueryRow(ctx, `SELECT EXISTS(
 			SELECT 1 FROM pg_stat_activity WHERE datname=current_database()
-			AND application_name='user-auth' AND $1=ANY(pg_blocking_pids(pid))
-			AND query LIKE 'UPDATE phone_verification v SET provider_call_id=%')`, blockerPID).Scan(&waiting)
+			AND application_name='user-auth' AND $1=ANY(pg_blocking_pids(pid)))`, blockerPID).Scan(&waiting)
 		if err != nil {
 			t.Fatal(err)
 		}
