@@ -9,6 +9,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -117,7 +118,10 @@ def verify_checkout(cache: Path, revision: str) -> None:
         raise ValueError("Shared CI cache has local modifications (file inventory).")
     for name, oid in expected.items():
         path = cache / name
-        size = path.stat().st_size
+        info = path.stat()
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("Shared CI cache has local modifications (non-regular file).")
+        size = info.st_size
         digest = hashlib.sha1(b"blob " + str(size).encode() + b"\0")
         count = 0
         with path.open("rb") as stream:
