@@ -41,7 +41,11 @@ Business clock задаётся в assembly через `app.WithClock` (по у�
 Starter, key engine, verification/session/profile и retention repositories используют
 одну функцию. Репозиторий берёт свежее время после PostgreSQL parent/unique/key
 ожиданий перед окончательным admission; snapshot до ожидания не подходит.
-Signing и отдельный clock лимитера `WithLimitClock` этим seam не изменяются.
+Auth handler считает expires_in и локальный fake backend строит call от тех же
+часов. Signing, отдельный clock лимитера `WithLimitClock`, operational polling cache
+и метрики outcome этим seam не изменяются. Внешние часы Zvonok остаются реальными:
+произвольный перенос business clock не эмулирует часы внешнего провайдера и не
+поддерживается для реальных Zvonok запросов; HTTP/context deadlines измеряют elapsed time.
 
 До unknown_deadline новый ключ получает обычный cached duplicate429 до
 ceilMinute(deadline), с однократным списанием phone/IP; replay не списывает, чистый

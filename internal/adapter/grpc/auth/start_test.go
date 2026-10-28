@@ -8,12 +8,32 @@ import (
 
 	userv1 "github.com/fin-assist/contracts/gen/go/finassist/user/v1"
 	idempotency "github.com/fin-assist/go-idempotency"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/fin-assist/user/internal/verification"
 )
 
 type startFunc func(context.Context, idempotency.Request, string, string) (verification.Started, error)
+
+type clockRegistrar struct{ handler *Handler }
+
+func (r *clockRegistrar) RegisterService(_ *grpc.ServiceDesc, service any) {
+	r.handler = service.(*Handler)
+}
+
+func TestUnitRegisteredStartMappingUsesAssemblyClock(t *testing.T) {
+	h, sessions, _, limits, _ := handlerFixture(t)
+	now := time.Date(2032, time.February, 29, 23, 59, 0, 0, time.UTC)
+	registrar := new(clockRegistrar)
+	Register(registrar, sessions, h.engine, h.state, h.attempts, limits, h.guard, nil, func() time.Time { return now }, startFunc(func(context.Context, idempotency.Request, string, string) (verification.Started, error) {
+		return verification.Started{Token: "opaque", CallbackNumber: "+74951234567", ExpiresAt: now.Add(5 * time.Minute)}, nil
+	}))
+	out, err := registrar.handler.StartPhoneVerification(handlerContext(), &userv1.StartPhoneVerificationRequest{Phone: "+79001234567"})
+	if err != nil || out.GetExpiresIn() != 300 || !out.GetExpiresAt().AsTime().Equal(now.Add(5*time.Minute)) {
+		t.Fatal("wire mapping mixed the business and wall clocks", out, err)
+	}
+}
 
 func (f startFunc) StartWithConsent(ctx context.Context, r idempotency.Request, phone, ip string, _ verification.Consent) (verification.Started, error) {
 	return f(ctx, r, phone, ip)

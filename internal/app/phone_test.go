@@ -82,7 +82,7 @@ func TestIntegrationPhoneAssemblyKeySeparationAndFailureCleanup(t *testing.T) {
 		t.Fatal("duplicate prod guard metric accepted")
 	}
 	a.Cfg.Env, a.Cfg.Zvonok.Provider = config.EnvDev, "fake"
-	a.phoneProvider = fakephone.New()
+	a.phoneProvider = fakephone.New(time.Now)
 	if _, _, err := wirePhone(t.Context(), a, a.DB, a.Tombstones, prometheus.NewRegistry()); err == nil {
 		t.Fatal("two backends accepted")
 	}

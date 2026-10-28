@@ -76,7 +76,7 @@ func wireSessions(ctx context.Context, a *App, reg prometheus.Registerer) ([]wor
 	if a.Cfg.Zvonok.Provider == "fake" {
 		starts.SetImmediateConfirmation(a.authConfirmation)
 	}
-	authgrpc.Register(a.GRPC.GRPC(), sessions, engine, postgres.NewSessionTransactions(pool), a.DB, a.Limits, guard, a.Verifications, starts)
+	authgrpc.Register(a.GRPC.GRPC(), sessions, engine, postgres.NewSessionTransactions(pool), a.DB, a.Limits, guard, a.Verifications, now, starts)
 	cleanup, err := worker.Every("auth-cleanup", time.Minute, a.Log, worker.SystemClock{}, func(ctx context.Context) error {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()

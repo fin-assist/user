@@ -181,7 +181,7 @@ func TestUnitSessionHandlerMappingAndIndependentAttempts(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := grpc.NewServer()
-	Register(server, s, h.engine, h.state, h.attempts, l, h.guard, nil)
+	Register(server, s, h.engine, h.state, h.attempts, l, h.guard, nil, time.Now)
 	if _, ok := server.GetServiceInfo()["finassist.user.v1.AuthService"]; !ok {
 		t.Fatal("service absent")
 	}

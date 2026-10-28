@@ -88,7 +88,7 @@ func wirePhone(ctx context.Context, a *App, authDB *postgres.DB, authGuard *tomb
 			notifications.Close()
 			return nil, nil, err
 		}
-		a.phoneProvider, a.phoneSelector = fakephone.New(), numbers
+		a.phoneProvider, a.phoneSelector = fakephone.New(now), numbers
 		outcomes, err := callbackOutcomesJob(a, numbers)
 		if err != nil {
 			closeBackend()

@@ -131,7 +131,7 @@ func TestIntegrationStartCommitsReservationBeforeProviderAndRecoversLostReply(t 
 func TestIntegrationFakeBackendUsesDurableAttemptAndCommonConfirmation(t *testing.T) {
 	env := apitest.Start(t)
 	seedDocuments(t, env)
-	p := fakephone.New()
+	p := fakephone.New(time.Now)
 	starter := integrationStarter(t, env, p)
 	starter.SetImmediateConfirmation(env.App.Verifications)
 	phone := "+70000001111"
@@ -145,7 +145,7 @@ func TestIntegrationFakeBackendUsesDurableAttemptAndCommonConfirmation(t *testin
 		t.Fatal(proof, err)
 	}
 	// Reconstructing the provider and coordinator preserves the committed result.
-	restarted := integrationStarter(t, env, fakephone.New())
+	restarted := integrationStarter(t, env, fakephone.New(time.Now))
 	restarted.SetImmediateConfirmation(env.App.Verifications)
 	again, err := restarted.StartWithConsent(t.Context(), request, phone, "203.0.113.9", verification.Consent{Accepted: true, Version: "v1", AgeConfirmed: true})
 	if err != nil || again.Token != first.Token || again.CallbackNumber != first.CallbackNumber {

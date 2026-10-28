@@ -11,17 +11,15 @@ import (
 )
 
 func TestUnitDurableAttemptRecoveryAndPoolIsolation(t *testing.T) {
-	p := New()
-	now := time.Now().UTC()
-	p.now = func() time.Time { return now }
+	now := time.Date(2032, time.February, 29, 23, 59, 0, 0, time.UTC)
+	p := New(func() time.Time { return now })
 	a := verification.Attempt{ID: 42, Phone: "+70000001234", Provider: "fake", CreatedAt: now, ExpiresAt: now.Add(verification.RequestTTL)}
 	first, err := p.Create(t.Context(), a)
 	if err != nil || first.ID != "fake:42" || first.Phone != a.Phone ||
 		!first.StartedAt.Equal(a.CreatedAt) || !reflect.DeepEqual(first.Numbers, []string{CallbackNumberOne, CallbackNumberTwo}) {
 		t.Fatal(first, err)
 	}
-	p = New() // No process-local mapping or timer survives a restart.
-	p.now = func() time.Time { return now }
+	p = New(func() time.Time { return now }) // No process-local mapping or timer survives a restart.
 	recovered, err := p.Recover(t.Context(), a)
 	if err != nil || !reflect.DeepEqual(first, recovered) {
 		t.Fatal(recovered, err)
@@ -40,7 +38,7 @@ func TestUnitDurableAttemptRecoveryAndPoolIsolation(t *testing.T) {
 
 func TestUnitRejectsNonSyntheticAndInvalidAttemptsWithoutNetwork(t *testing.T) {
 	now := time.Now().UTC()
-	p := New()
+	p := New(time.Now)
 	p.now = func() time.Time { return now }
 	valid := verification.Attempt{ID: 1, Phone: "+70000000000", Provider: "fake", CreatedAt: now, ExpiresAt: now.Add(verification.RequestTTL)}
 	for _, phone := range []string{"+70000009999", "+70000000001"} {

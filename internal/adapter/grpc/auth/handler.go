@@ -80,8 +80,8 @@ type Handler struct {
 }
 
 // Register installs the AuthService lifecycle and the phone creation coordinator.
-func Register(server grpc.ServiceRegistrar, sessions Sessions, engine Engine, state, attempts Transactions, limits Limits, guard Guard, phone Phone, starts ...PhoneStart) {
-	h := &Handler{sessions: sessions, engine: engine, state: state, attempts: attempts, limits: limits, guard: guard, phone: phone, now: time.Now}
+func Register(server grpc.ServiceRegistrar, sessions Sessions, engine Engine, state, attempts Transactions, limits Limits, guard Guard, phone Phone, now func() time.Time, starts ...PhoneStart) {
+	h := &Handler{sessions: sessions, engine: engine, state: state, attempts: attempts, limits: limits, guard: guard, phone: phone, now: now}
 	if len(starts) > 0 {
 		h.start = starts[0]
 	}

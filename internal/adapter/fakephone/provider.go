@@ -19,8 +19,9 @@ const (
 // Provider reconstructs calls from the durable attempt, without process-local state.
 type Provider struct{ now func() time.Time }
 
-// New returns the stateless development backend. Runtime assembly forbids prod.
-func New() *Provider { return &Provider{now: time.Now} }
+// New returns the stateless development backend with the application clock.
+// Runtime assembly forbids prod.
+func New(now func() time.Time) *Provider { return &Provider{now: now} }
 
 // Name is the persistent identity used by the common creation/confirmation paths.
 func (*Provider) Name() string { return "fake" }
