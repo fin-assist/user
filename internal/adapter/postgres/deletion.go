@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -12,10 +13,19 @@ import (
 )
 
 // Accounts removes user-owned data inside the tombstone transaction on primary.
-type Accounts struct{ db *DB }
+type Accounts struct {
+	db  *DB
+	now func() time.Time
+}
 
 // NewAccounts shares the transaction manager with deletion and outbox publication.
-func NewAccounts(db *DB) *Accounts { return &Accounts{db: db} }
+func NewAccounts(db *DB) *Accounts { return &Accounts{db: db, now: time.Now} }
+
+// WithClock supplies the application clock for consent-evidence retention.
+func (r *Accounts) WithClock(now func() time.Time) *Accounts {
+	r.now = now
+	return r
+}
 
 // Remove requires the caller to hold go-tombstone's user guard. NOWAIT avoids
 // inversion with auth replay (key lock, then user guard): the usecase rolls back
@@ -51,6 +61,11 @@ func (r *Accounts) Remove(ctx context.Context, id string) error {
 	if _, err = tx.Exec(ctx, `DELETE FROM idempotency_keys WHERE scope=$1::uuid OR owner_id=$1::uuid`, id); err != nil {
 		return deletionError(err)
 	}
+	// Independent evidence survives deletion without keeping an account FK.
+	// Each receipt starts its policy retention once; repeated deletion cannot extend it.
+	if _, err = tx.Exec(ctx, `UPDATE phone_consent_receipt SET retain_until=$2 WHERE linked_user_id=$1::uuid AND retain_until IS NULL`, id, r.now().UTC().AddDate(3, 0, 0)); err != nil {
+		return fmt.Errorf("deletion: retain phone evidence: %w", err)
+	}
 	if _, err = tx.Exec(ctx, `DELETE FROM app_user WHERE id=$1`, id); err != nil {
 		return fmt.Errorf("deletion: remove account: %w", err)
 	}
@@ -84,7 +99,7 @@ func (r *Accounts) purgeStartKeys(ctx context.Context, phone string) error {
 	if err != nil {
 		return deletionError(err)
 	}
-	rows, err := q.Query(ctx, `SELECT 1 FROM idempotency_keys k JOIN phone_verification v ON k.resource_type='phone_verification' AND k.resource_id=v.id::text WHERE v.phone=$1 AND k.scope='00000000-0000-0000-0000-000000000000'::uuid AND k.endpoint=$2 FOR UPDATE OF k NOWAIT`, phone, startPhoneVerificationEndpoint)
+	rows, err := q.Query(ctx, `SELECT 1 FROM idempotency_keys k JOIN phone_verification v ON k.resource_type='phone_verification' AND k.resource_id=v.id::text WHERE v.phone=$1 AND k.scope='00000000-0000-0000-0000-000000000000'::uuid AND k.endpoint=ANY($2::text[]) FOR UPDATE OF k NOWAIT`, phone, verificationKeyEndpoints())
 	if err != nil {
 		return deletionError(err)
 	}
@@ -95,7 +110,7 @@ func (r *Accounts) purgeStartKeys(ctx context.Context, phone string) error {
 	if err != nil {
 		return deletionError(err)
 	}
-	_, err = q.Exec(ctx, `DELETE FROM idempotency_keys k USING phone_verification v WHERE k.resource_type='phone_verification' AND k.resource_id=v.id::text AND v.phone=$1 AND k.scope='00000000-0000-0000-0000-000000000000'::uuid AND k.endpoint=$2`, phone, startPhoneVerificationEndpoint)
+	_, err = q.Exec(ctx, `DELETE FROM idempotency_keys k USING phone_verification v WHERE k.resource_type='phone_verification' AND k.resource_id=v.id::text AND v.phone=$1 AND k.scope='00000000-0000-0000-0000-000000000000'::uuid AND k.endpoint=ANY($2::text[])`, phone, verificationKeyEndpoints())
 	if err != nil {
 		return deletionError(err)
 	}

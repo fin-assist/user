@@ -113,6 +113,30 @@ service migrate force <source> <version>  # выставить версию и �
 - Squawk по **новым** up-файлам PR (`.finassist-ci/generated/.squawk.toml`). Down-файлы проверяет «вверх → вниз → вверх».
 - Существующие файлы в `migrations/` не меняются.
 
+### FIN-364: receipt и уникальность заявки (service version 8)
+
+000005 добавляет nullable `consent_receipt_id` и FK `NOT VALID`, оставляя проверку
+новых записей включённой. Отдельная000006 валидирует прежние строки. 000007 строит
+UNIQUE INDEX CONCURRENTLY для `(provider,campaign,provider_call_id)` одной командой
+без изменения прежнего constraint. Только000008 атомарно снимает прежний
+`UNIQUE(provider,provider_call_id)` и подключает готовый индекс через `USING INDEX`.
+Имя `phone_verification_provider_call_key` сохраняется для runtime error mapping.
+В этом единственном DROP — локальное обоснованное `squawk-ignore ban-drop-constraint`;
+конфигурация и остальные правила Squawk не меняются. 000001–000004 неизменны.
+
+Cutover выполняется с остановленным приёмом phone Start на старых репликах; новый
+runtime допускается после всех четырёх шагов. Невалидный concurrent index требует
+обычного операторского удаления/force по правилам выше, а не пропуска000008.
+Downgrade — offline и только без retained receipts: down000008 и down000005
+проверяют пустоту под `ACCESS EXCLUSIVE` receipt-table lock. Не удалять proof ради
+прохождения guard. Down000008 в одной транзакции снимает triple constraint,
+восстанавливает standalone triple index000007 и прежний global constraint;
+межкампанийные коллизии старого ключа также останавливают откат. Это сохраняет
+возможность `down service 1` из8 и последующего `up` без потерянного индекса.
+Down000007 удаляет standalone index `CONCURRENTLY` отдельной командой; down000006
+оставляет validation монотонной (`SELECT 1`), down000005 удаляет FK с колонкой и
+не меняет уникальность. Старые invalidated auth secrets не восстанавливаются.
+
 Локально без Docker — свой PostgreSQL:
 
 ```bash

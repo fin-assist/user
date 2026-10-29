@@ -39,7 +39,7 @@ updates them in the same PR. A service made from the template rewrites the first
 
 FIN-255 uses go-grpc v0.2.0 server/client/reqctx, go-migrate v0.2.0 and go-worker v0.1.0 directly; no local transport/context/runner copies. go-postgres v0.3.0 owns pool lifecycle; routing and business transaction mapping remain service-owned. Workers receive the logger, SystemClock and explicit five-second restart delay. Shared tests belong to the libraries; service identity, ACL, SQL and RPC scenarios remain here.
 
-FIN-225 uses contracts/gen/go v0.5.0. Usecase-owned `domain.WithRequestRetry` marks only explicit refusal phases; `adapter/grpc/retryinfo` serializes that decision after mapping, and `adapter/idempotency.StartEngine` preserves callback advice before encoding. Never infer permission from a reason/status or decorate an old decoded cache. Positive V1 is restricted to the initial pre-effect limiter; unknown storage/COMMIT/provider outcomes stay unmarked. See `docs/errors.md`; this does not change keys, TTL or provider behavior.
+FIN-364 uses contracts/gen/go v0.7.0. Usecase-owned `domain.WithRequestRetry` marks only explicit refusal phases; `adapter/grpc/retryinfo` serializes that decision after mapping, and `adapter/idempotency.StartEngine` preserves callback advice before encoding. Never infer permission from a reason/status or decorate an old decoded cache. Positive advice also permits strictly read-only unknown recovery before its captured deadline. Terminal original dispatched duplicate/unknown keys carry false; storage/COMMIT failures do not inherit callback advice. See `docs/errors.md` and FIN-364 below.
 
 ## Current implementation (FIN-219)
 
@@ -70,7 +70,7 @@ create an ignored .local key through `cmd/dev-key` (not shipped in the service i
 Profile writes take the tombstone guard and the user row lock in one primary transaction.
 Assistant consent is effective only for the current document version; Status is primary-only,
 assistant-only SYSTEM per grpc-api.md 3.3, despite the mixed-model comment in the proto.
-go-outbox v0.2.0 publishes timezone changes through `NewPublisher(a.DB, time.Now)` in the
+go-outbox v0.2.0 publishes timezone changes through `NewPublisher(a.DB, a.clock())` in the
 caller-owned transaction; Publish requires its callback context and does not commit.
 The dispatcher runs as `worker.Job{Name: "outbox", Run: dispatcher.Run}` with a service
 lifecycle context, never a go-postgres transaction context (`postgres.ErrForeignTransaction`).
@@ -106,7 +106,7 @@ fields own recovery and refundable windows. Library Resource binds the own reser
 and successful/busy caches to the request ID; busy keys never overwrite attempt fields. Completion takes key -> guard/user -> request;
 fresh claims take key -> limits -> guard/user -> request -> BindResource. Selector runs inside
 the completion transaction. Only ReleaseIfCurrent permits refund after a definite provider
-rejection, in the same transaction as release; uncertain outcomes keep their claim.
+rejection, in the same transaction as release; uncertain outcomes keep their claim only until the captured unknown deadline. Receipt and terminal key evidence survive independently.
 Deletion also purges successful and busy Start caches through phone links, including
 keys created before the account existed. Cleanup retains requests while a Resource cache is live. Purge locks request parents
 before its NOWAIT key snapshot; busy claims take KEY SHARE to close the uncommitted-link race.
@@ -255,7 +255,13 @@ Priorities when they pull apart, in this order:
   notifications are code; `docs/schema.md`, «Инварианты в коде сервиса», lists them.
 - Clients of other services: `client.Dial` with `Retry` listing only reads and methods idempotent by construction;
   the context carries the deadline.
-- Time: "now" in business logic comes from an injected clock (`func() time.Time` or an interface passed by `wire()`),
+- Time: `app.WithClock` supplies one business clock (default `time.Now`) through assembly to verification,
+  sessions, repositories, profile/deletion retention, guards, event publishers, local fake provider and public
+  `expires_in` mapping. Zvonok local admission/receive timestamps use this clock too; provider-created remains
+  an authenticated remote value and must agree within the fixed tolerance. Signing, `WithLimitClock`, polling coalescing, elapsed HTTP
+  durations and rolling-outcome reports retain their documented clock boundaries. Admission repositories sample this function after blocking PostgreSQL
+  locks/writes; do not replace it with a timestamp captured before the wait.
+  "now" in business logic comes from an injected clock (`func() time.Time` or an interface passed by `wire()`),
   never `time.Now()` inside a usecase or repository query: tests pin the date, and month and year boundaries must be
   testable. Calendar days and months are computed in the user's profile time zone (grpc-api.md 8), never in
   `time.Local` or the server's zone; `now()` in SQL only for technical columns (`created_at`, outbox schedule).
@@ -273,6 +279,22 @@ Priorities when they pull apart, in this order:
   free text.
 - Document in moderation: a doc comment on exported identifiers of packages others use, comments where the logic is
   not obvious (accounting rules, idempotency, locks, transaction boundaries), not on every function.
+
+## FIN-364 registration evidence
+
+Start uses contracts/gen/go v0.7.0: separate age/PD declarations, all gates after key/limits/busy.
+Durable phone_consent_receipt commits before provider transfer; it has no account/request cascade.
+Receipt acceptance/age/IP/version are immutable and applicant-only until verified ownership.
+Unknown deadline comes from PHONE_VERIFICATION_UNKNOWN_TIMEOUT (default5m, startup1s..5m),
+captured once. Dispatch marker+first_dispatch_at atomic; one Create before dispatch_not_after,
+then only read-only Recover. Unknown deadline releases phone with accepted late-duplicate risk;
+terminal old key cannot repeat within original24h, evidence survives end+24h separately.
+Linked evidence survives deletion/revoke3years. No providerName branching in usecases.
+Admission/binding/open/positive conservative remaining are atomic; unique provider/campaign/ID
+covers live/archive. Zvonokε1s splits declared/public/busy; fakeε0. Terminal original dispatched
+provider duplicate caches429false until retry_at, then500false; predispatch busy keys keep usual
+cache semantics. Old pending/results without receipt invalidated by000005; established sessions
+persist even before first Refresh. Never reintroduce confirm retry or current-version Register gate.
 
 ## Tests
 

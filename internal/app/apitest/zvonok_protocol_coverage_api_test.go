@@ -21,6 +21,8 @@ func TestAPIZvonokMalformedProviderRepliesNeverPublishSecretsAndRecoverOnce(t *t
 		t.Run(mode, func(t *testing.T) {
 			var healthy atomic.Bool
 			var confirms atomic.Int32
+			var created atomic.Int64
+			var accepted atomic.Bool
 			provider := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				values := r.URL.Query()
 				if r.Method == http.MethodPost {
@@ -34,7 +36,11 @@ func TestAPIZvonokMalformedProviderRepliesNeverPublishSecretsAndRecoverOnce(t *t
 					w.WriteHeader(http.StatusForbidden)
 					return
 				}
-				call := map[string]any{"call_id": 41, "phone": values.Get("phone"), "created": time.Now().UTC(), "call_status": "in_process", "allowed_phones_for_call": []string{"+74951234567"}}
+				stamp := time.Now().UTC()
+				if n := created.Load(); n != 0 {
+					stamp = time.Unix(0, n).UTC()
+				}
+				call := map[string]any{"call_id": 41, "phone": values.Get("phone"), "created": stamp, "call_status": "in_process", "allowed_phones_for_call": []string{"+74951234567"}}
 				bad := !healthy.Load()
 				if strings.HasSuffix(r.URL.Path, "calls_by_phone/") {
 					if bad {
@@ -65,6 +71,10 @@ func TestAPIZvonokMalformedProviderRepliesNeverPublishSecretsAndRecoverOnce(t *t
 							}
 						}
 					}
+					if !bad && accepted.Load() {
+						_ = json.NewEncoder(w).Encode([]any{call})
+						return
+					}
 					_, _ = io.WriteString(w, "[]")
 					return
 				}
@@ -73,6 +83,10 @@ func TestAPIZvonokMalformedProviderRepliesNeverPublishSecretsAndRecoverOnce(t *t
 					return
 				}
 				confirms.Add(1)
+				created.CompareAndSwap(0, stamp.UnixNano())
+				if !bad || mode != "confirm-rejected" {
+					accepted.Store(true)
+				}
 				if bad {
 					switch mode {
 					case "confirm-invalid-json", "ambiguous-recovery":
@@ -113,6 +127,7 @@ func TestAPIZvonokMalformedProviderRepliesNeverPublishSecretsAndRecoverOnce(t *t
 			env := apitest.StartWithOptions(t, []app.Option{app.WithZvonokTransport(zvonokHTTPTransport{target, provider.Client().Transport})}, func(c *config.Config) {
 				c.Zvonok = config.ZvonokConfig{Provider: "zvonok", PublicKey: "local-provider-secret", CampaignID: "123", CallbackAddr: "127.0.0.1:0", PollInterval: time.Second}
 			})
+			seedDocuments(t, env)
 			key, phone := authKey(), "+79991234567"
 			response, err := startCall(t, env, key, phone)
 			if err == nil || response != nil || strings.Contains(err.Error(), "private") || strings.Contains(err.Error(), "local-provider-secret") || strings.Contains(err.Error(), phone) {
@@ -122,10 +137,21 @@ func TestAPIZvonokMalformedProviderRepliesNeverPublishSecretsAndRecoverOnce(t *t
 			if err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT count(*) FROM phone_verification WHERE provider_call_id IS NOT NULL OR callback_number IS NOT NULL OR allowed_phones_for_call IS NOT NULL OR verified_at IS NOT NULL`).Scan(&stored); err != nil || stored != 0 {
 				t.Fatalf("invalid provider reply produced local confirmation effects: %d %v", stored, err)
 			}
-			if (strings.HasPrefix(mode, "history-") && mode != "history-wrong-phone" || mode == "confirm-rejected") && startHits(t, env) != 0 {
+			if (strings.HasPrefix(mode, "history-") || mode == "confirm-rejected") && startHits(t, env) != 0 {
 				t.Fatal("definitively refused creation retained a rate-limit reservation")
 			}
+			if mode == "ambiguous-recovery" {
+				if _, err := startCall(t, env, key, phone); err == nil {
+					t.Fatal("ambiguous read authorized binding")
+				}
+			}
 			healthy.Store(true)
+			if strings.HasPrefix(mode, "history-") || mode == "confirm-rejected" {
+				if _, err := startCall(t, env, key, phone); err == nil {
+					t.Fatal("definitively rejected key was dispatched again")
+				}
+				key = authKey()
+			}
 			response, err = startCall(t, env, key, phone)
 			if err != nil || response.GetVerificationToken() == "" || response.GetCallbackNumber() != "+74951234567" || startHits(t, env) != 1 {
 				t.Fatalf("corrected provider did not recover exactly one reservation: %v %v", response, err)

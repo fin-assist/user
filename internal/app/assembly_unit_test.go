@@ -14,7 +14,7 @@ import (
 )
 
 func TestUnitPhoneAndSessionAssemblyRejectsInvalidKeysBeforeResources(t *testing.T) {
-	a := &App{Log: slog.New(slog.DiscardHandler), Cfg: config.Config{Env: config.EnvDev, Phone: config.PhoneConfig{ResultKeyID: "key", MaxStreams: 1, ResyncInterval: time.Second}}}
+	a := &App{Log: slog.New(slog.DiscardHandler), Cfg: config.Config{Env: config.EnvDev, Phone: config.PhoneConfig{ResultKeyID: "key", MaxStreams: 1, UnknownTimeout: 5 * time.Minute, ResyncInterval: time.Second}}}
 	if _, _, err := wirePhone(t.Context(), a, a.DB, a.Tombstones, prometheus.NewRegistry()); err == nil {
 		t.Fatal("missing phone key accepted")
 	}

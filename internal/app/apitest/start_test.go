@@ -43,7 +43,7 @@ func (p *creationProvider) Create(ctx context.Context, a verification.Attempt) (
 	if p.calls == nil {
 		p.calls = map[string]verification.Call{}
 	}
-	c := verification.Call{ID: fmt.Sprintf("call-%d", count), Phone: a.Phone, StartedAt: a.CreatedAt, Numbers: []string{"+74951234567", "+74957654321"}}
+	c := verification.Call{ID: fmt.Sprintf("call-%d", count), Phone: a.Phone, StartedAt: a.FirstDispatchAt, ReceivedAt: time.Now().UTC(), State: verification.Pending, Campaign: a.Campaign, Numbers: []string{"+74951234567", "+74957654321"}}
 	p.calls[a.Phone] = c
 	p.mu.Unlock()
 	if p.env != nil {
@@ -85,8 +85,8 @@ func (p *creationProvider) Recover(_ context.Context, a verification.Attempt) (v
 		return c, nil
 	}
 	// A new process has only the durable attempt; the adapter establishes provider
-	// ownership before returning a replacement with its own fresh lifetime/pool.
-	c := verification.Call{ID: "recovered:" + fmt.Sprint(a.ID), Phone: a.Phone, StartedAt: time.Now().UTC(), Numbers: []string{"+74951112233"}}
+	// ownership before returning that same attempt with its captured lifetime/pool.
+	c := verification.Call{ID: "recovered:" + fmt.Sprint(a.ID), Phone: a.Phone, StartedAt: a.FirstDispatchAt, ReceivedAt: time.Now().UTC(), Campaign: a.Campaign, State: verification.Pending, Numbers: []string{"+74951112233"}}
 	if p.calls == nil {
 		p.calls = map[string]verification.Call{}
 	}
@@ -120,11 +120,12 @@ func startEnv(t *testing.T, p *creationProvider, mutate ...func(*config.Config))
 	t.Helper()
 	env := apitest.StartWithPhone(t, p, creationSelector{}, mutate...)
 	p.env = env
+	seedDocuments(t, env)
 	return env
 }
 func startCall(t *testing.T, env *apitest.Env, key, phone string) (*userv1.StartPhoneVerificationResponse, error) {
 	t.Helper()
-	return userv1.NewAuthServiceClient(env.Conn).StartPhoneVerification(authContext(t.Context(), key), &userv1.StartPhoneVerificationRequest{Phone: phone})
+	return userv1.NewAuthServiceClient(env.Conn).StartPhoneVerification(authContext(t.Context(), key), &userv1.StartPhoneVerificationRequest{Phone: phone, PdConsentAccepted: true, PdConsentVersion: "v1", AgeConfirmed: true})
 }
 func startHits(t *testing.T, env *apitest.Env) int {
 	t.Helper()
@@ -234,64 +235,47 @@ func TestAPIStartAPIFullNewAndExistingSignInAndDeletion(t *testing.T) {
 func TestAPIStartAPILostReplyRecoveryAndProcessRestart(t *testing.T) {
 	p := &creationProvider{mode: "lost"}
 	env := startEnv(t, p)
-	key := authKey()
-	phone := "+79001234567"
-	out, err := startCall(t, env, key, phone)
-	if err != nil {
-		t.Fatal(out, err)
+	key, phone := authKey(), "+79001234567"
+	if out, e := startCall(t, env, key, phone); e == nil || out != nil {
+		t.Fatal("lost response exposed success")
+	}
+	out, e := startCall(t, env, key, phone)
+	if e != nil || out.GetVerificationToken() == "" {
+		t.Fatal("read-only recovery failed", e)
 	}
 	if creates, recovers := p.counts(); creates != 1 || recovers != 1 {
-		t.Fatal(creates, recovers)
+		t.Fatal("unexpected effects", creates, recovers)
 	}
 	p.setMode("unknown")
 	key = authKey()
-	otherPhone := "+79007654321"
-	if out, err = startCall(t, env, key, otherPhone); status.Code(err) != codes.Internal || out != nil {
-		t.Fatal(out, err)
+	other := "+79007654321"
+	if out, e = startCall(t, env, key, other); e == nil || out != nil {
+		t.Fatal("unknown exposed success")
 	}
-	oldCall := p.call(otherPhone)
-	// Recovery of a terminal provider call must replace the durable dates, not
-	// merely manufacture a fresh expires_at in the RPC response.
-	aged := time.Now().UTC().Truncate(time.Microsecond).Add(-2 * time.Minute)
-	if _, err = env.App.DB.Primary().Exec(t.Context(), `UPDATE phone_verification SET created_at=$1,expires_at=$2 WHERE phone=$3 AND released_at IS NULL`, aged, aged.Add(verification.RequestTTL), otherPhone); err != nil {
-		t.Fatal(err)
-	}
+	remote := p.call(other)
 	before := startHits(t, env)
 	_ = env.Conn.Close()
-	shutdown, stop := context.WithTimeout(t.Context(), time.Second)
+	shutdown, cancel := context.WithTimeout(t.Context(), time.Second)
 	env.App.GRPC.Shutdown(shutdown, 0)
-	stop()
+	cancel()
 	env.App.Close()
-	replacement := &creationProvider{}
-	// Reassemble against the same primary and secrets, with a new engine/adapter.
-	second := secondStartInstance(t, env, replacement)
-	out, err = startCall(t, second, key, otherPhone)
-	if err != nil || out.GetCallbackNumber() != "+74951112233" || out.GetExpiresIn() < 298 {
-		t.Fatal(out, err)
+	recovered := &creationProvider{calls: map[string]verification.Call{other: remote}}
+	second := secondStartInstance(t, env, recovered)
+	out, e = startCall(t, second, key, other)
+	if e != nil || out.GetCallbackNumber() != remote.Numbers[len(remote.Numbers)-1] {
+		t.Fatal("restart did not read original call", e)
 	}
-	if creates, recovers := replacement.counts(); creates != 0 || recovers != 1 {
-		t.Fatal("restarted creation instead of recovery", creates, recovers)
+	if creates, recovers := recovered.counts(); creates != 0 || recovers != 1 || startHits(t, second) != before {
+		t.Fatal("restart repeated external effect/accounting", creates, recovers)
 	}
-	if after := startHits(t, second); after != before {
-		t.Fatal("recovery consumed again", before, after)
+	if !out.GetExpiresAt().AsTime().Equal(remote.PublicExpiry()) {
+		t.Fatal("recovery extended provider lifetime")
 	}
-	var call string
-	var created, expires time.Time
-	if err = second.App.DB.Primary().QueryRow(t.Context(), `SELECT provider_call_id,created_at,expires_at FROM phone_verification WHERE phone=$1 AND released_at IS NULL`, otherPhone).Scan(&call, &created, &expires); err != nil || call != replacement.call(otherPhone).ID {
-		t.Fatal(call, err)
-	}
-	recovered := replacement.call(otherPhone)
-	if !created.After(aged.Add(time.Minute)) || !created.Equal(recovered.StartedAt.Truncate(time.Microsecond)) || !expires.Equal(created.Add(verification.RequestTTL)) || !expires.Equal(out.GetExpiresAt().AsTime().Truncate(time.Microsecond)) {
-		t.Fatal("replacement lifetime was not persisted", created, expires, recovered.StartedAt, out.GetExpiresAt())
-	}
-	if changed, err := second.App.Verifications.Confirm(t.Context(), verification.Proof{Provider: replacement.Name(), CallID: oldCall.ID, Phone: otherPhone}); changed || !errors.Is(err, verification.ErrMissing) {
-		t.Fatal("old call confirmed replacement", changed, err)
-	}
-	confirmCreated(t, second, replacement, otherPhone)
+	confirmCreated(t, second, recovered, other)
 	stream := openPhoneWatch(t, second, phoneContext(t.Context()), out.GetVerificationToken())
-	verified, err := stream.Recv()
-	if err != nil || !verified.GetIsNewUser() || verified.GetRegistrationToken() == "" {
-		t.Fatal("replacement cannot complete sign-in", verified, err)
+	verified, e := stream.Recv()
+	if e != nil || !verified.GetIsNewUser() {
+		t.Fatal("recovered call cannot complete", e)
 	}
 }
 
@@ -310,6 +294,7 @@ func TestAPIStartAPIRejectionCompensationAndProviderDuplicate(t *testing.T) {
 		t.Fatal(got)
 	}
 	p.setMode("ok")
+	key = authKey() // A conclusive rejection is terminal for its original key.
 	if _, err := startCall(t, env, key, phone); err != nil {
 		t.Fatal(err)
 	}
@@ -368,7 +353,7 @@ func TestAPIStartAPIConcurrentKeysAndCommittedReservation(t *testing.T) {
 	}
 	done := make(chan reply, 1)
 	go func() {
-		out, err := userv1.NewAuthServiceClient(env.Conn).StartPhoneVerification(authContext(ctx, key), &userv1.StartPhoneVerificationRequest{Phone: phone})
+		out, err := userv1.NewAuthServiceClient(env.Conn).StartPhoneVerification(authContext(ctx, key), &userv1.StartPhoneVerificationRequest{Phone: phone, PdConsentAccepted: true, PdConsentVersion: "v1", AgeConfirmed: true})
 		done <- reply{out, err}
 	}()
 	select {
@@ -427,10 +412,10 @@ func TestAPIStartAPIValidationDisabledAndLimitPriority(t *testing.T) {
 		t.Fatal("limit/busy called provider", creates)
 	}
 	c := userv1.NewAuthServiceClient(env.Conn)
-	if _, err := c.StartPhoneVerification(phoneContext(t.Context()), &userv1.StartPhoneVerificationRequest{Phone: "+79001234567"}); apitest.Reason(err) != "VALIDATION_ERROR" {
+	if _, err := c.StartPhoneVerification(phoneContext(t.Context()), &userv1.StartPhoneVerificationRequest{Phone: "+79001234567", PdConsentAccepted: true, PdConsentVersion: "v1", AgeConfirmed: true}); apitest.Reason(err) != "VALIDATION_ERROR" {
 		t.Fatal(err)
 	}
-	if _, err := c.StartPhoneVerification(metadata.AppendToOutgoingContext(apitest.Caller(t.Context(), "assistant"), "idempotency-key", authKey()), &userv1.StartPhoneVerificationRequest{Phone: "+79001234567"}); status.Code(err) != codes.PermissionDenied {
+	if _, err := c.StartPhoneVerification(metadata.AppendToOutgoingContext(apitest.Caller(t.Context(), "assistant"), "idempotency-key", authKey()), &userv1.StartPhoneVerificationRequest{Phone: "+79001234567", PdConsentAccepted: true, PdConsentVersion: "v1", AgeConfirmed: true}); status.Code(err) != codes.PermissionDenied {
 		t.Fatal(err)
 	}
 }
@@ -460,7 +445,7 @@ func blockedStart(t *testing.T, env *apitest.Env, p *creationProvider, ctx conte
 	done := make(chan error, 1)
 	callCtx := authContext(ctx, key)
 	go func() {
-		_, err := userv1.NewAuthServiceClient(env.Conn).StartPhoneVerification(callCtx, &userv1.StartPhoneVerificationRequest{Phone: phone})
+		_, err := userv1.NewAuthServiceClient(env.Conn).StartPhoneVerification(callCtx, &userv1.StartPhoneVerificationRequest{Phone: phone, PdConsentAccepted: true, PdConsentVersion: "v1", AgeConfirmed: true})
 		done <- err
 	}()
 	select {
@@ -522,7 +507,7 @@ func TestAPIStartAPICallerCancellationPreservesCommittedCreation(t *testing.T) {
 	tick := time.NewTicker(5 * time.Millisecond)
 	defer tick.Stop()
 	for {
-		out, err := userv1.NewAuthServiceClient(env.Conn).StartPhoneVerification(authContext(deadline, key), &userv1.StartPhoneVerificationRequest{Phone: phone})
+		out, err := userv1.NewAuthServiceClient(env.Conn).StartPhoneVerification(authContext(deadline, key), &userv1.StartPhoneVerificationRequest{Phone: phone, PdConsentAccepted: true, PdConsentVersion: "v1", AgeConfirmed: true})
 		if err == nil {
 			if out.GetVerificationToken() == "" || startHits(t, env) != 1 {
 				t.Fatal("cancelled effect lost or charged twice", out)
@@ -620,7 +605,7 @@ func TestAPIStartAPIDeletionRetriesBusyPreAccountCacheKey(t *testing.T) {
 	}()
 	replayed := make(chan error, 1)
 	go func() {
-		_, err := userv1.NewAuthServiceClient(env.Conn).StartPhoneVerification(authContext(ctx, key), &userv1.StartPhoneVerificationRequest{Phone: phone})
+		_, err := userv1.NewAuthServiceClient(env.Conn).StartPhoneVerification(authContext(ctx, key), &userv1.StartPhoneVerificationRequest{Phone: phone, PdConsentAccepted: true, PdConsentVersion: "v1", AgeConfirmed: true})
 		replayed <- err
 	}()
 	eventually(t, func() bool {

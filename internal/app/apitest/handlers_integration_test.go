@@ -83,7 +83,7 @@ func TestIntegrationHandlersCommitCachedSessionsAndSettingsAtomically(t *testing
 	}
 	r := integrationRegistrar{}
 	starter := integrationStarter(t, env, &creationProvider{env: env})
-	authgrpc.Register(r, sessions, engine, postgres.NewSessionTransactions(state), env.App.DB, env.App.Limits, stateGuard, env.App.Verifications, starter)
+	authgrpc.Register(r, sessions, engine, postgres.NewSessionTransactions(state), env.App.DB, env.App.Limits, stateGuard, env.App.Verifications, time.Now, starter)
 	profilegrpc.Register(r, profiles, accounts)
 	consentgrpc.Register(r, consent.New(postgres.NewConsentDocuments(env.App.DB)), env.App.Users, env.App.Tombstones)
 	signinggrpc.Register(r, env.App.Signing, profiles)
@@ -99,7 +99,7 @@ func TestIntegrationHandlersCommitCachedSessionsAndSettingsAtomically(t *testing
 		}
 		return metadata.NewIncomingContext(ctx, metadata.Pairs("idempotency-key", keysByLabel[key]))
 	}
-	started, err := a.StartPhoneVerification(incoming("integration-start"), &userv1.StartPhoneVerificationRequest{Phone: "+79001234569"})
+	started, err := a.StartPhoneVerification(incoming("integration-start"), &userv1.StartPhoneVerificationRequest{Phone: "+79001234569", PdConsentAccepted: true, PdConsentVersion: "v1", AgeConfirmed: true})
 	if err != nil || started.GetVerificationToken() == "" {
 		t.Fatal(started, err)
 	}

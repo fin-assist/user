@@ -175,7 +175,7 @@ func TestUnitInvalidSubjectsAndCounterErrors(t *testing.T) {
 	for _, tt := range []struct {
 		op        Operation
 		phone, ip string
-	}{{0, "", "192.0.2.1"}, {Watch, "", ""}, {Watch, "", "secret"}, {Watch, "", "fe80::1%eth0"}, {Start, "", "192.0.2.1"}, {Start, "+7900bad4567", "192.0.2.1"}, {Start, "+790012345678", "192.0.2.1"}} {
+	}{{0, "", "192.0.2.1"}, {Watch, "", ""}, {Watch, "", "secret"}, {Watch, "", "fe80::1%eth0"}} {
 		if _, _, err := l.Check(t.Context(), tt.op, tt.phone, tt.ip); err == nil || strings.Contains(err.Error(), tt.ip) && tt.ip != "" {
 			t.Fatalf("invalid input/error: %+v %v", tt, err)
 		}

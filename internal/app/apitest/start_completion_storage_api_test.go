@@ -56,10 +56,10 @@ func TestAPIStartCompletionStorageFailurePreservesOwnedRecoveryAndCharge(t *test
 					return
 				}
 				mu.Lock()
-				if strings.HasSuffix(r.URL.Path, "calls_by_phone/") {
+				if strings.HasSuffix(r.URL.Path, "calls_by_phone/") || strings.HasSuffix(r.URL.Path, "call_by_id/") {
 					calls := []any{}
 					if !created.IsZero() {
-						calls = append(calls, map[string]any{"call_id": 41, "phone": phone, "created": created, "call_status": "in_process"})
+						calls = append(calls, map[string]any{"call_id": 41, "phone": phone, "created": created, "call_status": "in_process", "allowed_phones_for_call": []string{"+74951234567", "+74957654321"}})
 					}
 					mu.Unlock()
 					_ = json.NewEncoder(w).Encode(calls)
@@ -95,6 +95,7 @@ func TestAPIStartCompletionStorageFailurePreservesOwnedRecoveryAndCharge(t *test
 				c.Zvonok = config.ZvonokConfig{Provider: "zvonok", PublicKey: "storage-test-secret", CampaignID: "123", CallbackAddr: "127.0.0.1:0", PollInterval: time.Second}
 			})
 			seedProfiles(t, env)
+			seedDocuments(t, env)
 			key := authKey()
 			type result struct {
 				out *userv1.StartPhoneVerificationResponse
@@ -129,6 +130,18 @@ func TestAPIStartCompletionStorageFailurePreservesOwnedRecoveryAndCharge(t *test
 			}
 			if hits := startHits(t, env); hits != 1 {
 				t.Fatal("failed completion changed committed charge", hits)
+			}
+			if tc.reject {
+				if out, e := startCall(t, env, key, phone); e == nil || out != nil {
+					t.Fatal("rejected unknown cannot reconfirm")
+				}
+				mu.Lock()
+				writes := confirms
+				mu.Unlock()
+				if writes != 1 {
+					t.Fatal("compensation failure repeated confirm", writes)
+				}
+				return
 			}
 			recovered, err := startCall(t, env, key, phone)
 			if err != nil || recovered.GetVerificationToken() == "" || recovered.GetCallbackNumber() == "" || startHits(t, env) != 1 {

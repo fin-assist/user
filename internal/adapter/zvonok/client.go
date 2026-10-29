@@ -30,8 +30,8 @@ var phone = regexp.MustCompile(`^\+[1-9][0-9]{1,14}$`)
 // Gate reserves one account-wide API slot in primary storage before network I/O.
 type Gate interface{ Wait(context.Context) error }
 
-// Client never retries a write in its transport. Only Recover may repeat confirm
-// after looking up this durable attempt and checking the returned call identity.
+// Client never retries a write. Recover uses authenticated read operations only;
+// a missing or incomplete response cannot authorize another confirm.
 type Client struct {
 	key, campaign string
 	http          *http.Client
@@ -39,23 +39,27 @@ type Client struct {
 	now           func() time.Time
 	requests      *prometheus.CounterVec
 	latency       *prometheus.HistogramVec
+	clockDistance *prometheus.HistogramVec
 }
 
 // New pins the API endpoint, bounds HTTP work and disables redirects. A supplied
 // transport is a trusted assembly seam for HTTP integration tests, never a URL setting.
-func New(key, campaign string, gate Gate, transport http.RoundTripper, reg prometheus.Registerer) (*Client, error) {
-	if len(key) == 0 || len(key) > 4096 || strings.ContainsAny(key, "\r\n") || !digits.MatchString(campaign) || gate == nil {
+// now is the shared application clock for local admission and receive timestamps;
+// remote created values remain independently authenticated provider data.
+func New(key, campaign string, gate Gate, transport http.RoundTripper, reg prometheus.Registerer, now func() time.Time) (*Client, error) {
+	if len(key) == 0 || len(key) > 4096 || strings.ContainsAny(key, "\r\n") || !digits.MatchString(campaign) || gate == nil || now == nil {
 		return nil, errors.New("zvonok: invalid credentials, campaign or API gate")
 	}
 	if transport == nil {
 		transport = http.DefaultTransport.(*http.Transport).Clone()
 	}
-	c := &Client{key: key, campaign: campaign, gate: gate, now: time.Now,
-		http:     &http.Client{Transport: transport, Timeout: 3 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
-		requests: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "finassist_zvonok_requests_total", Help: "Zvonok V1 HTTP requests by fixed operation and sanitized outcome."}, []string{"operation", "outcome"}),
-		latency:  prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "finassist_zvonok_request_duration_seconds", Help: "Zvonok V1 request latency including the shared API gate.", Buckets: prometheus.DefBuckets}, []string{"operation"}),
+	c := &Client{key: key, campaign: campaign, gate: gate, now: now,
+		http:          &http.Client{Transport: transport, Timeout: 3 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+		requests:      prometheus.NewCounterVec(prometheus.CounterOpts{Name: "finassist_zvonok_requests_total", Help: "Zvonok V1 HTTP requests by fixed operation and sanitized outcome."}, []string{"operation", "outcome"}),
+		latency:       prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "finassist_zvonok_request_duration_seconds", Help: "Zvonok V1 request latency including the shared API gate.", Buckets: prometheus.DefBuckets}, []string{"operation"}),
+		clockDistance: prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "finassist_zvonok_clock_distance_seconds", Help: "Bounded provider-created distance outside the dispatch/receive interval, not a clock-offset estimate.", Buckets: []float64{0.001, 0.01, 0.1, 1, 5, 30, 60, 300}}, []string{"direction"}),
 	}
-	for _, metric := range []prometheus.Collector{c.requests, c.latency} {
+	for _, metric := range []prometheus.Collector{c.requests, c.latency, c.clockDistance} {
 		if err := reg.Register(metric); err != nil {
 			return nil, err
 		}
@@ -66,6 +70,9 @@ func New(key, campaign string, gate Gate, transport http.RoundTripper, reg prome
 // Name is the stored provider identity, independent of campaign configuration.
 func (*Client) Name() string { return "zvonok" }
 
+// Campaign is the trusted configured campaign used for durable ID bindings.
+func (c *Client) Campaign() string { return c.campaign }
+
 // Close releases the client's idle HTTP connections during application shutdown.
 func (c *Client) Close() { c.http.CloseIdleConnections() }
 
@@ -74,14 +81,20 @@ type response struct {
 	body   []byte
 }
 
-func (c *Client) request(ctx context.Context, operation string, values url.Values, post bool) (response, error) {
-	started := c.now()
+func (c *Client) request(ctx context.Context, operation string, values url.Values, post bool, notAfter ...time.Time) (response, error) {
+	started := time.Now()
 	outcome := "capacity_unavailable"
 	defer func() {
 		c.requests.WithLabelValues(operation, outcome).Inc()
-		c.latency.WithLabelValues(operation).Observe(c.now().Sub(started).Seconds())
+		c.latency.WithLabelValues(operation).Observe(time.Since(started).Seconds())
 	}()
+	if ctx.Err() != nil {
+		return response{}, errUnavailable
+	}
 	if err := c.gate.Wait(ctx); err != nil {
+		return response{}, errUnavailable
+	}
+	if ctx.Err() != nil || (post && len(notAfter) != 0 && !c.now().Before(notAfter[0])) {
 		return response{}, errUnavailable
 	}
 	values.Set("public_key", c.key)
@@ -116,6 +129,9 @@ func (c *Client) request(ctx context.Context, operation string, values url.Value
 		req.Header.Set("Content-Type", contentType)
 	}
 	outcome = "unavailable"
+	if ctx.Err() != nil || (post && len(notAfter) != 0 && !c.now().Before(notAfter[0])) {
+		return response{}, errUnavailable
+	}
 	r, err := c.http.Do(req)
 	if err != nil {
 		return response{}, errUnavailable

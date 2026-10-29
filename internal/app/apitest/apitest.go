@@ -108,7 +108,7 @@ func start(t *testing.T, options []app.Option, mutate ...func(*config.Config)) *
 	}
 	cfg := config.Config{
 		Service:  "user",
-		Phone:    config.PhoneConfig{ResultKeyFile: phoneKeyPath, ResultKeyID: "test", MaxStreams: 1024, ResyncInterval: 5 * time.Second},
+		Phone:    config.PhoneConfig{ResultKeyFile: phoneKeyPath, ResultKeyID: "test", MaxStreams: 1024, UnknownTimeout: 5 * time.Minute, ResyncInterval: 5 * time.Second},
 		Signing:  config.SigningConfig{PrivateKeyFile: keyPath, KeyID: "apitest", Issuer: "apitest-user", Audience: "apitest-client"},
 		Env:      config.EnvDev,
 		Auth:     config.AuthConfig{Mode: config.AuthInsecureDev},

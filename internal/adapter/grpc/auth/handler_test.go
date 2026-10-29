@@ -11,6 +11,7 @@ import (
 	idempotency "github.com/fin-assist/go-idempotency"
 	"github.com/jackc/pgx/v5"
 	"github.com/prometheus/client_golang/prometheus"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
@@ -80,6 +81,7 @@ func (e *fakeEngine) Do(ctx context.Context, _ idempotency.Request, fn func(cont
 }
 
 type fakeSessions struct {
+	proofID          int32
 	in               usecase.RegisterInput
 	reused           bool
 	err, completeErr error
@@ -91,7 +93,7 @@ type fakeSessions struct {
 
 func (s *fakeSessions) Register(_ context.Context, in usecase.RegisterInput) (usecase.Registered, error) {
 	s.in = in
-	return usecase.Registered{UserID: "user", Pair: usecase.Pair{Access: "access", Refresh: "refresh"}}, s.err
+	return usecase.Registered{VerificationID: s.proofID, UserID: "user", Pair: usecase.Pair{Access: "access", Refresh: "refresh"}}, s.err
 }
 func (s *fakeSessions) Refresh(context.Context, string) (usecase.Rotation, error) {
 	return usecase.Rotation{UserID: "user", Pair: usecase.Pair{Access: "new-access", Refresh: "new-refresh"}, Reused: s.reused}, s.err
@@ -179,7 +181,7 @@ func TestUnitSessionHandlerMappingAndIndependentAttempts(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := grpc.NewServer()
-	Register(server, s, h.engine, h.state, h.attempts, l, h.guard, nil)
+	Register(server, s, h.engine, h.state, h.attempts, l, h.guard, nil, time.Now)
 	if _, ok := server.GetServiceInfo()["finassist.user.v1.AuthService"]; !ok {
 		t.Fatal("service absent")
 	}
@@ -331,5 +333,24 @@ func TestUnitAuthPhaseAdviceBeforeEffectAndUnknownCommit(t *testing.T) {
 	rest, _ = finerr.ToREST(err)
 	if rest.RequestRetryable != nil {
 		t.Fatal("unmarked engine result gained permission", rest)
+	}
+}
+
+func TestUnitFailedRegisterOnlyBindsAnAuthenticatedProofResource(t *testing.T) {
+	for _, id := range []int32{0, 7} {
+		h, s, e, _, _ := handlerFixture(t)
+		s.proofID = id
+		s.err = finerr.ValidationError(&errdetails.BadRequest_FieldViolation{Field: "timezone", Reason: "INVALID_FORMAT"})
+		_, err := h.Register(handlerContext(), &userv1.RegisterRequest{RegistrationToken: "valid-proof", PdConsentAccepted: true, PdConsentVersion: "v1"})
+		if grpcReason(err) != "VALIDATION_ERROR" {
+			t.Fatal(err)
+		}
+		if id == 0 {
+			if e.last.Resource != (idempotency.Resource{}) {
+				t.Fatal("untrusted input bound to proof")
+			}
+		} else if e.last.Resource != (idempotency.Resource{Type: "phone_verification", ID: "7"}) {
+			t.Fatal("authenticated proof resource lost", e.last.Resource)
+		}
 	}
 }

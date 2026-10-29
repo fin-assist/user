@@ -33,10 +33,13 @@ registration_token ищется по SHA-256 на primary. Нужны подтв
 После срока — TOKEN_EXPIRED, неизвестный/израсходованный — INVALID_TOKEN. Отказ
 CONSENT_REQUIRED/CONSENT_OUTDATED или неверный IANA timezone токен не расходует.
 
-Документ personal_data должен быть опубликован; отсутствие — bare INTERNAL из-за
-неподготовленных данных. Версия сверяется с текущей под FOR SHARE на строке документа,
-чтобы смена версии не обогнала запись согласия. Утверждённые документы остаются
-условием включения регистрации; юридические данные не выдумываются.
+Документ и возраст проверяются в Start до передачи номера. Register повторно получает
+обязательные PD assertions: true и исходную версию из receipt (1–64 Unicode символа).
+Текущая версия повторно не запрашивается: смена документа во время звонка не отменяет
+принятую заявку/15-минутный результат. Assertion не подменяет доказательство.
+user_consent.granted_at берётся из исходного receipt, как и факт14+, а не из Register.
+Без evidence старый registration_token не принимается. Связь receipt с подтверждённым
+аккаунтом коммитится вместе с созданием/сессией/расходованием токена.
 
 Новый аккаунт получает UUIDv7 PostgreSQL 18, тему system, timezone запроса или
 Europe/Moscow, settings_version=1, согласие на ПДн, первую refresh-сессию и начальное
@@ -111,3 +114,13 @@ PostgreSQL: реальные запросы/блокировки, FK, primary п
 звено. API: подпись JWT, регистрация/initial timezone, replay/конфликт, ошибки и лимиты,
 конкурентные Register/Refresh, reuse, Logout, отмена после эффекта, откат при ошибке
 сохранения ответа, SQL-ошибки без утечки и tombstone перед выдачей cached-секрета.
+
+FIN-364: кэшируемые отказы Register после проверки пригодного registration_token
+получают Resource исходной attempt. На evidence cutoff связанные Start/Register
+keys удаляются вместе с working state/receipt, даже если Register cache ещё live;
+их время жизни ограничено min(common key window, proof retention). До cutoff
+живые кэши linked account сохраняются по обычному правилу. Очистка блокирует parents,
+затем только адресные resource keys NOWAIT; занятый key откатывает стадию целиком,
+без инверсии ожиданий и частичного удаления proof. UUID, повторно принятый с новым
+resource, не затрагивается. Известная занятость хранит origin_attempt_id для адресной
+очистки даже после удаления working row; это связь ресурсов, не ownership чужого ID.

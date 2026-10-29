@@ -57,6 +57,7 @@ func seedPendingPhone(t *testing.T, db *DB, raw, phone string, now time.Time) in
 	if err != nil {
 		t.Fatal(err)
 	}
+	seedStoredEvidence(t, db.Primary(), id)
 	return id
 }
 func proofFor(raw, phone string) verification.Proof {

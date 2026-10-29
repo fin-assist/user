@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -17,7 +18,7 @@ func TestUnitFakePhoneProdStartupFailsBeforeOpeningResources(t *testing.T) {
 		t.Fatal(a, err)
 	}
 	// Trusted test-assembly seams cannot accidentally run the fake in prod either.
-	a := &App{Cfg: config.Config{Env: config.EnvProd}, phoneProvider: fakephone.New()}
+	a := &App{Cfg: config.Config{Env: config.EnvProd}, phoneProvider: fakephone.New(time.Now)}
 	if _, _, err := wirePhone(t.Context(), a, a.DB, a.Tombstones, prometheus.NewRegistry()); err == nil || !strings.Contains(err.Error(), "forbidden in prod") {
 		t.Fatal(err)
 	}

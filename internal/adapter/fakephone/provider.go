@@ -19,8 +19,9 @@ const (
 // Provider reconstructs calls from the durable attempt, without process-local state.
 type Provider struct{ now func() time.Time }
 
-// New returns the stateless development backend. Runtime assembly forbids prod.
-func New() *Provider { return &Provider{now: time.Now} }
+// New returns the stateless development backend with the application clock.
+// Runtime assembly forbids prod.
+func New(now func() time.Time) *Provider { return &Provider{now: now} }
 
 // Name is the persistent identity used by the common creation/confirmation paths.
 func (*Provider) Name() string { return "fake" }
@@ -32,15 +33,18 @@ func (p *Provider) Create(ctx context.Context, a verification.Attempt) (verifica
 	}
 	now := p.now()
 	if a.ID < 1 || a.Provider != p.Name() || !verification.IsTestPhone(a.Phone) ||
-		a.CreatedAt.After(now) || !a.ExpiresAt.After(now) ||
-		!a.ExpiresAt.Equal(a.CreatedAt.Add(verification.RequestTTL)) {
+		a.CreatedAt.After(now) || !a.ExpiresAt.After(now) {
 		return verification.Call{}, verification.ErrProviderRejected
 	}
 	id := "fake:" + strconv.FormatInt(int64(a.ID), 10)
 	if a.CallID != "" && a.CallID != id {
 		return verification.Call{}, verification.ErrProviderRejected
 	}
-	return verification.Call{ID: id, Phone: a.Phone, StartedAt: a.CreatedAt,
+	started := a.FirstDispatchAt
+	if started.IsZero() {
+		started = a.CreatedAt
+	}
+	return verification.Call{ID: id, Phone: a.Phone, StartedAt: started, ReceivedAt: now, State: verification.Pending,
 		Numbers: []string{CallbackNumberOne, CallbackNumberTwo}}, nil
 }
 

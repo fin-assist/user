@@ -53,6 +53,7 @@ func MigrationSources() []migrate.Source {
 
 // wire registers user RPCs and durable timezone/deletion delivery.
 func wire(ctx context.Context, a *App, reg prometheus.Registerer) (jobs []worker.Job, closeAll func(), err error) {
+	now := a.clock()
 	events, dispatch, closeOutbox, err := wireOutbox(ctx, a, reg)
 	if err != nil {
 		return nil, nil, err
@@ -62,8 +63,8 @@ func wire(ctx context.Context, a *App, reg prometheus.Registerer) (jobs []worker
 		closeOutbox()
 		return nil, nil, err
 	}
-	profiles := profile.New(postgres.NewProfileTransactions(a.DB), postgres.NewProfiles(a.DB), a.Tombstones, events, time.Now)
-	deletions := deletion.New(a.DB, a.Tombstones, postgres.NewAccounts(a.DB), events)
+	profiles := profile.New(postgres.NewProfileTransactions(a.DB), postgres.NewProfiles(a.DB), a.Tombstones, events, now)
+	deletions := deletion.New(a.DB, a.Tombstones, postgres.NewAccounts(a.DB).WithClock(now), events)
 	profilegrpc.Register(a.GRPC.GRPC(), profiles, deletions)
 	documents := consent.New(postgres.NewConsentDocuments(a.DB))
 	consentgrpc.Register(a.GRPC.GRPC(), documents, a.Users, a.Tombstones)
@@ -72,7 +73,7 @@ func wire(ctx context.Context, a *App, reg prometheus.Registerer) (jobs []worker
 	cleanup, err := worker.Every("rate-limit-cleanup", time.Minute, a.Log, worker.SystemClock{}, func(ctx context.Context) error {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
-		_, err := limits.Cleanup(ctx, time.Now().Add(-time.Hour), 1000)
+		_, err := limits.Cleanup(ctx, now().Add(-time.Hour), 1000)
 		return err
 	})
 	if err != nil {

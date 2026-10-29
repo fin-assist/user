@@ -64,8 +64,8 @@ func TestAPIPhoneQuotaAdviceDoesNotAuthorizeDuplicateReplay(t *testing.T) {
 	for range 2 {
 		_, err = startCall(t, env, key, "+79001234568")
 		r, ok := finerr.ToREST(err)
-		if !ok || r.Code != "RATE_LIMITED" || r.RequestRetryable != nil {
-			t.Fatal("cached busy reply invented advice", r, err)
+		if !ok || r.Code != "RATE_LIMITED" || (r.RequestRetryable == nil || *r.RequestRetryable) {
+			t.Fatal("terminal dispatched busy reply lost false", r, err)
 		}
 	}
 }

@@ -133,7 +133,7 @@ func newFixture() fixture {
 	now := time.Date(2026, 10, 23, 23, 59, 59, 0, time.UTC)
 	verified := now.Add(-2 * time.Minute)
 	id := int32(3)
-	r := &fakeRepo{l: Link{SessionID: 2, Generation: 1, UserID: "user", VerificationID: &id, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour)}, v: Registration{ID: 3, Phone: "+79001234567", VerifiedAt: &verified, IsNewUser: true}, version: "v1", created: true, fail: map[string]error{}}
+	r := &fakeRepo{l: Link{SessionID: 2, Generation: 1, UserID: "user", VerificationID: &id, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour)}, v: Registration{ID: 3, ConsentVersion: "v1", ConsentAcceptedAt: now.Add(-2 * time.Minute), AgeConfirmedAt: now.Add(-2 * time.Minute), Phone: "+79001234567", VerifiedAt: &verified, IsNewUser: true}, version: "v1", created: true, fail: map[string]error{}}
 	g := &fakeGuard{alive: true}
 	tx := &fakeTx{}
 	sign := &fakeSigner{}
@@ -266,7 +266,7 @@ func TestUnitRegistrationNewAccountAndExistingAccount(t *testing.T) {
 	if err != nil || out.UserID != "user" || out.Pair.Refresh != "refresh" || f.e.calls != 1 || f.e.zone != "Europe/Moscow" || !f.r.expiry.Equal(f.now.Add(60*24*time.Hour)) {
 		t.Fatal(out, err)
 	}
-	if !reflect.DeepEqual(f.r.calls, []string{"reg-read", "document", "create", "user-lock", "reg-lock", "consent", "session", "close"}) {
+	if !reflect.DeepEqual(f.r.calls, []string{"reg-read", "create", "user-lock", "reg-lock", "consent", "session", "close"}) {
 		t.Fatal(f.r.calls)
 	}
 	f = newFixture()
@@ -301,7 +301,7 @@ func TestUnitRegistrationValidationOrderAndOneTimeResult(t *testing.T) {
 		{"zone-before-consent", func(_ *fixture, in *RegisterInput) { v := "Local"; in.Timezone = &v; in.Accepted = false }, "VALIDATION_ERROR"},
 		{"consent", func(_ *fixture, in *RegisterInput) { in.Accepted = false }, "CONSENT_REQUIRED"},
 		{"old-version", func(_ *fixture, in *RegisterInput) { in.ConsentVersion = "old" }, "CONSENT_OUTDATED"},
-		{"unpublished", func(f *fixture, _ *RegisterInput) { f.r.version = "" }, ""},
+		{"missing-evidence", func(f *fixture, _ *RegisterInput) { f.r.v.ConsentVersion = "" }, "INVALID_TOKEN"},
 		{"deleted", func(f *fixture, _ *RegisterInput) { f.g.alive = false }, "INVALID_TOKEN"},
 		{"consumed-during-lock", func(f *fixture, _ *RegisterInput) { v := f.r.v; v.Closed = true; f.r.lockedV = &v }, "INVALID_TOKEN"},
 		{"future-verified", func(f *fixture, _ *RegisterInput) { v := f.now.Add(time.Minute); f.r.v.VerifiedAt = &v }, ""},
@@ -319,7 +319,7 @@ func TestUnitRegistrationValidationOrderAndOneTimeResult(t *testing.T) {
 }
 
 func TestUnitRegistrationRollsBackDependencyFailures(t *testing.T) {
-	for _, stage := range []string{"reg-read", "document", "create", "user-lock", "reg-lock", "consent", "session", "close"} {
+	for _, stage := range []string{"reg-read", "create", "user-lock", "reg-lock", "consent", "session", "close"} {
 		f := newFixture()
 		f.r.fail[stage] = errDependency
 		if _, err := f.s.Register(t.Context(), validRegister()); !errors.Is(err, errDependency) {

@@ -12,10 +12,10 @@ import (
 func TestUnitPhoneConfigurationAndIndependentKey(t *testing.T) {
 	get, list := env(base())
 	cfg, err := load(get, noFiles, list)
-	if err != nil || cfg.Phone.MaxStreams != 1024 || cfg.Phone.ResyncInterval != 5*time.Second || cfg.Phone.ResultKeyID != "primary" {
+	if err != nil || cfg.Phone.MaxStreams != 1024 || cfg.Phone.ResyncInterval != 5*time.Second || cfg.Phone.ResultKeyID != "primary" || cfg.Phone.UnknownTimeout != 5*time.Minute {
 		t.Fatal(cfg.Phone, err)
 	}
-	for name, values := range map[string][]string{"PHONE_WATCH_MAX_STREAMS": {"0", "100001", "bad"}, "PHONE_WATCH_RESYNC_INTERVAL": {"0s", "31s", "bad"}, "PHONE_RESULT_KEY_ID": {"spaces bad", "path/id", strings.Repeat("a", 65)}} {
+	for name, values := range map[string][]string{"PHONE_VERIFICATION_UNKNOWN_TIMEOUT": {"0s", "999ms", "5m1ns", "invalid", "-1s"}, "PHONE_WATCH_MAX_STREAMS": {"0", "100001", "bad"}, "PHONE_WATCH_RESYNC_INTERVAL": {"0s", "31s", "bad"}, "PHONE_RESULT_KEY_ID": {"spaces bad", "path/id", strings.Repeat("a", 65)}} {
 		for _, v := range values {
 			vars := base()
 			vars[name] = v
@@ -58,5 +58,18 @@ func TestUnitPhoneConfigurationAndIndependentKey(t *testing.T) {
 	}
 	if _, err := LoadPhoneKey(cfg.Phone); err == nil {
 		t.Fatal("public key accepted")
+	}
+}
+
+func TestUnitUnknownTimeoutBounds(t *testing.T) {
+	for _, value := range []string{"1s", "30s", "5m"} {
+		vars := base()
+		vars["PHONE_VERIFICATION_UNKNOWN_TIMEOUT"] = value
+		g, l := env(vars)
+		cfg, err := load(g, noFiles, l)
+		want, _ := time.ParseDuration(value)
+		if err != nil || cfg.Phone.UnknownTimeout != want {
+			t.Fatal("valid unknown timeout", value, err)
+		}
 	}
 }

@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS phone_verification_provider_campaign_call_uidx;

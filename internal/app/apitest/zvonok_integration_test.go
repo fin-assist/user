@@ -16,7 +16,6 @@ import (
 
 	"github.com/fin-assist/user/internal/adapter/postgres"
 	"github.com/fin-assist/user/internal/adapter/zvonok"
-	"github.com/fin-assist/user/internal/app/apitest"
 	"github.com/fin-assist/user/internal/verification"
 )
 
@@ -34,13 +33,13 @@ func TestIntegrationZvonokProviderUsesTLSProtocolForCreationRecoveryAndCheckedPr
 			if err != nil {
 				t.Fatal(err)
 			}
-			client, err := zvonok.New("test-private-key", "123", integrationProviderGate{}, zvonokHTTPTransport{target, srv.Client().Transport}, prometheus.NewRegistry())
+			client, err := zvonok.New("test-private-key", "123", integrationProviderGate{}, zvonokHTTPTransport{target, srv.Client().Transport}, prometheus.NewRegistry(), time.Now)
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer client.Close()
 			now := time.Now().UTC()
-			attempt := verification.Attempt{ID: 7, Provider: "zvonok", Phone: "+79001234567", CreatedAt: now, ExpiresAt: now.Add(verification.RequestTTL)}
+			attempt := verification.Attempt{ID: 7, Provider: "zvonok", Campaign: "123", FirstDispatchAt: now, DispatchNotAfter: now.Add(verification.RequestTTL), Phone: "+79001234567", CreatedAt: now, ExpiresAt: now.Add(verification.RequestTTL)}
 			call, err := client.Create(t.Context(), attempt)
 			switch mode {
 			case "reject":
@@ -69,6 +68,7 @@ func TestIntegrationZvonokProviderUsesTLSProtocolForCreationRecoveryAndCheckedPr
 				t.Fatal("durable attempt did not recover", recovered, err)
 			}
 			attempt.CallID = recovered.ID
+			attempt.CreatedAt = recovered.StartedAt
 			pending, err := client.Status(t.Context(), attempt)
 			if err != nil || pending.State != verification.Pending {
 				t.Fatal("pending status", pending, err)
@@ -95,30 +95,29 @@ func TestIntegrationZvonokProviderUsesTLSProtocolForCreationRecoveryAndCheckedPr
 // The checker combines authenticated HTTP state with local PostgreSQL ownership;
 // callback hints alone never create a proof or disclose an unknown provider ID.
 func TestIntegrationCheckedProviderProofCommitsLocalVerification(t *testing.T) {
-	env := apitest.Start(t)
-	p := &zvonokHTTP{calls: map[string]zvonokCall{}, mode: "ok", balance: json.RawMessage(`"100.29"`)}
+	env, p := zvonokEnv(t, "")
 	srv := httptest.NewTLSServer(p)
 	defer srv.Close()
 	target, err := url.Parse(srv.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	client, err := zvonok.New("test-private-key", "123", integrationProviderGate{}, zvonokHTTPTransport{target, srv.Client().Transport}, prometheus.NewRegistry())
+	client, err := zvonok.New("test-private-key", "123", integrationProviderGate{}, zvonokHTTPTransport{target, srv.Client().Transport}, prometheus.NewRegistry(), time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client.Close()
 	now := time.Now().UTC()
-	attempt := verification.Attempt{ID: 12, Provider: "zvonok", Phone: "+79001234567", CreatedAt: now, ExpiresAt: now.Add(verification.RequestTTL)}
+	attempt := verification.Attempt{ID: 12, Provider: "zvonok", Campaign: "123", FirstDispatchAt: now, DispatchNotAfter: now.Add(verification.RequestTTL), Phone: "+79001234567", CreatedAt: now, ExpiresAt: now.Add(verification.RequestTTL)}
 	call, err := client.Create(t.Context(), attempt)
 	if err != nil {
 		t.Fatal(err)
 	}
 	id := pendingPhoneAPI(t, env, "checked-provider-proof", attempt.Phone, attempt.ExpiresAt)
-	if _, err := env.App.DB.Primary().Exec(t.Context(), `UPDATE phone_verification SET provider='zvonok',provider_call_id=$1 WHERE id=$2`, call.ID, id); err != nil {
+	if _, err := env.App.DB.Primary().Exec(t.Context(), `UPDATE phone_verification SET provider='zvonok',campaign='123',provider_call_id=$1,created_at=$3,expires_at=$4 WHERE id=$2`, call.ID, id, call.StartedAt, call.PublicExpiry()); err != nil {
 		t.Fatal(err)
 	}
-	repo := postgres.NewVerifications(env.App.DB)
+	repo := postgres.NewVerifications(env.App.DB, "123")
 	checker, err := verification.NewChecker("zvonok", client, repo, env.App.Verifications, time.Second, 1, prometheus.NewRegistry())
 	if err != nil {
 		t.Fatal(err)

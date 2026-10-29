@@ -43,6 +43,7 @@ func seedRegistration(t *testing.T, env *apitest.Env, raw, phone string, verifie
 	if err != nil {
 		t.Fatal(err)
 	}
+	seedPhoneEvidence(t, env.App.DB.Primary(), id)
 	return id
 }
 func registrationRequest(raw string) *userv1.RegisterRequest {
@@ -213,7 +214,7 @@ func TestAPIAuthAPIConcurrentRegisterDifferentKeysConsumesTokenOnce(t *testing.T
 		t.Fatal(err)
 	}
 	defer func() { _ = blocker.Rollback(context.Background()) }()
-	if _, err := blocker.Exec(t.Context(), `SELECT version FROM consent_document WHERE type='personal_data' AND is_current FOR UPDATE`); err != nil {
+	if _, err := blocker.Exec(t.Context(), `SELECT id FROM phone_verification WHERE registration_token_hash=sha256('reg'::bytea) FOR UPDATE`); err != nil {
 		t.Fatal(err)
 	}
 	type result struct {
@@ -229,10 +230,10 @@ func TestAPIAuthAPIConcurrentRegisterDifferentKeysConsumesTokenOnce(t *testing.T
 		}()
 	}
 	// Both requests have already read the same open verification, and now wait
-	// at the document read before either can create an account or consume it.
+	// at the locked verification/unique user before either can consume it.
 	eventually(t, func() bool {
 		var n int
-		err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND application_name='user-auth' AND wait_event_type='Lock' AND query LIKE 'SELECT version FROM consent_document%'`).Scan(&n)
+		err := env.App.DB.Primary().QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND application_name='user-auth' AND wait_event_type='Lock'`).Scan(&n)
 		return err == nil && n == 2
 	})
 	if err := blocker.Commit(t.Context()); err != nil {

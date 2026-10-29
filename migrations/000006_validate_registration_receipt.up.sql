@@ -1,0 +1,1 @@
+ALTER TABLE phone_verification VALIDATE CONSTRAINT phone_verification_consent_receipt_id_fkey;

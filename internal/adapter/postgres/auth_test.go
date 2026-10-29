@@ -27,7 +27,7 @@ func TestIntegrationAuthRepositoryPrimaryLocksAndConstraintTranslation(t *testin
 	if err := db.Run(ctx, func(ctx context.Context) error { return repo.CloseVerification(ctx, 999, profileID, now) }); !errors.Is(err, auth.ErrMissing) {
 		t.Fatal("missing verification", err)
 	}
-	if _, err := db.Primary().Exec(ctx, `INSERT INTO consent_document(type,version,title,url,is_current) VALUES('personal_data','v1','Test only','https://example.test/pd',true)`); err != nil {
+	if _, err := db.Primary().Exec(ctx, `INSERT INTO consent_document(type,version,title,url,is_current) VALUES('personal_data','v1','Test only','https://example.test/pd',true) ON CONFLICT(type,version) DO UPDATE SET is_current=true`); err != nil {
 		t.Fatal(err)
 	}
 	version, err := repo.CurrentPD(ctx)

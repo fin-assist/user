@@ -10,6 +10,34 @@
 
 **Решение владельца 19.10.2026 (ревью PR #2):** в БД нет правил валидации и логики. В схеме — только `PRIMARY KEY`, `UNIQUE` (в том числе частичные уникальные индексы), `FOREIGN KEY` с каскадами, `NOT NULL` и `DEFAULT` (в том числе `uuidv7()`, `now()`). Нет `CHECK`, `EXCLUDE`, триггеров и функций; форматы, диапазоны, согласованность состояний и уведомления — код сервиса (раздел «Инварианты в коде сервиса»). `TestSchemaHasNoRulesOrLogic` не даёт новой миграции вернуть их незаметно.
 
+## Доказательство перед передачей телефона (FIN-364)
+
+Миграция000005 отделяет phone_consent_receipt от operational phone_verification.
+У receipt нет FK к аккаунту/рабочей заявке: их удаление не уничтожает доказательство.
+PK attempt_id — неизменяемая связь, FK(type,version) удерживает доступный неизменяемый
+документ. Phone/IP, consent_accepted_at/age_confirmed_at пишутся один раз после gates
+перед внешним эффектом. Наличие receipt означает accepted=true и age=true: поля bool
+не дублируются, инвариант обеспечивает Go. По одному phone owner не устанавливается;
+linked_user_id/linked_at появляются только после verified. Linked owner не FK, после
+удаления сохраняется связь доказательства, но не активный аккаунт.
+
+retention: abandoned attempt_end+24h (unknown — изначальный сохранённый deadline),
+linked — NULL при действующем аккаунте и deletion/revoke+3года. Первый приём не меняется.
+Key/hash очищаются после обычного24h key window; физический архив не продлевает replay.
+Роль сервиса пишет/читает receipt в auth-транзакциях и cleanup; клиентские API, profile,
+операционные read-only роли и отчёты доступа к нему не получают. При выдаче DB-доступов
+оператор отдельно ограничивает SELECT на эти таблицы, не применяет общий read-all role;
+миграция не создаёт внешние login/пароли и не расширяет PUBLIC privileges. Доступ к
+архивным доказательствам отдельно разрешается ответственному оператору и аудируется.
+
+phone_provider_binding имеет unique(provider,campaign,call_id), FK receipt с каскадом
+только на конце evidence retention. Сохраняет authoritative created и три immutable
+срока declared/public/busy. Он не даёт proof другой заявке. phone_known_busy — независимый
+finite phone+срок без чужого ID ownership; истечение чистится отдельно. Working row имеет
+unknown_deadline, атомарные first_dispatch_at/dispatch_not_after, start_terminal и receipt
+link; timestamps и состояния контролирует код, без CHECK/EXCLUDE/triggers/extensions.
+Индексы обслуживают lookup по key/owner/cutoff и уникальность provider binding.
+
 ## Общие правила
 
 - **Секреты не хранятся в открытом виде.** `verification_token`, `registration_token`, refresh — 256 случайных бит, в БД только SHA-256 (`bytea`, 32 байта — длину обеспечивает код). Соль и медленный хеш не нужны: перебор 2²⁵⁶ невозможен, а поиск по хешу — точное совпадение по уникальному индексу. Сравнение «за постоянное время» (api.md 1.2) обеспечивает именно поиск по хешу: время зависит от хеша, а не от совпавшего префикса токена.
@@ -346,3 +374,13 @@ TestPhoneConfirmationAtomicReplayAndPrimaryReads, API-тесты verification_te
 7. ~~Имя таблицы~~ — закрыт: `app_user`, решение владельца 19.10.2026 (`user` зарезервирован в SQL).
 8. ~~ПДн в `rate_limit_window.subject`~~ — закрыт: хранить текстом, не HMAC, решение владельца 19.10.2026.
 9. ~~Лимит «по устройству»~~ — закрыт: на будущее, сейчас схема его не заводит (в контракте только `x-client-ip`), решение владельца 19.10.2026.
+
+FIN-364: кэшируемые отказы Register после проверки пригодного registration_token
+получают Resource исходной attempt. На evidence cutoff связанные Start/Register
+keys удаляются вместе с working state/receipt, даже если Register cache ещё live;
+их время жизни ограничено min(common key window, proof retention). До cutoff
+живые кэши linked account сохраняются по обычному правилу. Очистка блокирует parents,
+затем только адресные resource keys NOWAIT; занятый key откатывает стадию целиком,
+без инверсии ожиданий и частичного удаления proof. UUID, повторно принятый с новым
+resource, не затрагивается. Известная занятость хранит origin_attempt_id для адресной
+очистки даже после удаления working row; это связь ресурсов, не ownership чужого ID.

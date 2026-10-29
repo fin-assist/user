@@ -45,7 +45,7 @@ func TestAPICachedBusyReplayPreservesStructuredDetailsAndAbsoluteExpiry(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
-			in := &userv1.StartPhoneVerificationRequest{Phone: "+79001234567"}
+			in := &userv1.StartPhoneVerificationRequest{Phone: "+79001234567", PdConsentAccepted: true, PdConsentVersion: "v1", AgeConfirmed: true}
 			hash, err := idempotency.HashProto(in)
 			if err != nil {
 				t.Fatal(err)

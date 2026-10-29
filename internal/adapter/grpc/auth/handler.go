@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strconv"
 	"time"
 
 	userv1 "github.com/fin-assist/contracts/gen/go/finassist/user/v1"
@@ -39,7 +40,7 @@ type Phone interface {
 
 // PhoneStart owns the multi-transaction external-effect protocol.
 type PhoneStart interface {
-	Start(context.Context, idempotency.Request, string, string) (verification.Started, error)
+	StartWithConsent(context.Context, idempotency.Request, string, string, verification.Consent) (verification.Started, error)
 }
 
 // Engine is the library surface used by this transport adapter.
@@ -79,8 +80,8 @@ type Handler struct {
 }
 
 // Register installs the AuthService lifecycle and the phone creation coordinator.
-func Register(server grpc.ServiceRegistrar, sessions Sessions, engine Engine, state, attempts Transactions, limits Limits, guard Guard, phone Phone, starts ...PhoneStart) {
-	h := &Handler{sessions: sessions, engine: engine, state: state, attempts: attempts, limits: limits, guard: guard, phone: phone, now: time.Now}
+func Register(server grpc.ServiceRegistrar, sessions Sessions, engine Engine, state, attempts Transactions, limits Limits, guard Guard, phone Phone, now func() time.Time, starts ...PhoneStart) {
+	h := &Handler{sessions: sessions, engine: engine, state: state, attempts: attempts, limits: limits, guard: guard, phone: phone, now: now}
 	if len(starts) > 0 {
 		h.start = starts[0]
 	}
@@ -99,7 +100,7 @@ func (h *Handler) StartPhoneVerification(ctx context.Context, in *userv1.StartPh
 		if err != nil {
 			return nil, retryinfo.Apply(err)
 		}
-		result, err = h.start.Start(ctx, request, in.GetPhone(), reqctx.ClientIP(ctx))
+		result, err = h.start.StartWithConsent(ctx, request, in.GetPhone(), reqctx.ClientIP(ctx), verification.Consent{Accepted: in.GetPdConsentAccepted(), Version: in.GetPdConsentVersion(), AgeConfirmed: in.GetAgeConfirmed()})
 		return nil, retryinfo.Apply(err)
 	})
 	if err != nil {
@@ -114,6 +115,9 @@ func (h *Handler) Register(ctx context.Context, in *userv1.RegisterRequest) (*us
 	out := new(userv1.RegisterResponse)
 	err := h.run(ctx, userv1.AuthService_Register_FullMethodName, in, out, ratelimit.Register, func(ctx context.Context) (proto.Message, string, bool, error) {
 		r, err := h.sessions.Register(ctx, usecase.RegisterInput{Token: in.GetRegistrationToken(), Accepted: in.GetPdConsentAccepted(), ConsentVersion: in.GetPdConsentVersion(), Timezone: in.Timezone})
+		if err != nil && r.VerificationID > 0 {
+			err = &registrationFailure{cause: err, id: r.VerificationID}
+		}
 		return &userv1.RegisterResponse{Tokens: pair(r.Pair), UserId: r.UserID}, r.UserID, false, err
 	}, nil)
 	return out, err
@@ -184,7 +188,12 @@ func (h *Handler) execute(ctx context.Context, in, out proto.Message, op ratelim
 				if _, contract := finerr.ToREST(err); !contract {
 					effectFailure = err
 				}
-				return idempotency.Response{}, retryinfo.Apply(usecase.ContractError(err))
+				response := idempotency.Response{}
+				var linked *registrationFailure
+				if errors.As(err, &linked) {
+					response.Resource = idempotency.Resource{Type: "phone_verification", ID: strconv.FormatInt(int64(linked.id), 10)}
+				}
+				return response, retryinfo.Apply(usecase.ContractError(err))
 			}
 			body, err := proto.Marshal(msg)
 			return idempotency.Response{Body: body, OwnerID: id}, err
@@ -275,3 +284,13 @@ func verificationMessage(o verification.Outcome) *userv1.WatchPhoneVerificationR
 	}
 	return out
 }
+
+// registrationFailure carries only an authenticated proof resource inside the service.
+// It is extracted before finerr encoding and never becomes wire metadata.
+type registrationFailure struct {
+	cause error
+	id    int32
+}
+
+func (e *registrationFailure) Error() string { return e.cause.Error() }
+func (e *registrationFailure) Unwrap() error { return e.cause }

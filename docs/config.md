@@ -44,6 +44,7 @@ PEER_<NAME>_ADDR; по умолчанию нужны PEER_BANK_STATEMENT_DATA_AD
 | `JWT_ISSUER` | — | iss access JWT, обязателен; одинаков у всех потребителей (у них — `AUTH_USER_ISSUER`); этот же iss user проверяет у входящих access-токенов |
 | `JWT_AUDIENCE` | — | aud access JWT, обязателен; одинаков у всех потребителей (у них — `AUTH_USER_AUDIENCE`); эту же aud user проверяет у входящих access-токенов |
 | `AUTH_IDEMPOTENCY_KEY_FILE` | — | файл 0600 с 32 raw-байтами AES-256 для шифрования ответов Register/Refresh; обязателен, общий для реплик; сохранять ключ не менее 24 ч после последней записи |
+| `PHONE_VERIFICATION_UNKNOWN_TIMEOUT` | `5m` | локальный срок неизвестного исхода (Go duration, 1s..5m); абсолютный deadline фиксируется один раз при приёме; provider TTL 5m не меняется |
 | `PHONE_RESULT_KEY_FILE` | — | файл 0600 с 32 raw-байтами AES-256 для результата подтверждения; обязателен, общий для реплик, отличается от AUTH_IDEMPOTENCY_KEY_FILE; хранить до истечения всех 15-минутных результатов |
 | `PHONE_RESULT_KEY_ID` | `primary` | ID ключа результата: 1–64 символа A-Z/a-z/0-9/._-; сохраняется вместе с ciphertext |
 | `PHONE_WATCH_MAX_STREAMS` | `1024` | предел одновременно ожидающих Watch на экземпляр (1–100000); отдельный от 60 попыток/мин на IP; насыщение видно в метриках |

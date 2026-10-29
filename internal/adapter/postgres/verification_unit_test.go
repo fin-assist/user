@@ -17,7 +17,7 @@ import (
 
 func unitVerificationValues(now time.Time) []any {
 	h := token.Sum("secret")
-	return []any{int32(7), "+79001234567", h[:], "test", "call", now, now.Add(time.Minute), nil, false, "", nil, []byte("cipher"), "key", false, false}
+	return []any{int32(7), "+79001234567", h[:], "test", "call", now, now.Add(time.Minute), nil, false, "", nil, []byte("cipher"), "key", false, false, true, "", now.Add(time.Minute), now, now.Add(time.Minute), now.Add(time.Minute), now.Add(time.Minute), false}
 }
 
 func TestUnitVerificationRepositoryMapsRowsAndEnforcesTransactionGuard(t *testing.T) {
@@ -157,8 +157,8 @@ func TestUnitStartRepositoryPreservesOwnershipAndTranslatesBusyRaces(t *testing.
 		h := token.Sum("request")
 		record := verification.StartRecord{Key: "request-key", Hash: h, Request: verification.Request{ID: 7, Phone: "+79001234567", CreatedAt: now, ExpiresAt: now.Add(time.Minute)}}
 		tx.row = func(q string, args []any) pgx.Row {
-			if strings.Contains(q, "SELECT start_key") {
-				return unitRow{values: []any{record.Key, h[:], int32(7), []byte("[]")}}
+			if strings.Contains(q, "SELECT e.start_key") {
+				return unitRow{values: []any{record.Key, h[:], int32(7), []byte("[]"), "v1", "203.0.113.7", now, now.Add(24 * time.Hour), record.Request.Phone, record.Request.ExpiresAt}}
 			}
 			return unitRow{values: unitVerificationValues(now)}
 		}
@@ -196,6 +196,12 @@ func TestUnitStartRepositoryPreservesOwnershipAndTranslatesBusyRaces(t *testing.
 				t.Fatal("race exhaustion or storage error hidden")
 			}
 		}
+		tx.row = func(q string, _ []any) pgx.Row {
+			if strings.Contains(q, "SELECT unknown_deadline") {
+				return unitRow{values: []any{now.Add(time.Minute)}}
+			}
+			return unitRow{err: errUnitStorage}
+		}
 		for _, tag := range []string{"UPDATE 0", "UPDATE 1"} {
 			tx.exec = func(string, []any) (pgconn.CommandTag, error) { return pgconn.NewCommandTag(tag), nil }
 			for _, call := range []func(context.Context) error{func(c context.Context) error { return r.Complete(c, record, verification.Call{StartedAt: now}, h) }, func(c context.Context) error { return r.Reject(c, record, now) }, func(c context.Context) error { return r.Duplicate(c, record, now) }} {
@@ -208,17 +214,11 @@ func TestUnitStartRepositoryPreservesOwnershipAndTranslatesBusyRaces(t *testing.
 				}
 			}
 		}
-		if err := r.Forget(ctx, record.Key); err != nil {
-			t.Fatal(err)
-		}
-		if err := r.Forget(t.Context(), record.Key); err == nil {
-			t.Fatal("forget outside transaction")
-		}
 		if _, _, err := r.Claim(t.Context(), record); err == nil {
 			t.Fatal("claim outside transaction")
 		}
 		tx.exec = func(string, []any) (pgconn.CommandTag, error) { return pgconn.CommandTag{}, errUnitStorage }
-		for _, call := range []func() error{func() error { return r.Forget(ctx, record.Key) }, func() error { return r.Complete(ctx, record, verification.Call{}, h) }, func() error { return r.Reject(ctx, record, now) }, func() error { return r.Duplicate(ctx, record, now) }, func() error { _, _, e := r.Claim(ctx, record); return e }} {
+		for _, call := range []func() error{func() error { return r.Complete(ctx, record, verification.Call{}, h) }, func() error { return r.Reject(ctx, record, now) }, func() error { return r.Duplicate(ctx, record, now) }, func() error { _, _, e := r.Claim(ctx, record); return e }} {
 			if err := call(); err == nil {
 				t.Fatal("write failure hidden")
 			}

@@ -38,7 +38,7 @@ func TestIntegrationPhoneAssemblyKeySeparationAndFailureCleanup(t *testing.T) {
 	if err = os.WriteFile(phonePath, bytes.Repeat([]byte{42}, 32), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	goodPhone := config.PhoneConfig{ResultKeyFile: phonePath, ResultKeyID: "test", MaxStreams: 2, ResyncInterval: time.Second}
+	goodPhone := config.PhoneConfig{ResultKeyFile: phonePath, ResultKeyID: "test", MaxStreams: 2, UnknownTimeout: 5 * time.Minute, ResyncInterval: time.Second}
 	a := &App{DB: db, Log: slog.New(slog.DiscardHandler), Tokens: client.DevToken("user"), Cfg: config.Config{Service: "phone-wiring", DB: config.DBConfig{PrimaryDSN: dsn}, Phone: goodPhone, Sessions: config.SessionsConfig{IdempotencyKeyFile: authPath, RefreshTTL: time.Hour, MaxConns: 2}, Outbox: config.OutboxConfig{TimezoneTargets: []string{"assistant"}, DeletionTargets: []string{"bank-statement-data", "analytics", "assistant"}, MaxConns: 6, PollInterval: time.Second}, Peers: map[string]string{"bank-statement-data": "passthrough:///127.0.0.1:1", "analytics": "passthrough:///127.0.0.1:1", "assistant": "passthrough:///127.0.0.1:1"}}}
 	a.Cfg.Phone.ResultKeyFile = "/missing/phone.key"
 	if _, _, err = wirePhone(t.Context(), a, a.DB, a.Tombstones, prometheus.NewRegistry()); err == nil {
@@ -82,7 +82,7 @@ func TestIntegrationPhoneAssemblyKeySeparationAndFailureCleanup(t *testing.T) {
 		t.Fatal("duplicate prod guard metric accepted")
 	}
 	a.Cfg.Env, a.Cfg.Zvonok.Provider = config.EnvDev, "fake"
-	a.phoneProvider = fakephone.New()
+	a.phoneProvider = fakephone.New(time.Now)
 	if _, _, err := wirePhone(t.Context(), a, a.DB, a.Tombstones, prometheus.NewRegistry()); err == nil {
 		t.Fatal("two backends accepted")
 	}
