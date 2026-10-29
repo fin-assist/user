@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"io"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -73,49 +73,19 @@ func TestAPIDeploymentRebuildsBoundedCallbackMetricsFromStoredOutcomes(t *testin
 	if response, err := userv1.NewUserInternalServiceClient(conn).GetSigningKeys(requestCtx, &userv1.GetSigningKeysRequest{}, grpc.WaitForReady(true)); err != nil || response.GetJwksJson() == "" {
 		t.Fatalf("public API did not start alongside the reporting worker: %v %v", response, err)
 	}
-	client := &http.Client{Timeout: time.Second}
-	var body string
 	expected := []string{
-		`finassist_phone_callback_outcomes_24h{callback_number="+74950000001",outcome="confirmed"} 1`,
-		`finassist_phone_callback_outcomes_24h{callback_number="+74950000002",outcome="pending"} 1`,
-		`finassist_phone_callback_outcomes_24h{callback_number="+74950000003",outcome="expired"} 1`,
+		"finassist_phone_callback_overflow_requests_24h 1",
 		`finassist_phone_callback_outcomes_24h{callback_number="other",outcome="pending"} 1`,
+		`finassist_phone_callback_outcomes_24h{callback_number="other",outcome="confirmed"} 0`,
+		`finassist_phone_callback_outcomes_24h{callback_number="other",outcome="expired"} 0`,
 	}
-	for {
-		request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, "http://"+bound.HTTP.String()+"/metrics", nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		response, err := client.Do(request)
-		if err == nil {
-			data, readErr := io.ReadAll(response.Body)
-			_ = response.Body.Close()
-			if readErr != nil || response.StatusCode != http.StatusOK {
-				t.Fatalf("metrics response: status=%d err=%v", response.StatusCode, readErr)
-			}
-			body = string(data)
-			// GaugeVec and overflow are collected independently. One HTTP scrape
-			// must contain the complete report, not just its final overflow gauge.
-			complete := strings.Contains(body, "finassist_phone_callback_overflow_requests_24h 1\n")
-			for _, line := range expected {
-				complete = complete && strings.Contains(body, line+"\n")
-			}
-			if complete {
-				break
-			}
-		}
-		timer := time.NewTimer(10 * time.Millisecond)
-		select {
-		case <-requestCtx.Done():
-			timer.Stop()
-			t.Fatalf("scheduled worker did not publish persisted outcomes: %v", requestCtx.Err())
-		case <-timer.C:
-		}
+	for n := 1; n <= 256; n++ {
+		outcome := []string{"expired", "confirmed", "pending"}[n%3]
+		expected = append(expected, fmt.Sprintf(`finassist_phone_callback_outcomes_24h{callback_number="+7495%07d",outcome="%s"} 1`, n, outcome))
 	}
-	for _, line := range expected {
-		if !strings.Contains(body, line+"\n") {
-			t.Fatalf("rolling outcome missing from actual HTTP metrics: %s", line)
-		}
+	body, err := waitForMetrics(requestCtx, &http.Client{Timeout: time.Second}, "http://"+bound.HTTP.String()+"/metrics", expected)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if strings.Count(body, `finassist_phone_callback_outcomes_24h{callback_number="+`) != 256 || strings.Contains(body, "+74950000257") || strings.Contains(body, "+74950000258") || strings.Contains(body, "+7000000") || strings.Contains(body, "stored-") {
 		t.Fatal("metrics exceeded label bounds, included expired history or leaked caller identifiers")
