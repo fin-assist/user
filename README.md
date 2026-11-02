@@ -264,3 +264,8 @@ Captured deadline каждой attempt immutable. По нему номер ос�
 новый key. Linked account evidence хранится отдельно3года после удаления/отзыва. Никакие
 Watch/Refresh IP-события в receipt не добавляются. Детали, DB-права, cleanup и concurrency —
 [verification.md](docs/verification.md), [schema.md](docs/schema.md).
+
+## Профильное ревью (FIN-421)
+
+Перед ревью применяются [профильные навыки](docs/review-skills/README.md) из проверяемой ревизии.
+Обязательные требования, выбор и ограничения — в `AGENTS.md`, раздел `Code Review Rules`.
