@@ -104,7 +104,7 @@ internal/profile/                  profile settings and assistant-consent usecas
 internal/deletion/                 atomic account deletion and remote purge scheduling
 internal/adapter/outbox/            timezone and deletion event encoding
 internal/ratelimit/                authentication limit policies and commit-aware metrics
-internal/domain/                   entities and invariants, no infrastructure imports
+internal/domain/                   entities, invariants and cross-layer constants (values only), no infrastructure imports
 internal/<feature>/                usecases; interfaces of repositories and clients they need
 internal/adapter/grpc/<feature>/   gRPC handlers: messages <-> usecases
 internal/adapter/postgres/         pools, transaction manager, repositories on pgx
@@ -264,3 +264,12 @@ Captured deadline каждой attempt immutable. По нему номер ос�
 новый key. Linked account evidence хранится отдельно3года после удаления/отзыва. Никакие
 Watch/Refresh IP-события в receipt не добавляются. Детали, DB-права, cleanup и concurrency —
 [verification.md](docs/verification.md), [schema.md](docs/schema.md).
+
+## Профильное ревью (FIN-421)
+
+Перед ревью применяются [профильные навыки](docs/review-skills/README.md) из проверяемой ревизии.
+Обязательные требования, выбор и ограничения — в `AGENTS.md`, раздел `Code Review Rules`.
+
+FIN-421: доменный уровень владеет также межслойными константами, включая технические значения;
+это только значения, без переноса внешнего поведения или инфраструктурных импортов в `internal/domain`.
+Незатронутый Go-код по этому правилу массово не перерабатывается; комментарии пакета уточняются вместе с фактическим переносом констант.
